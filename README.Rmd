@@ -74,7 +74,7 @@ wd = ('path/to/workingdirectory') # wd = rawd
 # ncores = as.integer(parallel::detectCores()/2) # use 1/2 of the available processors
  ncores = as.integer(parallel::detectCores())-2 # us all but 2 available processors
  library(MSI.EAGLE)
- MSI.EAGLE()
+ #MSI.EAGLE() # uncomment to start the app
 
 ```
 

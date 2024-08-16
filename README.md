@@ -58,9 +58,8 @@ BiocManager::install("CardinalWorkflows")
     # ncores = as.integer(parallel::detectCores()/2) # use 1/2 of the available processors
      ncores = as.integer(parallel::detectCores())-2 # us all but 2 available processors
      library(MSI.EAGLE)
-     MSI.EAGLE()
+     #MSI.EAGLE() # uncomment to start the app
 
-<div style="width: 100% ; height: 400px ; text-align: center; box-sizing: border-box; -moz-box-sizing: border-box; -webkit-box-sizing: border-box;" class="muted well">Shiny applications not supported in static R Markdown documents</div>
 <!-- What is special about using `README.Rmd` instead of just `README.md`? You can include R chunks like so: -->
 <!-- ```{r cars} -->
 <!-- summary(cars) -->
