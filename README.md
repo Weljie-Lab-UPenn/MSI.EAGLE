@@ -15,7 +15,7 @@ features from Cardinal, and adds a number of analysis options.
 You can install the development version of MSI.EAGLE as follows:
 
 ``` r
-# FILL THIS IN! HOW CAN PEOPLE INSTALL YOUR DEV PACKAGE?
+<!-- # FILL THIS IN! HOW CAN PEOPLE INSTALL YOUR DEV PACKAGE? -->
 Install using: 
 
 Step 1*: Install Bioconductor packages
@@ -26,6 +26,9 @@ if (!require("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
 
 BiocManager::install(c("BiocParallel", "Cardinal"))
+
+One can also install the CardinalWorkflows package for demo data
+BiocManager::install("CardinalWorkflows")
 ```
 
     Step 2: Install Git
@@ -35,46 +38,36 @@ BiocManager::install(c("BiocParallel", "Cardinal"))
 
     Step 3: Install MSI.EAGLE
 
-    remotes::install_git("http://weljie.myds.me:30003/aalim/DESI_Shiny_Processing_script.git", branch="modules")
+    remotes::install_git("https://github.com/Weljie-Lab-UPenn/MSI.EAGLE")
 
 
     ## Example
 
-    This is a basic example which shows you how to solve a common problem:
+    This is a basic example which shows you how to setup and start the app:
 
 
     ``` r
-    ## basic example code
-    # wd = ('path/to/workingdirectory)
-    # rawd = ('path/to/rawfilesdirectory') # rawd = wd
+    # basic startup script
+
+    # set up the directory with raw data
+     rawd = ('path/to/rawfilesdirectory')
+
+    # set up the working directory
+    wd = ('path/to/workingdirectory') # wd = rawd
+
     # ncores = as.integer(parallel::detectCores()/2) # use 1/2 of the available processors
-    # ncores = as.integer(parallel::detectCores())-2 # us all but 2 available processors
-    # library(MSI.EAGLE)
-    # MSI.EAGLE()
+     ncores = as.integer(parallel::detectCores())-2 # us all but 2 available processors
+     library(MSI.EAGLE)
+     MSI.EAGLE()
 
-What is special about using `README.Rmd` instead of just `README.md`?
-You can include R chunks like so:
-
-``` r
-summary(cars)
-#>      speed           dist       
-#>  Min.   : 4.0   Min.   :  2.00  
-#>  1st Qu.:12.0   1st Qu.: 26.00  
-#>  Median :15.0   Median : 36.00  
-#>  Mean   :15.4   Mean   : 42.98  
-#>  3rd Qu.:19.0   3rd Qu.: 56.00  
-#>  Max.   :25.0   Max.   :120.00
-```
-
-You’ll still need to render `README.Rmd` regularly, to keep `README.md`
-up-to-date. `devtools::build_readme()` is handy for this. You could also
-use GitHub Actions to re-render `README.Rmd` every time you push. An
-example workflow can be found here:
-<https://github.com/r-lib/actions/tree/v1/examples>.
-
-You can also embed plots, for example:
-
-<img src="man/figures/README-pressure-1.png" width="100%" />
-
-In that case, don’t forget to commit and push the resulting figure
-files, so they display on GitHub and CRAN.
+<div style="width: 100% ; height: 400px ; text-align: center; box-sizing: border-box; -moz-box-sizing: border-box; -webkit-box-sizing: border-box;" class="muted well">Shiny applications not supported in static R Markdown documents</div>
+<!-- What is special about using `README.Rmd` instead of just `README.md`? You can include R chunks like so: -->
+<!-- ```{r cars} -->
+<!-- summary(cars) -->
+<!-- ``` -->
+<!-- You'll still need to render `README.Rmd` regularly, to keep `README.md` up-to-date. `devtools::build_readme()` is handy for this. You could also use GitHub Actions to re-render `README.Rmd` every time you push. An example workflow can be found here: <https://github.com/r-lib/actions/tree/v1/examples>. -->
+<!-- You can also embed plots, for example: -->
+<!-- ```{r pressure, echo = FALSE} -->
+<!-- plot(pressure) -->
+<!-- ``` -->
+<!-- In that case, don't forget to commit and push the resulting figure files, so they display on GitHub and CRAN. -->
