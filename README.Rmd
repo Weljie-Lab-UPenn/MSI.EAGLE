@@ -78,6 +78,34 @@ wd = ('path/to/workingdirectory') # wd = rawd
 
 ```
 
+
+## Access as a private repository (TEMP)
+
+3. Store the PAT in .Renviron (Recommended)
+
+A more secure way is to store the PAT in your .Renviron file, which is loaded into your environment when you start R. This way, you don't have to expose the PAT in your scripts.
+
+    Edit .Renviron:
+        You can edit or create a .Renviron file in your home directory or the project directory:
+
+        r
+
+usethis::edit_r_environ()
+
+Add the following line to the file:
+
+makefile
+
+        GITHUB_PAT=your_personal_access_token
+
+    Restart R to load the new environment variable.
+
+    Install the Package:
+        Now you can simply use remotes::install_github("username/repo_name") without needing to pass the PAT each time.
+
+This approach keeps your PAT secure while still allowing you to install packages from private repositories.
+
+
 <!-- What is special about using `README.Rmd` instead of just `README.md`? You can include R chunks like so: -->
 
 <!-- ```{r cars} -->
