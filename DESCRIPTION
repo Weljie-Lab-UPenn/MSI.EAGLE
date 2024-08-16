@@ -1,0 +1,38 @@
+Package: MSI.EAGLE
+Title: Mass Spectrometry Imaging Elegant and Adaptive Graphical Layer Extensions
+Version: 0.0.0.9000
+Authors@R: 
+    person("Aalim", "Weljie", , "aalimudin@gmail.com", role = c("aut", "cre"),
+           comment = c(ORCID = "0000-0002-7145-4494"))
+Description: This is a (relatively) user friendly interactive tool for analysis of mass spectrometry data. It includes high level options to the Cardinal package for data processing, as well as extended tools such as UMAP analysis, pixel phenotyping, and some basic statistical tools.
+License: GPL (>= 3)
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.3
+Imports: 
+    BiocParallel,
+    Cardinal,
+    dbscan,
+    dplyr,
+    DT,
+    ggplot2,
+    ggprism,
+    ggpubr,
+    ggsci,
+    gplots,
+    lomb,
+    markdown,
+    pals,
+    pheatmap,
+    pkgload,
+    prodlim,
+    readr,
+    rstatix,
+    scales,
+    shiny,
+    shinydashboard,
+    shinyFiles,
+    shinythemes,
+    stray,
+    tidyr,
+    uwot

@@ -1,0 +1,2582 @@
+### R/StatsPrepServer.R
+StatsPrepServer <- function(id,  setup_values) {
+  moduleServer(id, function(input, output, session) {
+    # output$table <- DT::renderDataTable(mtcars)
+    
+    ns = session$ns #for dyanamic variable namespace
+    
+    #import parallel mode
+    par_mode = reactive({
+      setup_values()[["par_mode"]]
+    })
+    
+    has.new.files <- function() {
+      unique(list.files(setup_values()[["wd"]]))
+    }
+    get.files <- function() {
+      list.files(setup_values()[["wd"]])
+    }
+    
+    # store as a reactive instead of output
+    my_files <-
+      reactivePoll(10, session, checkFunc = has.new.files, valueFunc = get.files)
+    
+    # any time the reactive changes, update the selectInput
+    observeEvent(my_files(),
+                 ignoreInit = T,
+                 ignoreNULL = T,
+                 {
+                   #print(grep("rds|RData", my_files(), ignore.case =T, value=T  ))
+                   updateSelectInput(
+                     session,
+                     ns('peakPickfile'),
+                     choices = grep(
+                       "rds|RData",
+                       my_files(),
+                       ignore.case = T,
+                       value = T
+                     )
+                   )
+                 })
+    
+    
+    
+    ####STATISTICS####
+    
+    output$ui <- renderUI({
+      #req(input$phen_cols_stats)
+      switch(
+        input$stats_test,
+        "ssctest" = list(
+          uiOutput(ns('test_membership')),
+          uiOutput(ns('ssc_params')),
+          uiOutput(ns("phen_interaction_stats")),
+          uiOutput(ns("output_factors")),
+          uiOutput(ns('anova_factors')),
+          #check if we need this??
+          actionButton(ns("run_test"), label = "Run test")
+          ),
+        "meanstest" = list(
+          uiOutput(ns('test_membership')),
+          uiOutput(ns("phen_interaction_stats")),
+          actionButton(ns("run_test"), label = "Run test"),
+          uiOutput(ns("output_factors"))
+          #uiOutput(ns('anova_factors')),
+          #actionButton(ns("save_stats_models"), label =
+          #               "Save means test model"),
+          #actionButton(ns("restore_stats_models"), "Restore means test model"))
+          ),
+        "spatialDGMM" = list(
+          uiOutput(ns('test_membership')),
+          uiOutput(ns('ssc_params')),
+          uiOutput(ns("phen_interaction_stats")),
+          uiOutput(ns("output_factors")),
+          actionButton(ns("run_test"), label = "Run test"),
+          #textInput(ns("plot_prefix"), label="Prefix for plotting / results output", value="output"),
+          actionButton(ns("write_plots"), label =
+                         "save significant plots directory 'plots'")
+          #actionButton(ns("save_stats_models"), "Save DGMM model"),
+          #actionButton(ns("restore_stats_models"), "Restore DGMM model")
+          ),
+        #https://www.datanovia.com/en/lessons/mixed-anova-in-r/ some ANOVA information
+        #https://www.datanovia.com/en/lessons/repeated-measures-anova-in-r/
+        #https://www.datanovia.com/en/lessons/anova-in-r/
+        "anova" = list(
+          radioButtons(
+            ns("anova_type"),
+            "Type of ANOVA",
+            choices = list(
+              "One way (Y ~ A)" = "anova_oneway",
+              "Two way additive, Independent (Y ~ A + B)" =
+                "anova_add",
+              "Two way Interaction (Y ~ A * B)" =
+                "anova_interaction",
+              "Repeated measures, Between subjects interaction (Y ~ A*B +Error(C)" =
+                "between_interacting" #,
+              #"Repeated measures, independent (Y ~ A+B + Error (C)"="between_independent")
+            )
+          ),
+          #uiOutput("phen_interaction_stats"),
+          
+          uiOutput(ns('grouping_variables')),
+          uiOutput(ns("output_factors")),
+          uiOutput(ns('anova_factors')),
+          uiOutput(ns('test_membership')),
+          actionButton(ns("run_test"), label = "Run test")
+          #actionButton(ns("save_stats_models"), label =
+           #              "Save ANOVA test model"),
+          #actionButton(ns("restore_stats_models"), "Restore ANOVA test model")
+        )
+      )
+      #
+      #
+      #
+      # ,
+      #browser()
+    })
+    
+    
+    #Setup and values for the statistics tab
+    x5 <- reactiveValues(
+      data_file = NULL,
+      data_file_selected = NULL,
+      mytable_stats_plate_selected = NULL,
+      phen_options = NULL,
+      phen_cols_stats = NULL,
+      #from input$phen_col_stats, the test variable
+      test_result = NULL,
+      stats_results = NULL,
+      plot_list = NULL,
+      anova_vars = NULL,
+      tf_list = NULL,
+      #True/False list for selecting df to visualize
+      test_result_feature_test = NULL,
+      source_file = NULL,
+      model_restore_path = NULL,
+      dat_long_tech_avg = NULL,
+      #stored initial data to create plots for visualization
+      size_ok = NULL,
+      #check membership size for ANOVA
+      groupsx = NULL,
+      #full set of grouping variables for plot / output / grouping
+      group_var = NULL,
+      # names of groupign variables
+      stats_table_filtered = NULL #filtered stats table final form
+    )
+    output$final_data <- renderUI({
+      selectInput(
+        ns("stats_input_file"),
+        "Imageset for analysis",
+        grep(
+          "rds$",
+          my_files(),
+          ignore.case = T,
+          value = T
+        )
+      )
+    })
+    
+    observeEvent(input$action_read_stats, {
+      if (is.null(input$stats_input_file))
+        return()
+      
+      x5$data_file <- (readRDS(input$stats_input_file))
+      print(x5$data_file)
+      
+      if (!is.na(input$debug_n)) {
+        message("selecting peaks for debugging")
+        #browser()
+        if (dim(x5$data_file)[1] < input$debug_n) {
+          message("more debug peaks than features, keeping all peaks")
+        } else {
+          x5$data_file <- x5$data_file[1:input$debug_n, ]
+          print(x5$data_file)
+        }
+      }
+      
+      
+      x5$source_file <- input$stats_input_file
+    })
+    
+    
+    observeEvent(input$action_demo, {
+      
+      withProgress(message = "Loading demo data",
+                   value = 0.5,
+                   detail = "",
+                   {
+                     data(rcc, package = "CardinalWorkflows")
+                     overview_peaks <- as(rcc, "MSImagingExperiment")
+                     
+                     
+                     x5$data_file <- overview_peaks
+                   })
+      
+    })
+    
+    output$filename_header <- renderPrint({
+      (paste0("working filename= ", req(x5$source_file)))
+      #if(is.null(input$stats_input_file))
+      #  return()
+      #print(input$stats_input_file)
+      #browser()
+      #renderPrint(cat(input$stats_input_file))
+    })
+    
+    
+    output$ssc_params <- renderUI({
+      if (input$stats_test %in% c("ssctest")) {
+        list(
+          textInput(ns('sscr'), 'SSC r value', "1"),
+          textInput(ns("sscs"), 'SSC s value ', "0"),
+          textInput(ns("ssck"), 'SSC k value ', "3")
+        )
+      } else if (input$stats_test %in% c("spatialDGMM")) {
+        list(textInput(ns('sscr'), 'DGMM r value', "1"),
+             textInput(ns("sscs"), 'DGMM k value ', "5"))
+      } else {
+        return()
+      }
+    })
+    
+    output$phen_cols_stats <-
+      renderUI({
+        #https://gist.github.com/wch/4211337
+        # If missing input, return to avoid error later in function
+        if (is.null(x5$data_file))
+          return()
+        
+        # Get the data set with the appropriate name
+        
+        dat <- (as.data.frame(pData(x5$data_file)))
+        x5$phen_options <- colnames(dat)
+        
+        
+        # Create the checkboxes and select them all by default
+        selectInput(ns("phen_cols_stats"),
+                    "Choose variable to test",
+                    choices  = x5$phen_options)
+      })
+    
+    output$grouping_variables <- renderUI({
+      selectInput(
+        ns("grouping_variables"),
+        "Choose grouping variables",
+        choices  = unique(c("none", x5$phen_options)),
+        multiple = T
+      )
+      
+    })
+    
+    output$grouping_variables_export <- renderUI({
+      selectInput(
+        ns("grouping_variables_export"),
+        "Choose grouping variables",
+        choices  = unique(c("none", x5$phen_options)),
+        multiple = T
+      )
+      
+    })
+    
+    
+    output$test_membership <-
+      renderUI({
+        
+        #https://gist.github.com/wch/4211337
+        # If missing input, return to avoid error later in function
+        if (is.null(x5$data_file))
+          return()
+        if (is.null(input$phen_cols_stats))
+          return()
+        
+        #store test variable in x5 for other modules to use
+        x5$phen_cols_stats <- input$phen_cols_stats
+        
+        
+        
+        # Get the members from variable being tested
+        
+        if (input$stats_test == "anova" &&
+            #!is.null(input$aov_vars2) &&
+            input$anova_type == "anova_oneway") {
+          #TODO .. fix this funkiness!!!
+          
+          members <-
+            unique(as.data.frame(pData(x5$data_file))[, input$aov_vars1])
+          
+        } else if (input$stats_test == "anova" &&
+                   !is.null(input$aov_vars2))  {
+          #members<-paste(aov_members[,1], aov_members[,2], sep="____")
+          members <-
+            c(
+              paste(input$aov_vars1, unique(as.data.frame(
+                pData(x5$data_file)
+              )[, input$aov_vars1]), sep = "____"),
+              paste(input$aov_vars2, unique(as.data.frame(
+                pData(x5$data_file)
+              )[, input$aov_vars2]), sep = "____")
+            )
+          
+          
+        } else {
+          members <-
+            unique(as.data.frame(pData(x5$data_file))[, input$phen_cols_stats])
+          
+        }
+        
+        
+        
+        # Create the checkboxes and select them all by default
+        selectizeInput(
+          ns("test_membership"),
+          "Choose members to include",
+          choices  = members,
+          selected = members,
+          multiple=TRUE
+        )
+      })
+    
+    
+    
+    output$phen_interaction_stats <-
+      renderUI({
+        #https://gist.github.com/wch/4211337
+        # If missing input, return to avoid error later in function
+        if (is.null(x5$data_file))
+          return()
+        
+        # Get the data set with the appropriate name
+        # Create the checkboxes and select them all by default
+        
+        selectInput(
+          ns("phen_interaction_stats"),
+          "Choose interaction for grouping",
+          choices  = c("none", 1, x5$phen_options),
+          multiple = T
+        )
+      })
+    
+    output$output_factors <-
+      renderUI({
+        #https://gist.github.com/wch/4211337
+        # If missing input, return to avoid error later in function
+        if (is.null(x5$data_file))
+          return()
+        
+        # Get the data set with the appropriate name
+        # Create the checkboxes and select them all by default
+        
+        selectInput(
+          ns("output_factors"),
+          "Choose variables for modeling",
+          choices  = c(x5$phen_options),
+          multiple = TRUE,
+          selected = input$phen_cols_stats
+        )
+      })
+    
+    
+    output$anova_factors <- renderUI({
+      x5$anova_vars <- input$output_factors
+      if (is.null(x5$anova_vars))
+        return()
+      
+      v <- list()
+      
+      if (is.null(input$anova_type)) {
+        anova_choices = c("Fixed", "Ind. Variable 1", "Ind. Variable 2")
+        
+        for (i in 1:length(anova_choices)) {
+          v[[i]] <- #box(width = NULL, background = "blue",
+            #    title = h6(anova_choices[i], style = "display:inline; font-weight:bold"),
+            selectInput(ns(eval(paste0(
+              "aov_vars", i
+            ))),
+            label = NULL,
+            choices = c(x5$anova_vars))
+          #)
+          
+        }
+      } else if (input$anova_type == "anova_oneway") {
+        anova_choices = c("Y Variable for one-way ANOVA")
+        for (i in 1:length(anova_choices)) {
+          v[[1]] = box(
+            width = NULL,
+            background = "blue",
+            title = h6(anova_choices[i], style = "display:inline; font-weight:bold"),
+            selectInput(
+              ns(paste0("aov_vars", i)),
+              label = NULL,
+              choices = c(input$phen_cols_stats)
+            )
+          )
+        }
+        
+        
+        
+        
+        # for (i in 1:length(anova_choices)){
+        #
+        #   v[[i]] <- box(width = NULL, background = "blue",
+        #                 title = h6(anova_choices[i], style = "display:inline; font-weight:bold"),
+        #                 selectInput(ns(paste0("aov_vars",i)), label = NULL,choices = x5$anova_vars[!c(x5$anova_vars)%in%input$phen_cols_stats])
+        
+        
+      } else if (input$anova_type == "anova_add") {
+        anova_choices = c("Ind V1", "Ind V2")
+        
+        for (i in 1:length(anova_choices)) {
+          v[[i]] <- box(
+            width = NULL,
+            background = "blue",
+            title = h6(anova_choices[i], style = "display:inline; font-weight:bold"),
+            selectInput(
+              ns(paste0("aov_vars", i)),
+              label = NULL,
+              choices = c(x5$anova_vars)
+            )
+          )
+        }
+      } else if (input$anova_type == "anova_interaction") {
+        anova_choices = c("Int V1", "Int V2")
+        
+        for (i in 1:length(anova_choices)) {
+          v[[i]] <- box(
+            width = NULL,
+            background = "blue",
+            title = h6(anova_choices[i], style = "display:inline; font-weight:bold"),
+            selectInput(
+              ns(paste0("aov_vars", i)),
+              label = NULL,
+              choices = c(x5$anova_vars)
+            )
+          )
+        }
+      } else if (input$anova_type == "between_interacting") {
+        anova_choices = c("Variable 1", "Variable 2", "Subject")
+        
+        for (i in 1:length(anova_choices)) {
+          v[[i]] <- box(
+            width = NULL,
+            background = "blue",
+            title = h6(anova_choices[i], style = "display:inline; font-weight:bold"),
+            selectInput(
+              ns(paste0("aov_vars", i)),
+              label = NULL,
+              choices = c(x5$anova_vars)
+            )
+          )
+        }
+      } else if (input$anova_type == "between_independent") {
+        anova_choices = c("Subject", "Ind. Variable 1", "Ind. Variable 2")
+        
+        for (i in 1:length(anova_choices)) {
+          v[[i]] <- box(
+            width = NULL,
+            background = "blue",
+            title = h6(anova_choices[i], style = "display:inline; font-weight:bold"),
+            selectInput(
+              ns(paste0("aov_vars", i)),
+              label = NULL,
+              choices = c(x5$anova_vars)
+            )
+          )
+        }
+      }
+      return(v)
+      
+    })
+    
+    
+    
+    
+    
+    observeEvent(input$run_test, {
+      message("Running stats test")
+      
+      if (is.null(x5$data_file)) {
+        print(
+          "Select dataset to analyze and then press 'Read file for stats' button in the left panel"
+        )
+        return()
+      }
+      req(input$phen_cols_stats)
+      
+      withProgress(message = "Running stats test", value = 0.2, {
+        print("running test")
+        #browser()
+        
+        #create selected data file. The ANOVA variables necessiate a slightly more complex selection
+        if (!is.null(input$anova_type) &&
+            input$anova_type %in% c("anova_add",
+                                    "anova_interaction",
+                                    "between_interacting")) {
+          if (!input$phen_cols_stats %in% c(input$aov_vars1, input$aov_vars2)) {
+            print("test variable must be one of the ANOVA variables. Quitting.")
+            return()
+          }
+          
+          #browser()
+          members <-
+            data.frame(t = input$test_membership) %>% tidyr::separate(
+              col = t,
+              into = c("coln", "membs"),
+              sep = "____"
+            )
+          
+          #use do.call to extract?
+          
+          select_list <-
+            lapply(1:dim(members)[1], function(i)
+              ((
+                as.data.frame(pData(x5$data_file))[, members[i, 1]] %in% members[i, 2]
+              )))
+          
+          select_vec <-
+            (Reduce("+", select_list)) == length(unique(members[, 1]))
+          
+          x5$data_file_selected = x5$data_file[, select_vec]
+        } else {
+          #For all other cases!
+          #create selected data files based on chosen user input.
+          
+          select_vec <-
+            as.data.frame(pData(x5$data_file))[, input$phen_cols_stats] %in% input$test_membership
+          
+          x5$data_file_selected = x5$data_file[, select_vec]
+          #x5$data_file_selected = x5$data_file[1:100,as.data.frame(pData(x5$data_file))[,input$phen_cols_stats]%in%input$test_membership]
+          
+        }
+        #browser()
+        print("checking groups")
+        
+        #browser()
+        
+        #TODO check this..!
+        if (input$stats_test == "anova") {
+          group_var = input$grouping_variables
+        } else {
+          group_var = input$phen_interaction_stats
+        }
+        
+        # if(!is.null(group_var) && group_var=='none'){
+        #   group_var=input$phen_cols_stats
+        # }
+        
+        x5$group_var <- group_var
+        
+        # if(sum(group_var%in%input$phen_cols_stats)>0) {
+        #   print("Test variable in Grouping variable(s), exiting")
+        #   return()
+        # }else
+        if (sum(group_var %in% "1") == 1) {
+          groupsx = 1
+        } else if (input$stats_test == "anova" &&
+                   sum(group_var %in% "none") > 0) {
+          groupsx = "none"
+        } else if (input$stats_test != "anova" &&
+                   sum(group_var %in% "none") > 0) {
+          message("must have grouping for this test. Exiting.")
+          return(NULL)
+        } else{
+          grouping = as.data.frame(pData(x5$data_file_selected))[, group_var]
+          if (is.factor(grouping)) {
+            groupsx = droplevels(as.data.frame(pData(x5$data_file_selected))[, group_var])
+          } else {
+            message(
+              "grouping variable is not a factor-- do you need to create an interaction term?"
+            )
+            
+            if (length(grouping) == 0) {
+              message("must have value for grouping, or 'none' (for ANOVA)")
+              showNotification(
+                "must have value for grouping, or can have 'none' (for ANOVA)",
+                type = "error",
+                duration = 10
+              )
+              return(NULL)
+            }
+            message("continuing by creating a factor. Check the output carefully!")
+            groupsx = droplevels(as.factor(interaction(grouping)))
+          }
+        }
+        x5$groupsx <- groupsx
+        print("groups done")
+        
+        
+        if (input$stats_test == "meanstest") {
+          #browser()
+          
+          select_vec <-
+            as.data.frame(pData(x5$data_file))[, input$phen_cols_stats] %in% input$test_membership
+          
+          x5$data_file_selected = x5$data_file[, select_vec]
+          
+          #browser()
+          
+          message("performing means test")
+          #browser()
+          
+          if (input$phen_cols_stats == "run") {
+            pData(x5$data_file_selected)$run <- run(x5$data_file_selected)
+          }
+          
+          
+          
+          mt <- 
+            try(meansTest(x5$data_file_selected[, ],
+                      as.formula(paste0("~", input$phen_cols_stats)),
+                      groups =
+                        droplevels(groupsx)))
+          #mt2<-meansTest(x5$data_file_selected, as.formula(paste("~", input$phen_cols_stats)), groups=droplevels(x5$data_file_selected$Plate.Group))
+          
+          if(class(mt) %in% "try-error") {
+            print("meanstest failed. check data and data size")
+            return()
+          }
+          
+          
+          #code to debug error in meanstest
+          # select_ratio <- 0.1 # amount of data to select to see if size is an issue
+          # dat_debug<-x5$data_file_selected
+          # group_debug<-groupsx
+          # select_vec_debug<- sort(sample(1:(dim(dat_debug)[2]), round(dim(dat_debug)[2]*select_ratio,0)))
+          # 
+          # mt_debug<-meansTest(dat_debug[,select_vec_debug],
+          #                     as.formula(paste0("~", input$phen_cols_stats)),
+          #                     groups=droplevels(group_debug[select_vec_debug]))
+          # 
+          #some QC on results-- make sure values are finite, and not NaN, check first 10% of values
+          #if(class(try(summary(mt)))=="try-error"){
+          if (sum(class(resultData(mt)[[1]]$model) %in% "try-error") > 0) {
+            print("cannot create meanstest summary, check grouping variable(s)")
+            return()
+          }
+          
+          # check summary results are not NaN
+          ntests = max(round(length(resultData(mt)) / 100), 1)
+          
+          if (sum(is.nan(summary(mt[1:ntests])$PValue)) == ntests) {
+            message("first 1% of PValues are NaN, checking median PValue")
+            
+            if (is.nan(summary(mt[median(1:length(resultData(mt)))])$PValue)) {
+              message("Median value Nan, check grouping variable!  ")
+              return(NULL)
+              
+            } else {
+              message("median value non NaN, continuing")
+            }
+          }
+          incProgress(amount = 0.5, message = "extracting top features... can take a while for large datasets")
+          print("extracting top features... can take a while for large datasets")
+          
+          
+          stats_results <-
+            as.data.frame(topFeatures(mt, n = dim(mt)[1], p.adjust = "BH"))
+          x5$stats_results <- stats_results
+          
+          #x5$stats_results<-Cardinal::subset(x5$stats_results, AdjP<as.numeric(input$FDR_val))
+          #check for nan issue
+          
+          x5$test_result <- mt
+          
+          x5$test_result_feature_test <- NULL
+          
+          print(
+            "Means test complete, check Output table tab for table and check FDR cutoff if results not visible."
+          )
+          showNotification(
+            "Means test complete, check Output table tab for table and check FDR cutoff if results not visible."
+          )
+          
+          
+          
+        } else if (input$stats_test == "ssctest") {
+          
+          select_vec <-
+            as.data.frame(pData(x5$data_file))[, input$phen_cols_stats] %in% input$test_membership
+          
+          x5$data_file_selected = x5$data_file[, select_vec]
+          
+          browser()
+          sscr = as.numeric(unlist(strsplit(input$sscr, split = ",")))
+          sscs = as.numeric(unlist(strsplit(input$sscs, split = ",")))
+          ssck = as.numeric(unlist(strsplit(input$ssck, split = ",")))
+          
+          if (sum(is.na(c(sscr, sscs, ssck))) > 0) {
+            showNotification(paste0(
+              "NA value detected in r, s or k. Values are:",
+              paste(c(sscr, sscs, ssck), collapse = ",")
+            ))
+            return(NULL)
+          }
+          
+          
+          a <-
+            droplevels(as.data.frame(pData(x5$data_file_selected)))
+          dat <- x5$data_file_selected
+          
+          pData(dat) <- PositionDataFrame(coord(dat), run = a$run,  a)
+          y = a[, input$phen_cols_stats]
+          
+          myfold <- groupsx
+          
+          res <-
+            spatialShrunkenCentroids(dat,
+                                     #x5$data_file_selected,
+                                     y,
+                                     # droplevels(as.data.frame(pData(x5$data_file_selected))[, input$phen_cols_stats]),
+                                     r = sscr,
+                                     s = sscs,
+                                     k = ssck)
+          
+          print(summary(res))
+          #res <- spatialShrunkenCentroids(x=x5$data_file_selected, groups=groupsx, r=sscr, s=sscs, k=ssck)
+          
+          incProgress(amount=0.3, message="Initial SSC done, now performing cross-validation. Check console for details.")
+          
+          #myfold=droplevels(run(x5$data_file_selected))
+          
+          # tf_list<-te %in% c("LF.PARAFILM", "UF.PARAFILM")
+          # dat_trim<-dat[, tf_list]
+          # aa <- droplevels(as.data.frame(pData(dat_trim)))
+          # pData(dat_trim)<-PositionDataFrame(coord(dat_trim), run = aa$run,  aa)
+          # myfold=run(dat_trim)
+          #
+          cv_ssc <-
+            try(crossValidate(
+              .x = dat,
+              .y = y,
+              .fun = "spatialShrunkenCentroids",
+              .fold = myfold,
+              #r=sscr, s=sscs, .fold=run(x5$data_file_selected))
+              r = sscr,
+              s = sscs,
+              k = ssck,
+              .process = TRUE,
+              .processControl = list(
+                SNR = 3,
+                tolerance = 15,
+                units = "ppm"
+              )
+              #BPPARAM=SerialParam()
+            ))
+          
+          if (class(cv_ssc) == "try-error") {
+            showNotification(
+              "SSC not able to complete-- try changing Grouping variable to create folds or fixing stray pixels in the Segmentation - UMAP tab, save new file, and try again",
+              duration = 5
+            )
+            return(NULL)
+          }
+          
+          print(summary(res))
+          print(summary(cv_ssc))
+          #graphics.off()
+          #print(plot(summary(cv_ssc), Accuracy ~ s, type='b')) #move to main area eventually
+          
+          topFeatures(res, n = 100)
+          
+          
+          bb <-
+            topFeatures(res, n = dim(modelData(res))[1] * dim(featureData(res))[1])
+          
+          x5$stats_results <- as.data.frame(bb)
+          x5$test_result <- res
+          
+          print(
+            "SSC test complete, check Output table tab for table and check FDR cutoff if results not visible."
+          )
+          
+        } else if (input$stats_test == "spatialDGMM") {
+          browser()
+          sscr = as.numeric(unlist(strsplit(input$sscr, split = ",")))
+          sscs = as.numeric(unlist(strsplit(input$sscs, split = ",")))
+          
+          #test_dgmm<-try(spatialDGMM(x5$data_file_selected[1,], r=sscr, k=sscs, groups=droplevels(as.data.frame(pData(x5$data_file_selected))[,input$phen_interaction_stats])))
+          
+          test_dgmm <-
+            try(spatialDGMM(
+              x5$data_file_selected,
+              r = sscr,
+              k = sscs,
+              groups = droplevels(groupsx)
+            ))
+          if (class(test_dgmm) == "try-error") {
+            table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz == mzs[1]) %>% select(.data[[input$aov_vars1]]))
+            table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz ==
+                                                                         mzs[1]) %>% select(.data[[input$aov_vars2]]))
+            
+            print("check variables")
+            return()
+            
+          }
+          
+          #dgmm <- spatialDGMM(x5$data_file_selected[,], r=sscr, k=sscs, groups=droplevels(as.data.frame(pData(x5$data_file_selected))[,input$phen_interaction_stats]))
+          dgmm <-
+            spatialDGMM(
+              x5$data_file_selected[, ],
+              r = sscr,
+              k = sscs,
+              groups = groupsx
+            )
+          print("spatialDGMM finished. Starting segmentation test.")
+          x5$test_result <- dgmm
+          
+          stest <-
+            segmentationTest(dgmm, as.formula(paste0("~ ", input$phen_cols_stats)), classControl =
+                               "Ymax")
+          x5$test_result_feature_test <-
+            stest #in order to save later
+          
+          
+          #topFeatures(stest, p.adjust="fdr", AdjP < .1)
+          x5$stats_results <-
+            as.data.frame(topFeatures(stest, n = length(resultData(dgmm))))
+          
+          
+          print(summary(x5$test_result))
+          
+          print(
+            "Spatial DGMM test complete, check Output table tab for table and check FDR cutoff if results not visible."
+          )
+        } else if (input$stats_test == "anova") {
+          #browser()
+          req(input$aov_vars1)
+          
+          
+          numdat <- as.matrix(iData(x5$data_file_selected))
+          rownames(numdat) <- mz(x5$data_file_selected)
+          pdat <- as.data.frame(pData(x5$data_file_selected))
+          
+          dat <- cbind(pdat, t(numdat))
+          
+          dat_long <-
+            (
+              tidyr::pivot_longer(
+                dat,
+                cols = (ncol(pdat) + 1):ncol(dat),
+                names_to = "mz",
+                values_to = "response"
+              )
+            )
+          
+          #browser()
+          #dat_long_tech_avg<- dat_long %>% group_by(eval(input$phen_interaction_stats), mz) %>%
+          if (sum(input$grouping_variables %in% "none") == 1) {
+            print("'none' selected for grouping, so no groupings will be used. Check carefully")
+            dat_long_tech_avg <-
+              dat_long %>% dplyr::group_by_at(c(unique(c(
+                input$output_factors
+              )), "mz")) %>%
+              dplyr::summarize(tech_avg = mean(response),
+                               .groups = "keep")
+          } else {
+            dat_long_tech_avg <-
+              dat_long %>% dplyr::group_by_at(c(unique(
+                c(input$grouping_variables, input$output_factors)
+              ), "mz")) %>%
+              dplyr::summarize(tech_avg = mean(response),
+                               .groups = "keep")
+          }
+          
+          
+          
+          x5$dat_long_tech_avg <- dat_long_tech_avg #all mzs?
+          mzs <- fData(x5$data_file_selected)
+          feats <- features(x5$data_file_selected)
+          
+          if (is.null(dat_long_tech_avg[, input$phen_cols_stats])) {
+            print("Test variable not found!")
+            return()
+          }
+          
+          
+          
+          
+          #x5$test_result<-dat_long_tech_avg  #TODO check
+          
+          #calculate TIC /pixel; requires specifying color vector in output results
+          #usually used for tissue proportions TODO: check
+          #test for sample_id
+          if (!is.null(dat_long$sample_id)) {
+            nmz = length(unique(dat_long$mz))
+            dat_long_col_proportion <- dat_long_tech_avg %>%
+              dplyr::group_by(sample_id) %>% summarize(
+                group = group,
+                run = run,
+                sample_id = sample_id,
+                region_col = region_col,
+                n_color_by_sample = n_color_by_sample,
+                sum_pix_sample = sum(n_color_by_sample),
+                .groups = "keep"
+              ) %>%
+              dplyr::mutate(col_proportion = n_color_by_sample / sum_pix_sample)
+          } else {
+            print("no 'sample_id' thus proportions not calculated")
+          }
+          #browser()
+          
+          #eventually use lapply or bplapply???
+          #create vector of mz values
+          
+          #browser()
+          if (input$anova_type == "anova_oneway") {
+            #this order for input$aov_vars: anova_choices=c("Subject", "Within condition", "Within time")
+            
+            #browser()
+            #test for more than one variable / group / mz
+            x = dat_long_tech_avg$mz[1]
+            a <-
+              as.data.frame(na.omit(dat_long_tech_avg))[as.data.frame(na.omit(dat_long_tech_avg))$mz %in% x, ]
+            #a<-as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz==x)
+            if (sum(table(a[eval(input$aov_vars1)])) == dim(unique(a[eval(input$aov_vars1)]))[1]) {
+              print("only one value per group, exiting. Check groups")
+              return()
+            }
+            
+            
+            #create models for each mz value
+            fm = as.formula(paste0("tech_avg ~", input$aov_vars1))
+            anova_list <-
+              lapply(mz(mzs), function(x)
+                as.data.frame(na.omit(dat_long_tech_avg))[dat_long_tech_avg$mz %in% x, ] %>% rstatix::anova_test(formula =
+                                                                                                                   fm))
+            
+            names(anova_list) <- feats
+            x5$test_result <- anova_list
+            
+            pvals <- unlist(lapply(anova_list, '[[', 5))
+            adjustp <- p.adjust(pvals)
+            
+            stats_results <-
+              cbind(mz = mz(mzs),
+                    mzs,
+                    feature = feats,
+                    pvals,
+                    adjustp)
+            names(stats_results) <-
+              c("mz", "feature", "pvals", "pvals.BH")
+            
+            x5$stats_results <-
+              as.data.frame(cbind(as.data.frame(mzs), feature = feats, pvals, adjustp))
+            
+            
+            
+            
+            
+          } else if (input$anova_type == "anova_add") {
+            if (input$aov_vars1 == input$aov_vars2) {
+              print("Both variables cannot be the same for two-way ANOVA")
+              return()
+            }
+            
+            
+            #plots modelled from here
+            #https://csdaw.github.io/ggprism/articles/pvalues.html
+            
+            #browser()
+            fm = as.formula(paste0(
+              "tech_avg ~",
+              input$aov_vars1,
+              "+",
+              input$aov_vars2
+            ))
+            
+            anova_list <- try(bplapply(mz(mzs), function(x)
+              as.data.frame(na.omit(dat_long_tech_avg))[dat_long_tech_avg$mz %in% x, ] %>% rstatix::anova_test(fm)))
+            
+            if (class(anova_list) == "try-error") {
+              #browser()
+              table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz ==
+                                                                           mzs[1]) %>% select(.data[[input$aov_vars1]]))
+              table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz ==
+                                                                           mzs[1]) %>% select(.data[[input$aov_vars2]]))
+              
+              print("check group sizes")
+              return()
+            }
+            
+            
+            names(anova_list) <- feats
+            x5$test_result <- anova_list
+            
+            pvals <-
+              do.call(rbind.data.frame, (lapply(anova_list, '[[', 5)))
+            colnames(pvals) <- paste0(anova_list[[1]]$Effect, ".p")
+            adjustp <- apply(pvals, 2, p.adjust)
+            colnames(adjustp) <-
+              sapply(colnames(pvals), function(x)
+                paste0(x, ".BH"))
+            
+            stats_results <-
+              cbind(mz = mz(mzs),
+                    feature = feats,
+                    pvals,
+                    adjustp)
+            #names(stats_results)<-c("mz", "feature", "pvals", "pvals.BH")
+            
+            x5$stats_results <- as.data.frame(stats_results)
+            
+            
+            
+            
+            
+          } else if (input$anova_type == "anova_interaction") {
+            if (input$aov_vars1 == input$aov_vars2) {
+              print("Both variables cannot be the same for two-way ANOVA")
+              return()
+            }
+            #browser()
+            #formula for simple two way interaction ANOVA
+            fm = as.formula(paste0(
+              "tech_avg ~",
+              input$aov_vars1,
+              "*",
+              input$aov_vars2
+            ))
+            
+            #run a single test to check for issues
+            
+            
+            test_aov <-
+              try(as.data.frame(na.omit(dat_long_tech_avg))[dat_long_tech_avg$mz %in%
+                                                              mz(mzs)[1], ] %>% rstatix::anova_test(fm))
+            
+            if (sum(class(test_aov) %in% "try-error") > 0) {
+              #browser()
+              table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz ==
+                                                                           mz(mzs)[1]) %>% select(.data[[input$aov_vars1]]))
+              table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz ==
+                                                                           mz(mzs)[1]) %>% select(.data[[input$aov_vars2]]))
+              
+              print("check group sizes")
+              return()
+            }
+            
+            nm = table(attributes(test_aov)$args$data[, input$phen_cols_stats])
+            
+            if (min(nm) < 3) {
+              #browser()
+              showModal(modalDialog(
+                title = "Sample size warning!",
+                HTML(paste(
+                  names(nm), "n=  ", print(nm), "<p>"
+                )),
+                footer = tagList(
+                  modalButton("Cancel"),
+                  actionButton("ok", "Continue")
+                  # actionButton("tryagain", "try_again")
+                )
+              ))
+              
+              observeEvent(input$ok, {
+                x5$size_ok <- T
+                removeModal()
+              })
+              
+            } else {
+              x5$size_ok <- T
+            }
+            
+            
+            observeEvent (x5$size_ok, {
+              anova_list <-
+                lapply(mz(mzs), function(x)
+                  as.data.frame(na.omit(dat_long_tech_avg))[dat_long_tech_avg$mz %in% x, ] %>% rstatix::anova_test(fm))
+              names(anova_list) <- feats[]
+              x5$test_result <- anova_list
+              
+              pvals <-
+                do.call(rbind.data.frame, (lapply(anova_list, '[[', 5)))
+              colnames(pvals) <-
+                paste0(anova_list[[1]]$Effect, ".p")
+              adjustp <- apply(pvals, 2, p.adjust)
+              colnames(adjustp) <-
+                sapply(colnames(pvals), function(x)
+                  paste0(x, ".BH"))
+              
+              stats_results <-
+                cbind(mz = mz(mzs),
+                      mzs,
+                      feature = feats,
+                      pvals,
+                      adjustp)
+              #names(stats_results)<-c("mz", "feature", "pvals", "pvals.BH")
+              
+              x5$stats_results <- as.data.frame(stats_results)
+            })
+            
+            
+            
+            
+          } else if (input$anova_type == "between_interacting") {
+            #order of variables is: anova_choices=c( "Variable 1", "Variable 2", "Subject")
+            #browser()
+            
+            if (max(table(
+              c(
+                input$aov_vars1,
+                input$aov_vars2,
+                input$aov_vars3
+              )
+            )) > 1) {
+              print("Require unique subject and predictor variables")
+              return()
+            }
+            #browser()
+            #formula for simple two way interaction ANOVA
+            fm = as.formula(
+              paste0(
+                "tech_avg ~",
+                input$aov_vars1,
+                "*",
+                input$aov_vars2,
+                "+ Error(",
+                input$aov_vars3,
+                ")"
+              )
+            )
+            
+            
+            #run a single test to check for issues
+            library(rstatix)
+            
+            
+            
+            
+            two_way_rep <-
+              function(dat,
+                       mz_sel,
+                       subject,
+                       between,
+                       within) {
+                print(mz_sel)
+                #   tryCatch( expr = {
+                (na.omit(dat)) %>%
+                  subset(mz == mz_sel) %>%
+                  dplyr::group_by_(between, within, subject) %>%
+                  dplyr::summarize(tech_avg = mean(tech_avg),
+                                   .groups = "keep") %>%
+                  dplyr::ungroup() %>%
+                  rstatix::anova_test(
+                    dv = tech_avg,
+                    wid = subject,
+                    between = between,
+                    within = within
+                  )
+              } #,
+            #   error=function(e){
+            #     message("Encountered an error, check variables")
+            #     print(e)
+            #     return()
+            #   }
+            #   )
+            #
+            # }
+            #browser()
+            test_aov <- try(two_way_rep(
+              dat = dat_long_tech_avg,
+              mz_sel = mzs@mz[1],
+              subject = input$aov_vars3,
+              between = input$aov_vars1,
+              within = input$aov_vars2
+            ))
+            
+            if (class(test_aov) == "try-error") {
+              #browser()
+              table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz ==
+                                                                           mzs@mz[1]) %>% select(.data[[input$aov_vars1]]))
+              table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz ==
+                                                                           mzs@mz[1]) %>% select(.data[[input$aov_vars2]]))
+              table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz ==
+                                                                           mzs@mz[1]) %>% select(.data[[input$aov_vars3]]))
+              print("check group sizes")
+              return()
+            }
+            
+            
+            
+            
+            nm = table(attributes(test_aov)$args$data[, input$phen_cols_stats])
+            
+            if (min(nm) < 3) {
+              #browser()
+              showModal(modalDialog(
+                title = "Sample size warning!",
+                HTML(paste(
+                  names(nm), "n=  ", print(nm), "<p>"
+                )),
+                footer = tagList(
+                  modalButton("Cancel"),
+                  actionButton("ok", "Continue")
+                  # actionButton("tryagain", "try_again")
+                )
+              ))
+              
+              observeEvent(input$ok, {
+                x5$size_ok <- T
+                removeModal()
+              })
+              
+            } else {
+              x5$size_ok <- T
+            }
+            
+            
+            observeEvent (x5$size_ok, {
+              anova_list <-
+                future_lapply(mzs[], function(x)
+                  two_way_rep(
+                    dat = dat_long_tech_avg,
+                    mz = x,
+                    subject = input$aov_vars3,
+                    between = input$aov_vars1,
+                    within = input$aov_vars2
+                  ))
+              names(anova_list) <- feats[]
+              x5$test_result <- anova_list
+              
+              pvals <-
+                do.call(rbind.data.frame, (lapply(anova_list, '[[', 5)))
+              colnames(pvals) <-
+                paste0(anova_list[[1]]$Effect, ".p")
+              adjustp <- apply(pvals, 2, p.adjust)
+              colnames(adjustp) <-
+                sapply(colnames(pvals), function(x)
+                  paste0(x, ".BH"))
+              
+              stats_results <-
+                cbind(mz = mzs,
+                      feature = feats,
+                      pvals,
+                      adjustp)
+              #names(stats_results)<-c("mz", "feature", "pvals", "pvals.BH")
+              
+              x5$stats_results <- as.data.frame(stats_results)
+            })
+            
+            
+          }
+          
+          print(
+            "ANOVA test complete, Output table tab for table and check FDR cutoff if results not visible."
+          )
+          
+          #browser()
+          
+          
+          #p_val(dat_long_tech_avg, mzs[2])
+          
+          #
+          #
+          #adjustp<-apply(pvals, 2, p.adjust)
+          # colnames(adjustp)<-paste0(colnames(pvals),".BH")
+          #
+          # #browser()
+          # x5$stats_results<-as.data.frame(cbind(mz=mzs, feature=feats, pvals, adjustp))
+          
+        } #end of total anova testing
+      })
+    })
+    
+    observeEvent(input$data_export, {
+      #req(input$output_factors)
+      req(input$grouping_variables_export)
+      
+      #browser()
+      
+      numdat <- as.matrix(iData(x5$data_file))
+      rownames(numdat) <- mz(x5$data_file)
+      pdat <- as.data.frame(pData(x5$data_file))
+      
+      dat <- cbind(pdat, t(numdat))
+      
+      dat_long_tech_avg <-
+        (dat) %>%  dplyr::group_by_at(c(input$grouping_variables_export)) %>%
+        dplyr::summarize(across(where(is.numeric), mean), .groups = 'keep')
+      
+      file_name=paste0("data_table_export_", Sys.Date(), ".txt")
+      
+      print("Exporting datatable summarized by selected variables.")
+      showNotification(paste("Exporting datatable in the working directory summarized by selected variables. Filename is: ", file_name, "\n"), duration = 10)
+      
+      write.table(
+        dat_long_tech_avg,
+        file = paste0("data_table_export_", Sys.Date(), ".txt"),
+        sep = "\t",
+        row.names = F
+      )
+      
+    })
+    
+    
+    observeEvent(input$mummichog, {
+      req(x5$stats_results)
+      #browser()
+      
+      if (input$stats_test %in% c("meanstest", "spatialDGMM")) {
+        dat <- x5$stats_results %>%
+          dplyr::mutate_at(dplyr::vars(PValue, AdjP), ~ (round(., 5))) %>%
+          dplyr::filter(AdjP <= input$FDR_val)
+      } else if (input$stats_test %in% c("anova")) {
+        dat <- x5$stats_results %>%
+          print("not yet- anova")
+        return()
+      } else {
+        print("not yet")
+        return()
+        #dat<-x5$stats_results
+      }
+      print("Writing Mummichog import file.")
+      mchog_all <-
+        cbind(
+          mz = dat$mz,
+          rt = dat[, "feature"],
+          p.value = dat[, "PValue"],
+          LR = dat[, "LR"],
+          fdr = dat[, "AdjP"]
+        )
+      write.table(
+        mchog_all,
+        file = paste0(
+          "mummichog_input_all_FDR_",
+          input$FDR_val,
+          "_",
+          Sys.Date(),
+          ".txt"
+        ),
+        sep = "\t",
+        row.names = F
+      )
+      
+    })
+    
+    observeEvent(input$metaboanalyst, {
+      req(x5$stats_results)
+      #browser()
+      
+      if (input$stats_test %in% c("meanstest", "spatialDGMM")) {
+        dat <- x5$stats_results %>%
+          dplyr::mutate_at(dplyr::vars(PValue, AdjP), ~ (round(., 5))) %>%
+          dplyr::filter(AdjP <= input$FDR_val)
+      } else {
+        print("not yet")
+        #dat<-x5$stats_results
+      }
+      
+      print("Writing Metaboanalyst input file.")
+      hmdb_all_mc2 <-
+        as.data.frame(cbind(
+          m.z = dat$mz ,
+          p.value = dat[, "PValue"],
+          t.score = dat[, "LR"]
+        ))
+      hmdb_all_mc1 <- cbind(m.z = dat$mz[order(dat$PValue)])
+      write.table(
+        hmdb_all_mc2,
+        file = paste0(
+          "hmdb_input_mc2_all_FDR_",
+          input$FDR_val,
+          "_",
+          Sys.Date(),
+          ".txt"
+        ),
+        sep = "\t",
+        row.names = F,
+        quote = F
+      )
+      write.table(
+        hmdb_all_mc1,
+        file = paste0("hmdb_input_mc1_", "_", Sys.Date(), ".txt"),
+        sep = "\t",
+        row.names = F,
+        quote = F
+      )
+    })
+    
+    
+    observeEvent(input$save_stats_models, {
+      req(x5$test_result)
+      req(x5$data_file_selected)
+      
+      # if(is.null(x5$dat_long_tech_avg)){
+      #   print("need to generate meansplots first")
+      # }
+      
+      #browser()
+      
+      input_image_dataset <- x5$data_file_selected
+      parent_image_dataset <- x5$source_file
+      
+      
+      if (input$stats_test == "spatialDGMM") {
+        print("Saving model")
+        dgmm_model <- x5$test_result
+        dgmm_seg_test <- x5$test_result_feature_test
+        
+        dgmm_stats_result <- x5$stats_results
+        dgmm_dat_long_tech_avg <- x5$dat_long_tech_avg
+        
+        save(
+          input_image_dataset,
+          dgmm_dat_long_tech_avg,
+          dgmm_model,
+          dgmm_seg_test,
+          dgmm_stats_result,
+          parent_image_dataset,
+          file = paste0(
+            "DGMM_",
+            parent_image_dataset,
+            "_",
+            Sys.Date(),
+            ".RData"
+          )
+        )
+        print("DGMM model saved in working directory")
+        
+        
+      } else if (input$stats_test == "meanstest") {
+        #browser()
+        print("Saving model")
+        means_model <- x5$test_result
+        means_test <- x5$test_result_feature_test
+        means_test_stats_result <- x5$stats_results
+        means_test_dat_long_tech_avg <- x5$dat_long_tech_avg
+        phen_options <- x5$phen_options
+        phen_cols_stats <- input$phen_cols_stats
+        phen_interaction_stats <- input$phen_interaction_stats
+        
+        
+        
+        save(
+          input_image_dataset,
+          means_test_dat_long_tech_avg,
+          means_model,
+          means_test,
+          parent_image_dataset,
+          means_test_stats_result,
+          phen_options,
+          phen_cols_stats,
+          phen_interaction_stats,
+          file = paste0(
+            "Means_",
+            parent_image_dataset,
+            "_",
+            Sys.Date(),
+            ".RData"
+          )
+        )
+        
+        print("meanstest model saved in working directory")
+        
+      } else if (input$stats_test == "anova") {
+        print("Saving model")
+        anova_list <- x5$test_result
+        anova_test_stats_result <- x5$stats_results
+        aov_vars = list(input$aov_vars1, input$aov_vars2, input$aov_vars3)
+        aov_test_var <- input$phen_cols_stats
+        aov_grouping <- input$grouping_variables
+        aov_type <- input$anova_type
+        aov_dat_long_tech_avg <- x5$dat_long_tech_avg
+        
+        
+        
+        save(
+          input_image_dataset,
+          anova_list,
+          parent_image_dataset,
+          anova_test_stats_result,
+          aov_vars,
+          aov_test_var,
+          aov_grouping,
+          aov_type,
+          aov_dat_long_tech_avg,
+          file = paste0(
+            "ANOVA_",
+            parent_image_dataset,
+            "_",
+            Sys.Date(),
+            ".RData"
+          )
+        )
+        
+        print("Anova models saved in working directory")
+        
+        
+        
+      } else {
+        print("not yet")
+      }
+      
+    })
+    
+    
+    
+    observeEvent(input$restore_stats_models, {
+      #browser()
+      
+      #req(x5$test_result)
+      #req(x5$data_file_selected)
+      #modeled from here: https://stackoverflow.com/questions/51191701/r-shiny-fileinput-large-files
+      tryPath <- tryCatch(
+        file.choose()
+        ,
+        error = function(e) {
+          e
+        }
+      )
+      
+      if (inherits(tryPath, "error")) {
+        x5$model_restore_path <- NULL
+      } else {
+        x5$model_restore_path <- tryPath
+      }
+      
+      print(paste("restoring", x5$model_restore_path))
+      
+      if (!is.null(x5$model_restore_path)) {
+        load(x5$model_restore_path)
+      } else {
+        print("Path not valid, choose a valid model file")
+        return()
+      }
+      
+      #restore anova models?? test for test type in filename etc
+      #browser()
+      if (grepl("means", x5$model_restore_path, ignore.case = T)) {
+        selected_test <- "meanstest"
+        x5$data_file_selected <- input_image_dataset
+        #input$stats_input_file<-parent_image_dataset
+        x5$test_result <- means_model
+        x5$test_result_feature_test <- means_test
+        x5$stats_results <- means_test_stats_result
+        x5$phen_options <- phen_options
+        
+        updateSelectInput(
+          session = session,
+          ns("phen_cols_stats"),
+          "Choose variable to test",
+          choices  = x5$phen_options,
+          selected = phen_cols_stats
+        )
+        
+        updateSelectInput(
+          session = session,
+          ns("phen_interaction_stats"),
+          "Choose interaction for grouping",
+          choices  = c("none", 1, x5$phen_options),
+          selected = input$phen_cols_stats
+        )
+        
+        message(paste("Test variable is:", phen_cols_stats))
+        message(paste(
+          "Grouping variable(s):",
+          paste(phen_interaction_stats, collapse = " ")
+        ))
+        
+        
+      } else if (grepl("dgmm", x5$model_restore_path, ignore.case = T)) {
+        selected_test <- "spatialDGMM"
+        x5$data_file_selected <- input_image_dataset
+        #input$stats_input_file<-parent_image_dataset
+        x5$test_result <- dgmm_model
+        x5$test_result_feature_test <- dgmm_seg_test
+        x5$stats_results <- dgmm_stats_result
+        
+      } else if (grepl("ANOVA", x5$model_restore_path, ignore.case = T)) {
+        selected_test <- "anova"
+        x5$data_file_selected <- input_image_dataset
+        #input$stats_input_file<-parent_image_dataset
+        
+        
+        x5$test_result <- anova_list
+        x5$stats_results <- anova_test_stats_result
+        x5$dat_long_tech_avg <- aov_dat_long_tech_avg
+        updateRadioButtons(inputId = ns("anova_type"),
+                           selected = aov_type) #need full list?
+        updateSelectInput(
+          session = session,
+          inputId = ns("grouping_variables"),
+          "Choose grouping variables",
+          choices  = unique(c("none", x5$phen_options)),
+          selected = aov_grouping
+        )
+        updateSelectInput(
+          session = session,
+          inputId = ns("grouping_variables_export"),
+          "Choose grouping variables",
+          choices  = unique(c("none", x5$phen_options)),
+          selected = aov_grouping
+        )
+        updateSelectInput(
+          session,
+          ns("phen_cols_stats"),
+          "Choose variable to test",
+          choices  = x5$phen_options,
+          selected = aov_test_var
+        )
+        updateSelectInput(session, ns("aov_vars1"), selected = aov_vars[[1]])
+        updateSelectInput(session, ns("aov_vars2"), selected = aov_vars[[2]])
+        updateSelectInput(session, ns("aov_vars3"), selected = aov_vars[[3]])
+        
+      } else {
+        print("not yet")
+      }
+      
+      
+      
+      
+      updateRadioButtons(
+        session,
+        "stats_test",
+        "Type of test",
+        choices = list(
+          "Means test" = "meanstest",
+          "Spatial shrunken centroids" =
+            "ssctest",
+          "Spatial DGMM" = "spatialDGMM",
+          "ANOVA / t-test lm" = "anova"
+        ),
+        selected = selected_test
+      )
+      
+      
+    })
+    
+    observeEvent(input$write_plots, {
+      req(x5$stats_results)
+      
+      #browser()
+      
+      wd <- getwd()
+      dir.create(file.path(wd, "plots"), showWarnings = FALSE)
+      #setwd(file.path(wd, "plots"))
+      
+      
+      
+      if (input$stats_test %in% c("meanstest", "spatialDGMM")) {
+        withProgress(
+          message = "Saving plots",
+          detail = paste0(
+            "folder in ",
+            wd,
+            ". Can be slow. Only way to cancel is restarting!"
+          ),
+          {
+            req(x5$stats_results)
+            
+            stats_results_trimmed <-
+              subset(x5$stats_results, AdjP <= input$FDR_val)
+            
+            
+            for (m in 1:length(stats_results_trimmed$feature)) {
+              incProgress(amount = 1 / length(stats_results_trimmed$feature))
+              pdf(
+                file = paste(
+                  "plots/",
+                  input$plot_prefix,
+                  "_",
+                  m,
+                  "_",
+                  round(stats_results_trimmed$mz[m], digits = 4),
+                  ".pdf",
+                  sep = ""
+                ),
+                # The directory you want to save the file in
+                width = 4,
+                # The width of the plot in inches
+                height = 4
+              ) # The height of the plot in inches
+              #browser()
+              
+              #for means test
+              if (input$stats_test == "meanstest") {
+                p1 <-
+                  image(
+                    x5$test_result,
+                    model = list(x5$stats_results$feature[m]),
+                    normalize.image = 'linear',
+                    contrast.enhance = "histogram",
+                    key = F
+                  )
+              } else {
+                #for DGMM
+                p1 <-
+                  image(
+                    x5$test_result_feature_test,
+                    model = list(x5$stats_results$feature[m]),
+                    values = "mapping",
+                    contrast.enhance = "histogram",
+                    key = F
+                  )
+              }
+              nplots <- length(p1$dpages) + 2
+              
+              
+              print(p1, layout = n2mfrow(nplots))
+              print(plot(
+                x5$test_result,
+                model = list(x5$stats_results$feature[m]),
+                key = F
+              ), layout = FALSE)
+              if (input$stats_test == "spatialDGMM") {
+                print(plot(
+                  x5$test_result_feature_test,
+                  model = list(x5$stats_results$feature[m])
+                ),
+                layout = FALSE)
+              }
+              title(paste(
+                "mz= ",
+                round(x5$stats_results$mz[m], 4),
+                " FDR= ",
+                round(x5$stats_results$AdjP[m], 2)
+              ))
+              
+              
+              
+              
+              #print(plot(x5$test_result, model=list(stats_results_trimmed$feature[m])))
+              #title(paste("mz= ",round(x5$stats_results$mz[m],4)," FDR= ", round(x5$stats_results$AdjP[m],2)))
+              # Step 3: Run dev.off() to create the file!
+              dev.off()
+            }
+            
+          }
+        )
+      } else{
+        print("not yet")
+        showNotification("Plots not available for this statistical test")
+      }
+    })
+    
+    output$mytable_stats_plate = DT::renderDataTable({
+      req(x5$data_file_selected)
+      DT::datatable(
+        cbind(run = runNames(x5$data_file_selected), "run"),
+        # , size=ncol(x0$overview_peaks)), #FIX SIZE
+        selection = list(mode = "multiple", selected = c(1:length(
+          runNames(x5$data_file_selected)
+        ))),
+        caption = "Choose runs to visualize"
+      )
+    })
+    
+    #extract selected datasets from table
+    
+    observe({
+      if (is.null(x5$data_file_selected))
+        return()
+      #browser()
+      req(input$mytable_stats_plate_rows_selected)
+      ids <- input$mytable_stats_plate_rows_selected
+      x5$mytable_stats_plate_selected <-
+        x5$data_file_selected %>% subsetPixels(Cardinal::run(x5$data_file_selected) %in% runNames(x5$data_file_selected)[ids])
+    })
+    
+    observe({
+      req(x5$data_file_selected)
+      req(x5$mytable_stats_plate_selected)
+      #browser()
+      x5$tf_list <-
+        !is.na(prodlim::row.match(as.data.frame(
+          coord(x5$mytable_stats_plate_selected)
+        ), as.data.frame(
+          coord(x5$mytable_stats_plate_selected)
+        )))
+    })
+    
+    observe({
+      req(x5$mytable_stats_plate_selected)
+      req(x5$tf_list)
+      
+      img.dat <-
+        x5$mytable_stats_plate_selected %>% subsetPixels(x5$tf_list)
+      
+      plot_card_server("plot_card_stats",
+                       overview_peaks_sel = img.dat,
+                       spatialOnly = TRUE)
+      
+    })
+    
+    
+    # #plot to make sure it looks okay
+    # output$plot12 <- renderImage({
+    #   req(x5$mytable_stats_plate_selected)
+    #   req(x5$tf_list)
+    #   # A temp file to save the output.
+    #   # This file will be removed later by renderImage
+    #   outfile <- tempfile(fileext = '.png')
+    #
+    #   png(outfile, width = 800, height = 600)
+    #
+    #
+    #   img.dat<-x5$mytable_stats_plate_selected %>% subsetPixels(x5$tf_list)
+    #
+    #
+    #
+    #   #TODO - use an external module for visualization here
+    #   # if (input$ion_viz=="viz_all") {
+    #   #   browser()
+    #   #
+    #   #  plusminus=input$plusminus_viz
+    #     plusminus=1
+    #     print(Cardinal::image(img.dat, plusminus=input$plusminus_viz, colorscale=pals::parula(255), contrast.enhance="histogram"))
+    #
+    #   #
+    #   # } else if (input$ion_viz=="custom"){
+    #   #   ion=input$mz_viz
+    #   #   plusminus=input$plusminus_viz
+    #   #   print(Cardinal::image(img.dat, mz=ion, plusminus=input$plusminus_viz, colorscale=pals::parula(255), contrast.enhance="histogram"))
+    #   #
+    #   # }
+    #
+    #   #print(Cardinal::image(mytable_selected(), mz=ion, plusminus=input$plusminus_viz))
+    #
+    #   dev.off()
+    #
+    #   # Return a list containing the filename
+    #   list(src = outfile,
+    #        contentType = 'image/png',
+    #        width = 800,
+    #        height = 600,
+    #        alt = "This is alternate text")
+    # }, deleteFile = TRUE)
+    #
+    
+    
+    output$stats_table = DT::renderDataTable({
+      req(x5$stats_results)
+      dat <- x5$stats_results
+      
+      
+      #browser()
+      # if (input$stats_test %in% c("meanstest", "spatialDGMM")) {
+      #   dat$AdjP <- round(dat$AdjP, 4)
+      #   dat$PValue <- round(dat$PValue, 4)
+      # }
+      #
+      #browser()
+      #apply FDR filter and round
+      if (input$stats_test %in% c("meanstest", "spatialDGMM")) {
+        dat <- dat %>%
+          dplyr::filter(AdjP <= input$FDR_val) %>%
+          dplyr::mutate_at(dplyr::vars(PValue, AdjP), ~ (round(., 5)))
+        
+        
+        
+      } else {
+        dat <- dat
+        
+      }
+      
+      
+      if (input$stats_test %in% c("meanstest", "spatialDGMM", "ssctest")) {
+        labels = (unique(as.data.frame(pData(
+          x5$data_file_selected
+        ))[, input$phen_cols_stats])) #may mess up consistent coloring with droplevels?
+        
+        if (dim(dat)[1] == 0) {
+          showNotification(
+            "No features selected, check FDR threshold (set to 1 for troubleshooting",
+            duration = 10,
+            type = "error"
+          )
+          return(NULL)
+        }
+        
+        if (length(labels) == 2) {
+          mean_spectra <-
+            as.data.frame(
+              summarizeFeatures(
+                x5$data_file_selected %>% subsetFeatures(mz %in% dat$mz),
+                groups = droplevels(as.factor(as.data.frame(
+                  pData(x5$data_file_selected)
+                )[, input$phen_cols_stats])),
+                as = "DataFrame"
+              )
+            )
+          #reorder to match x5$stats_results
+          mean_spectra <-
+            mean_spectra[match(dat$mz, mean_spectra$mz), ]
+          
+          log2FC = round(log2(mean_spectra[, 3] / mean_spectra[, 2]), 3)
+          if (dim(dat)[1] == length(log2FC)) {
+            lab <- paste0("log2FC(", labels[2], "/", labels[1], ")")
+            dat <- cbind(dat, log2FC)
+            names(dat)[names(dat) == "log2FC"] <- lab
+            dat <- cbind(dat, round(mean_spectra[, -1], 3))
+            dat <-
+              cbind(dat, max_mean_group = colnames(mean_spectra[, -1])[max.col(mean_spectra[, -1])])
+            
+            
+          } else {
+            print("stats table and fold change results have different lengths, not adding FC")
+          }
+          
+        } else {
+          print("more than two labels in test data, FC not computed")
+          #browser()
+          #calculate group statistics
+          groups_clean<-as.factor(as.data.frame(
+            pData(
+              x5$data_file_selected %>% subsetFeatures(mz %in% dat$mz)
+            )
+          )[, input$phen_cols_stats])
+          
+          groups_clean<-droplevels(groups_clean)
+          
+          mean_spectra <-
+            as.data.frame(
+              summarizeFeatures(
+                x5$data_file_selected %>% subsetFeatures(mz %in% dat$mz),
+                groups = groups_clean,
+                as = "DataFrame"
+              )
+            )
+          temp_means <-
+            cbind(round(mean_spectra[], 4),
+                  max_mean_group = colnames(mean_spectra[,-1])[max.col(mean_spectra[,-1])])
+          dat$mz <- round(dat$mz, 4)
+          temp_means <-
+            cbind(temp_means, feature = 1:dim(temp_means)[1])
+          dat <- merge(dat, temp_means, by="mz") %>% dplyr::mutate(feature=feature.x)
+          #dat2 <- dat[dat$feature[(x5$stats_results$feature)],] #what is this doing and why?
+          x5$stats_table_filtered <- dat
+          
+        }
+        
+        
+      }
+      
+      
+      
+      #browser()
+      
+      #add fold change data if available for meanstest, ssctest, and spatialDGMM
+      #with condition that only two groups are in the test group for now
+      
+      
+      
+      
+      x5$stats_table_filtered <- dat
+      
+      DT::datatable(
+        dat,
+        selection = list(mode = "single"),
+        caption = "Results",
+        editable = FALSE,
+        #server = FALSE,
+        extensions = c("Buttons"),
+        options = list(
+          dom = 'Bfrtipl',
+          buttons = c('copy', 'csv', 'excel', 'pdf', 'print')
+        )
+      )
+    }, server = FALSE)
+    
+    
+    output$plot13 <- renderImage({
+      req(x5$data_file_selected)
+      req(x5$tf_list)
+      req(input$stats_table_rows_selected)
+      
+      # A temp file to save the output.
+      # This file will be removed later by renderImage
+      outfile <- tempfile(fileext = '.png')
+      
+      png(outfile, width = 800, height = 600)
+      
+      #browser()
+      plate1 <-
+        x5$data_file_selected[, Cardinal::run(x5$data_file_selected) %in% runNames(x5$data_file_selected)[1]]
+      
+      
+      
+      plate_sel <-
+        x5$mytable_stats_plate_selected %>% subsetPixels(x5$tf_list)
+      p2 <-
+        image(
+          plate_sel,
+          as.data.frame(pData(plate_sel))[, input$phen_cols_stats] ~ x * y,
+          key = F,
+          col = ggsci::pal_npg()(10)
+        )
+      p3 <-
+        image(
+          plate1,
+          as.data.frame(pData(plate1))[, input$phen_cols_stats] ~ x * y,
+          key = T,
+          col = ggsci::pal_npg()(10)
+        )
+      
+      nplots = length(p2$dpages) + 1
+      
+      #print(p1, layout=n2mfrow(nplots))
+      print(p2, layout = n2mfrow(nplots))
+      print(p3, layout = FALSE)
+      
+      
+      dev.off()
+      
+      # Return a list containing the filename
+      list(
+        src = outfile,
+        contentType = 'image/png',
+        width = 800,
+        height = 600,
+        alt = "This is alternate text"
+      )
+    }, deleteFile = TRUE)
+    
+    
+    #Plots selected statistical results
+    output$plot11 <- renderImage({
+      req(input$stats_table_rows_selected)
+      if (is.null(input$stats_table_rows_selected))
+        return()
+      
+      # A temp file to save the output.
+      # This file will be removed later by renderImage
+      outfile <- tempfile(fileext = '.png')
+      
+      png(outfile, width = 800, height = 600)
+      #browser()
+      
+      dat <- x5$stats_table_filtered
+      
+      #get row from orignial dataset corresponding to selected data
+      m =  which(x5$stats_results$feature %in% dat[input$stats_table_rows_selected, ]$feature)
+      if (input$stats_test == "ssctest") {
+        m = which(round(x5$stats_results$mz, 4) %in% dat[input$stats_table_rows_selected, ]$mz)
+      }
+      
+      if (input$stats_test %in% c("meanstest")) {
+        req(x5$stats_results)
+        
+        mycols = ggsci::pal_npg()(as.data.frame(pData(x5$data_file_selected))[, input$phen_cols_stats] %>%
+                                    factor() %>% droplevels() %>%
+                                    levels() %>% length())
+        p1 <-
+          plot(
+            x5$test_result,
+            model = list(dat[input$stats_table_rows_selected, ]$feature),
+            col = mycols,
+            las = 0
+          )
+        nplots <- length(p1$facets)
+        
+        mplot <- F
+        
+        
+        #TODO NEED to sort out getting aov vars with the means test... how should this work??
+        #Also need to test if there are enough variables with aov plots and skip if not
+        if (!is.null(input$output_factors)) {
+          print("adding means plot across multiple conditions")
+          mplot <- T
+          nplots <- nplots + 1
+        }
+        
+        print(p1, layout = n2mfrow(nplots))
+        title(paste(
+          "mz= ",
+          round(x5$stats_results$mz[m], 4),
+          " FDR= ",
+          round(x5$stats_results$AdjP[m], 2)
+        ))
+        
+        #print(plot(x5$test_result_feature_test, model=list(x5$stats_results$feature[m])), layout=FALSE)
+        #title(paste("mz= ",round(x5$stats_results$mz[m],4)," FDR= ", round(x5$stats_results$AdjP[m],2)))
+        
+        
+        if (mplot == T) {
+          #require(gplots)
+          #browser()
+          #mzdat=subset(x5$test_result, mz==x5$stats_results$mz[m])
+          # a<-as.matrix(iData(x5$data_file_selected[which(mz(x5$data_file_selected)%in%x5$stats_results$mz[m]),]))
+          # b<-pData(x5$data_file_selected[which(mz(x5$data_file_selected)%in%x5$stats_results$mz[m]),])
+          # dat=cbind(run=Cardinal::run(x5$data_file_selected),b,value=a[1,])
+          #
+          a <-
+            as.matrix(iData(x5$data_file_selected[which(mz(x5$data_file_selected) %in%
+                                                          x5$stats_results$mz[m]), ]))
+          b <-
+            as.data.frame(pData(x5$data_file_selected[which(mz(x5$data_file_selected) %in%
+                                                              x5$stats_results$mz[m]), ]))
+          dat = cbind(b, value = a[1, ])
+          
+          
+          #dat_long_tech_avg<- as.data.frame(na.omit(dat)) %>% dplyr::group_by_at(c(input$aov_vars1, input$aov_vars2, input$aov_vars3)) %>%
+          dat_long_tech_avg <-
+            dat %>% dplyr::group_by_at(c(input$phen_cols_stats, x5$group_var)) %>%
+            dplyr::summarize(tech_avg = mean(value),
+                             .groups = "keep")  %>% na.omit()
+          
+          #x5$dat_long_tech_avg<-dat_long_tech_avg
+          
+          fm <-
+            as.formula(paste0("tech_avg~", input$phen_cols_stats))
+          #browser()
+          print(
+            gplots::plotmeans(
+              fm,
+              dat_long_tech_avg,
+              mean.labels = T,
+              digits = 1,
+              las = 2
+            ),
+            layout = FALSE
+          )
+        }
+      } else if (input$stats_test %in% c("spatialDGMM")) {
+        req(x5$stats_results)
+        #browser()
+        mycols = ggsci::pal_npg()(length(droplevels(as.factor((as.data.frame(pData(
+          x5$data_file_selected
+        )[, input$phen_cols_stats]))
+        ))))
+        
+        
+        p1 <-
+          image(
+            x5$test_result_feature_test,
+            model = list(x5$stats_results$feature[m]),
+            values = "mapping"
+          )
+        nplots <- length(p1$dpages) + 2
+        
+        mplot <- F
+        
+        if (!is.null(input$aov_vars2) &&
+            !is.null(input$aov_vars3)) {
+          print("adding means plot across multiple conditions")
+          mplot <- T
+          nplots <- nplots + 1
+        }
+        
+        
+        print(p1, layout = n2mfrow(nplots))
+        print(plot(x5$test_result,
+                   model = list(x5$stats_results$feature[m])), layout =
+                FALSE)
+        print(plot(
+          x5$test_result_feature_test,
+          model = list(x5$stats_results$feature[m]),
+          col = mycols
+        ),
+        layout = FALSE)
+        title(paste(
+          "mz= ",
+          round(x5$stats_results$mz[m], 4),
+          " FDR= ",
+          round(x5$stats_results$AdjP[m], 2)
+        ))
+        
+        
+        if (mplot == T) {
+          #browser()
+          #require(gplots)
+          #mzdat=subset(x5$test_result, mz==x5$stats_results$mz[m])
+          a <-
+            as.matrix(iData(x5$data_file_selected[which(mz(x5$data_file_selected) %in%
+                                                          x5$stats_results$mz[m]), ]))
+          b <-
+            pData(x5$data_file_selected[which(mz(x5$data_file_selected) %in% x5$stats_results$mz[m]), ])
+          dat = cbind(run = Cardinal::run(x5$data_file_selected),
+                      b,
+                      value = a[1, ])
+          
+          dat_long_tech_avg <-
+            as.data.frame(dat) %>% dplyr::group_by_at(c(
+              "run",
+              input$aov_vars1,
+              input$aov_vars2,
+              input$aov_vars3
+            )) %>%
+            dplyr::summarize(tech_avg = mean(value),
+                             .groups = "keep")
+          
+          #x5$dat_long_tech_avg<-dat_long_tech_avg #single m/z?
+          
+          fm <-
+            as.formula(
+              paste0(
+                "tech_avg~interaction(",
+                input$aov_vars2,
+                ",",
+                input$aov_vars3,
+                ")"
+              )
+            )
+          
+          print(
+            gplots::plotmeans(
+              fm,
+              dat_long_tech_avg,
+              mean.labels = T,
+              digits = 1
+            ),
+            layout = FALSE
+          )
+        }
+        
+        
+        
+      } else if (input$stats_test == "anova") {
+        #browser()
+        #dev.new()
+        
+        #library(gplots)
+        #library(rstatix)
+        
+        #m=input$stats_table_rows_selected
+        #print(p1, layout=n2mfrow(nplots))
+        res.test <- x5$test_result[[m]]
+        print(rstatix::get_anova_table(res.test))
+        dat <-
+          as.data.frame(subset(
+            na.omit(x5$dat_long_tech_avg),
+            mz == x5$stats_results[m, "mz"]
+          ))
+        
+        
+        
+        
+        if (input$anova_type == "anova_oneway") {
+          if (!input$aov_vars1 %in% colnames(dat)) {
+            print("Check the Group variable, different from comparison variable")
+            return()
+          }
+          
+          
+          dat[, input$aov_vars1] <-
+            as.factor(dat[, input$aov_vars1])
+          
+          
+          library(ggpubr)
+          bxp <- ggboxplot(
+            dat,
+            x = input$aov_vars1,
+            y = 'tech_avg',
+            #color = input$aov_vars1, add="jitter", palette = "jco"
+            color = input$aov_vars1,
+            add = "jitter",
+            palette = "npg",
+            size = 1.3,
+            font.label = list(size = 15, color = "black")
+          )
+          #pair wise comparision
+          pwc <-
+            (dat) %>% rstatix::tukey_hsd(attributes(res.test)$args$formula)
+          pwc <-
+            (pwc) %>% rstatix::add_xy_position(x = eval(input$aov_vars1))
+          
+          print(as.data.frame(pwc))
+          
+          
+          
+          p1 <- bxp +
+            stat_pvalue_manual(pwc,
+                               tip.length = 0,
+                               hide.ns = TRUE) +
+            labs(
+              title = paste0(
+                "m/z= ",
+                round(x5$stats_results[m, "mz"], 4),
+                ",  FDR= ",
+                x5$stats_results[m, "adjustp"]
+              ),
+              subtitle = rstatix::get_test_label(res.test, detailed = TRUE) ,
+              caption = rstatix::get_pwc_label(pwc),
+              size = 15
+            )
+          
+          print(p1)
+          
+        } else if (input$anova_type %in% c("anova_add",
+                                           "anova_interaction",
+                                           "between_interacting")) {
+          #browser()
+          
+          #library(ggpubr)
+          #library(ggprism)
+          
+          dat[, input$aov_vars1] <-
+            as.factor(dat[, input$aov_vars1])
+          dat[, input$aov_vars2] <-
+            as.factor(dat[, input$aov_vars2])
+          
+          
+          if (input$anova_type %in% c("between_interacting")) {
+            dat[, input$aov_vars3] <- as.factor(dat[, input$aov_vars3])
+          }
+          
+          
+          
+          
+          
+          
+          plot_means_p <- function(dat, v1, v2, cols) {
+            fm1 = as.formula(paste0("tech_avg ~ ", v2))
+            fm2 = as.formula(paste0("tech_avg ~ ", v1))
+            
+            
+            
+            
+            df_p_val1 <- (dat) %>%
+              rstatix::group_by(.data[[v1]]) %>%
+              as.data.frame() %>%
+              rstatix::t_test(fm1) %>%
+              rstatix::adjust_pvalue(p.col = "p", method = "fdr") %>%
+              rstatix::add_significance(p.col = "p.adj") %>%
+              rstatix::add_xy_position(x = v1, dodge = 0.8) # important for positioning!
+            
+            df_p_val2 <- rstatix::t_test(dat, fm2,
+                                         p.adjust.method = "fdr") %>%
+              rstatix::add_xy_position()
+            
+            if (is.null(df_p_val2$p.adj)) {
+              df_p_val2 <- df_p_val2 %>% dplyr::mutate(p.adj = p)
+            }
+            
+            
+            # bxp <- ggboxplot(
+            #   dat, x = v1, y = 'tech_avg',
+            #   color = v2, add="jitter", palette = "jco"
+            #                 )+theme_prism()
+            
+            p1 <-
+              ggplot2::ggplot(dat, ggplot2::aes(x = .data[[v1]], y = tech_avg)) +
+              ggplot2::geom_boxplot(ggplot2::aes(fill = .data[[v2]])) +
+              ggplot2::scale_fill_manual(values = as.vector(cols)) +
+              ggprism::theme_prism(base_family = "Arial") +
+              
+              ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 25)) + #, hjust = 1))+
+              ggplot2::ylab("response") +
+              ggplot2::coord_cartesian(ylim = c(0, max(df_p_val2$y.position *
+                                                         1.2))) +
+              ggprism::add_pvalue(
+                df_p_val1,
+                xmin = "xmin",
+                xmax = "xmax",
+                label = "p = {p.adj}",
+                tip.length = 0
+              ) +
+              ggprism::add_pvalue(
+                df_p_val2,
+                label = "p = {p.adj}",
+                tip.length = 0.01,
+                bracket.nudge.y = df_p_val2$y.position * .1,
+                step.increase = 0.015
+              )
+            
+            
+            
+            return(p1)
+          }
+          
+          #dat<-dat %>% filter(!Plate.Group=="N9.healthy control")
+          
+          dat <- droplevels(dat)
+          
+          match_cols <-
+            ggsci::pal_npg()(length(levels(droplevels(dat[, input$aov_vars1]))))
+          contrast_cols <-
+            pals::alphabet2((length(levels(
+              droplevels(dat[, input$aov_vars2])
+            ))))
+          
+          p1 <-
+            plot_means_p(
+              dat,
+              v1 = input$aov_vars1,
+              v2 = input$aov_vars2,
+              cols = contrast_cols
+            )
+          p2 <-
+            plot_means_p(
+              dat,
+              v1 = input$aov_vars2,
+              v2 = input$aov_vars1,
+              cols = match_cols
+            )
+          
+          
+          
+          
+          #browser()
+          #add anova plots? qq plots, anything else?
+          sig_cols <-
+            grep("BH|mz|ID",
+                 colnames(x5$stats_results[m, ]),
+                 value = T)
+          sig_vals <-
+            x5$stats_results[m, c(colnames(x5$stats_results) %in% sig_cols)]
+          sig_vals$mz <- round(sig_vals$mz, 4)
+          
+          table_vals <-
+            table(interaction(dat[, input$aov_vars1], dat[, input$aov_vars2]))
+          
+          print(
+            gridExtra::grid.arrange(
+              p1,
+              p2,
+              gridExtra::tableGrob(sig_vals),
+              gridExtra::tableGrob(t(as.data.frame(
+                table_vals
+              ))),
+              nrow = 3,
+              heights = grid::unit(c(5, 1, 1), c("in", "in")),
+              layout_matrix = rbind(c(1, 1, 2, 2), c(NA, 3, 3, NA), c(NA, 4, 4, NA))
+            ),
+          )
+          
+          
+          
+          #fm3<-as.formula(paste0("tech_avg~interaction(",input$aov_vars1,",",input$aov_vars2,")"))
+          #plotmeans(formula=fm3, data=dat)
+          
+        } else if (input$anova_type %in% c("anova_in")) {
+          #library(ggpubr)
+          
+          
+          
+          bxp <- ggpubr::ggboxplot(
+            dat,
+            x = input$aov_vars2,
+            y = 'tech_avg',
+            color = input$aov_vars1,
+            add = "jitter",
+            palette = "jco"
+          )
+          qq <-
+            ggpubr::ggqqplot(dat, "tech_avg", ggtheme = theme_bw()) +
+            ggplot2::facet_grid(paste0(input$aov_vars2, " ~ ", input$aov_vars1))
+          
+          #library(emmeans)
+          fm2 <-
+            as.formula(paste0("tech_avg ~ ", input$aov_vars1))
+          pwc <-
+            dat %>% dplyr::group_by(.data[[input$aov_vars2]]) %>%
+            #group_by( dat$time.point) %>%
+            rstatix::emmeans_test(fm2, p.adjust.method = "fdr")
+          pwc
+          
+          pwc <-
+            pwc %>% rstatix::add_xy_position(x = eval(input$aov_vars1)) #TODO check
+          
+          
+          p1 <- bxp +
+            ggpubr::stat_pvalue_manual(pwc) +
+            ggplot2::labs(
+              subtitle = rstatix::get_test_label(res.test, detailed = TRUE),
+              caption = rstatix::get_pwc_label(pwc)
+            )
+        }
+        
+        
+        
+        
+      } else if (input$stats_test == "ssctest") {
+        #browser()
+        #require(gplots)
+        #mzdat=subset(x5$test_result, mz==x5$stats_results$mz[m])
+        a <-
+          as.matrix(iData(
+            subsetFeatures(x5$data_file_selected,
+                           mz == x5$stats_results$mz[m])
+          ))
+        b <-
+          pData(subsetFeatures(x5$data_file_selected,
+                               mz == x5$stats_results$mz[m]))
+        dat = cbind(run = Cardinal::run(x5$data_file_selected),
+                    b,
+                    value = a[1, ])
+        
+        dat_long_tech_avg <-
+          as.data.frame(dat) %>% dplyr::group_by_at(unique(
+            c(
+              "run",
+              input$aov_vars1,
+              input$aov_vars2,
+              input$aov_vars3
+            )
+          )) %>%
+          dplyr::summarize(tech_avg = mean(value),
+                           .groups = "keep")
+        
+        #x5$dat_long_tech_avg<-dat_long_tech_avg #single m/z
+        
+        
+        fm <-
+          as.formula(
+            paste0(
+              "tech_avg~interaction(",
+              input$aov_vars3,
+              ",",
+              input$aov_vars2,
+              ")"
+            )
+          )
+        
+        #choose one model to plot, hightest accuracy
+        acc = as.data.frame(summary(x5$test_result))$Accuracy
+        idx = which(acc %in% max(acc))
+        
+        #browser()
+        mycols = ggsci::pal_npg()(length(droplevels(as.factor((as.data.frame(pData(
+          x5$data_file_selected
+        )[, input$phen_cols_stats]))
+        ))))
+        
+        p1 <-
+          image(x5$test_result,
+                model = modelData(x5$test_result)[idx, ],
+                key = F)
+        p2 <-
+          image(
+            x5$data_file_selected,
+            mz = x5$stats_results$mz[m],
+            contrast.enhance = "histogram",
+            normalize.image = "linear"
+          )
+        
+        fm2 <-
+          as.formula(paste0(input$phen_cols_stats, "~x*y"))
+        p3 <-
+          image(x5$data_file_selected[, Cardinal::run(x5$data_file_selected) %in% runNames(x5$data_file_selected)[1]],
+                fm2,
+                key = F,
+                col = mycols)
+        p4 <-
+          image(x5$data_file_selected[, Cardinal::run(x5$data_file_selected) %in% runNames(x5$data_file_selected)[1]],
+                fm2,
+                key = T,
+                col = mycols)
+        nplots = length(p1$dpages) * 2 + 3
+        
+        print(p1, layout = n2mfrow(nplots))
+        print(p2, layout = FALSE)
+        
+        print(gplots::plotmeans(fm, dat_long_tech_avg),
+              layout = FALSE)
+        
+        print(
+          p3,
+          layout = FALSE,
+          main = runNames(x5$data_file_selected)[1],
+          cex.main = 0.8
+        )
+        print(p4, layout = FALSE)
+        
+      } else{
+        print("Plot not supported yet")
+      }
+      
+      
+      
+      
+      #print(Cardinal::image(mytable_selected(), mz=ion, plusminus=input$plusminus_viz))
+      
+      dev.off()
+      
+      # Return a list containing the filename
+      list(
+        src = outfile,
+        contentType = 'image/png',
+        width = 800,
+        height = 600,
+        alt = "This is alternate text"
+      )
+    }, deleteFile = TRUE)
+    
+    proc_values <- reactive({
+      list(x5 = x5,
+           par_mode = par_mode)
+    })
+    return(proc_values)
+    
+    
+  })
+}
