@@ -6,11 +6,13 @@
 <!-- badges: start -->
 <!-- badges: end -->
 
-The goal of MSI.EAGLE is to …
+The goal of MSI.EAGLE is to create an interactive user app for
+processing of mass spec imaging data. It uses many of the processing
+features from Cardinal, and adds a number of analysis options.
 
 ## Installation
 
-You can install the development version of MSI.EAGLE like so:
+You can install the development version of MSI.EAGLE as follows:
 
 ``` r
 # FILL THIS IN! HOW CAN PEOPLE INSTALL YOUR DEV PACKAGE?
@@ -35,27 +37,20 @@ BiocManager::install(c("BiocParallel", "Cardinal"))
 
     remotes::install_git("http://weljie.myds.me:30003/aalim/DESI_Shiny_Processing_script.git", branch="modules")
 
-\*Note: Step 1 may fail on arm computers (such as the M1/M2 Macs). In
-this case the current best method is to install a version with a minor
-tweak from github:
+
+    ## Example
+
+    This is a basic example which shows you how to solve a common problem:
 
 
-
-    remotes::install_github("kuwisdelu/Cardinal#17")
-
-## Example
-
-This is a basic example which shows you how to solve a common problem:
-
-``` r
-## basic example code
-# wd = ('path/to/workingdirectory)
-# rawd = ('path/to/rawfilesdirectory') # rawd = wd
-# ncores = as.integer(parallel::detectCores()/2) # use 1/2 of the available processors
-# ncores = as.integer(parallel::detectCores())-2 # us all but 2 available processors
-# library(MSI.EAGLE)
-# MSI.EAGLE()
-```
+    ``` r
+    ## basic example code
+    # wd = ('path/to/workingdirectory)
+    # rawd = ('path/to/rawfilesdirectory') # rawd = wd
+    # ncores = as.integer(parallel::detectCores()/2) # use 1/2 of the available processors
+    # ncores = as.integer(parallel::detectCores())-2 # us all but 2 available processors
+    # library(MSI.EAGLE)
+    # MSI.EAGLE()
 
 What is special about using `README.Rmd` instead of just `README.md`?
 You can include R chunks like so:
