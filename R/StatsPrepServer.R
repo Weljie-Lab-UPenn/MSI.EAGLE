@@ -11,10 +11,10 @@ StatsPrepServer <- function(id,  setup_values) {
     })
     
     has.new.files <- function() {
-      unique(list.files(setup_values()[["wd"]]))
+      unique(list.files(setup_values()[["wd"]], recursive = T))
     }
     get.files <- function() {
-      list.files(setup_values()[["wd"]])
+      list.files(setup_values()[["wd"]], recursive = T)
     }
     
     # store as a reactive instead of output
@@ -148,7 +148,7 @@ StatsPrepServer <- function(id,  setup_values) {
         ns("stats_input_file"),
         "Imageset for analysis",
         grep(
-          "rds$",
+          "imzML$",
           my_files(),
           ignore.case = T,
           value = T
@@ -160,7 +160,7 @@ StatsPrepServer <- function(id,  setup_values) {
       if (is.null(input$stats_input_file))
         return()
       
-      x5$data_file <- (readRDS(input$stats_input_file))
+      x5$data_file <- (readMSIData(input$stats_input_file))
       print(x5$data_file)
       
       if (!is.na(input$debug_n)) {
@@ -825,7 +825,7 @@ StatsPrepServer <- function(id,  setup_values) {
           req(input$aov_vars1)
           
           
-          numdat <- as.matrix(iData(x5$data_file_selected))
+          numdat <- as.matrix(spectra(x5$data_file_selected))
           rownames(numdat) <- mz(x5$data_file_selected)
           pdat <- as.data.frame(pData(x5$data_file_selected))
           
@@ -1266,7 +1266,7 @@ StatsPrepServer <- function(id,  setup_values) {
       
       #browser()
       
-      numdat <- as.matrix(iData(x5$data_file))
+      numdat <- as.matrix(spectra(x5$data_file))
       rownames(numdat) <- mz(x5$data_file)
       pdat <- as.data.frame(pData(x5$data_file))
       
@@ -2079,7 +2079,7 @@ StatsPrepServer <- function(id,  setup_values) {
           # dat=cbind(run=Cardinal::run(x5$data_file_selected),b,value=a[1,])
           #
           a <-
-            as.matrix(iData(x5$data_file_selected[which(mz(x5$data_file_selected) %in%
+            as.matrix(spectra(x5$data_file_selected[which(mz(x5$data_file_selected) %in%
                                                           x5$stats_results$mz[m]), ]))
           b <-
             as.data.frame(pData(x5$data_file_selected[which(mz(x5$data_file_selected) %in%
@@ -2159,7 +2159,7 @@ StatsPrepServer <- function(id,  setup_values) {
           #require(gplots)
           #mzdat=subset(x5$test_result, mz==x5$stats_results$mz[m])
           a <-
-            as.matrix(iData(x5$data_file_selected[which(mz(x5$data_file_selected) %in%
+            as.matrix(spectra(x5$data_file_selected[which(mz(x5$data_file_selected) %in%
                                                           x5$stats_results$mz[m]), ]))
           b <-
             pData(x5$data_file_selected[which(mz(x5$data_file_selected) %in% x5$stats_results$mz[m]), ])
@@ -2463,7 +2463,7 @@ StatsPrepServer <- function(id,  setup_values) {
         #require(gplots)
         #mzdat=subset(x5$test_result, mz==x5$stats_results$mz[m])
         a <-
-          as.matrix(iData(
+          as.matrix(spectra(
             subsetFeatures(x5$data_file_selected,
                            mz == x5$stats_results$mz[m])
           ))

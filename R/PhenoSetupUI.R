@@ -24,7 +24,7 @@ PhenoSetupUI <- function(id) {
                uiOutput(ns('plot_cols')),
                uiOutput(ns("phen_interaction")),
                actionButton(ns("interaction"), label="Add interaction data"),
-               downloadButton(ns("save_pheno"), label="Save phenotyped data")
+               shinyFiles::shinySaveButton(ns("save_imzml"), "Save imzML File", "Save", filetype = list(""))
                
              ),
              mainPanel(

@@ -73,7 +73,7 @@ MSI.EAGLE <- function(...) {
     preproc_values <- PeakPickServer("tab2", setup_values)
     UMAPServer("tab3", setup_values, preproc_values)
     SSCsegServer("tab3a", setup_values, preproc_values)
-    PhenoServer("tab4", preproc_values)
+    PhenoServer("tab4", setup_values, preproc_values)
     DepthAnalysisServer("tab5", setup_values)
     proc_values<-StatsPrepServer("tab6", setup_values )
     HeatmapServer("tab7", proc_values)

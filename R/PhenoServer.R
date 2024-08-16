@@ -1,5 +1,5 @@
 ### R/PhenoServer.R
-PhenoServer <- function(id,  preproc_values) {
+PhenoServer <- function(id,  setup_values, preproc_values) {
   moduleServer(id, function(input, output, session){
     # output$table <- DT::renderDataTable(mtcars)
     
@@ -95,7 +95,7 @@ PhenoServer <- function(id,  preproc_values) {
           print("No processed data, be sure to store data first.")
           return()
         } else {
-          x3$img.dat<-Cardinal::combine(x2$list_proc_img)
+          x3$img.dat<-combine_card(x2$list_proc_img)
         }
       }
       
@@ -135,8 +135,7 @@ PhenoServer <- function(id,  preproc_values) {
     
     observeEvent(input$start_phenotype, {
       
-      #browser()
-      
+
       if(is.null(x3$img.dat) | is.null(x3$txt_data))
         return()
       #try(if(x3$img.dat=="proc") #no processed data available
@@ -157,14 +156,17 @@ PhenoServer <- function(id,  preproc_values) {
       plates=unique(x3$txt_data$Plate)
       
       #reorder input file so plates are in the sample order
-      x3$img.dat<-Cardinal::combine(lapply(1:length(plates), function(x) x3$img.dat[,grep(plates[x], Cardinal::run(x3$img.dat))]))
+      x3$img.dat<-combine_card(lapply(1:length(plates), function(x) x3$img.dat[,grep(plates[x], Cardinal::run(x3$img.dat))]))
       
       #ADD code to remove all other ID columns?
       a<-as.data.frame(fData(x3$img.dat)) %>% dplyr::select(!contains("ID."))
-      Cardinal::fData(x3$img.dat)<-Cardinal::MassDataFrame(mz(x3$img.dat), ID=a$ID)
+      
+      if(!is.null(a$ID)) {
+      
+        Cardinal::fData(x3$img.dat)<-Cardinal::MassDataFrame(mz(x3$img.dat), ID=a$ID)
+      }
       
       
-      #browser()
       
       if(input$phen_method %in% c("spec_density", "period", "breaks")) {
         #browser()
@@ -248,28 +250,39 @@ PhenoServer <- function(id,  preproc_values) {
       x3$pdata[, paste0(input$int_cols_out, collapse = ".")]<-int
     })
     
-    output$save_pheno <- downloadHandler(
+    
+    
+    observeEvent(input$save_imzml, {
       
-      filename = function() {
-        paste(getwd(),"/MSI-pheno_hi_SN-bk_proc-", Sys.Date(), ".rds", sep="")
-      },
-      content = function(file) {
-        #pk_img <- x0$overview_peaks
+      req(input$save_imzml)
+      
+      
+      volumes <- c(wd = setup_values()[["wd"]], home = fs::path_home())
+      shinyFiles::shinyFileSave(input, "save_imzml", roots = volumes, session = session)
+      
+      
+      save_path <- shinyFiles::parseSavePath(volumes, input$save_imzml)
+      if (nrow(save_path) == 0) return(NULL)
+      
+      #browser()
+      filen <- as.character(save_path$datapath)
+      pk_img <- x3$img.dat
+      pData(pk_img)<-x3$pdata
+      
+      
+      fdata_tmp<-fData(x3$img.dat)
+      if(dim(fdata_tmp)[2]>1) {
+        coln<-unique(colnames(fdata_tmp))
+        #browser()
+        #only keep one ID column to prevent all sort of issues. would be a problem if additional featuredata is kept longer term
         
+        fdata_unique<-fdata_tmp[,unique(colnames(fdata_tmp))]
         
+        fData(pk_img)<-MassDataFrame(mz=fdata_unique$mz, fdata_unique %>% as.data.frame() %>% dplyr::select(!mz))
+      }
+      
         
-        
-        pk_img <- x3$img.dat
-        pData(pk_img)<-x3$pdata
-        
-        
-        fdata_tmp<-fData(x3$img.dat)
-        if(dim(fdata_tmp)[2]>1) {
-          fData(pk_img)<-fdata_tmp[,1] #only keep one ID column to prevent all sort of issues. would be a problem if additional featuredata is kept longer term
-        }
-        
-        
-        saveRDS(pk_img, file)
+        writeImzML(pk_img, filen)
       }
     )
     
@@ -300,7 +313,8 @@ PhenoServer <- function(id,  preproc_values) {
       }
       
       #browser()
-      print(Cardinal::image(img.dat, p~x*y, key=keyval, col=pals::alphabet()))
+      pData(img.dat)$p<-p
+      print(Cardinal::image(img.dat, "p", key=keyval))
       
       
       
