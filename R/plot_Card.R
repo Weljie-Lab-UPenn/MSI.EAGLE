@@ -62,9 +62,16 @@
       ns = session$ns
       
       graphics.off()
+      #browser()
       
       #create new overview_peaks_sel object with mean values
-      overview_peaks_sel<-Cardinal::summarizeFeatures(overview_peaks_sel)
+      overview_peaks_sel<-try(Cardinal::summarizeFeatures(overview_peaks_sel))
+      
+      if(class(overview_peaks_sel)=="try-error") {
+          showNotification("No data available, please check your parameters or dataset", type="error")
+          return()
+        }
+      
       
       observe({
         

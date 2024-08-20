@@ -135,7 +135,7 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
     
     observeEvent(input$start_phenotype, {
       
-
+      
       if(is.null(x3$img.dat) | is.null(x3$txt_data))
         return()
       #try(if(x3$img.dat=="proc") #no processed data available
@@ -155,7 +155,11 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       #reorder input file to match datafile
       plates=unique(x3$txt_data$Plate)
       
+      #browser()
       #reorder input file so plates are in the sample order
+      #first only keep overlapping set of runs?
+      
+      plates<-plates[plates %in% runNames(x3$img.dat)]
       x3$img.dat<-combine_card(lapply(1:length(plates), function(x) x3$img.dat[,grep(plates[x], Cardinal::run(x3$img.dat))]))
       
       #ADD code to remove all other ID columns?
@@ -300,11 +304,15 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       
       png(outfile, width = 800, height = 600)
       
-      #img.dat<-x3$img_p.dat  #should the be pdata?
-      img.dat<-x3$img.dat
-      p<-as.data.frame(x3$pdata)[,input$phen_plot]
-      #browser()
+      # #img.dat<-x3$img_p.dat  #should the be pdata?
+      # img.dat<-x3$img.dat
+      # p<-as.data.frame(x3$pdata)[,input$phen_plot]
+      # 
       
+      pk_img <- x3$img.dat
+      pData(pk_img)<-x3$pdata
+      
+      #browser()
       
       if(isFALSE(input$key_tf) || is.null(input$key_tf)) {
         keyval=TRUE
@@ -313,9 +321,7 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       }
       
       #browser()
-      pData(img.dat)$p<-p
-      print(Cardinal::image(img.dat, "p", key=keyval))
-      
+      print(image(pk_img, input$phen_plot))
       
       
       #print(Cardinal::image(mytable_selected(), mz=ion, plusminus=input$plusminus_viz))
