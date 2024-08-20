@@ -327,7 +327,7 @@ DepthAnalysisServer <- function(id,  setup_values) {
                      
                      
                      #most likely point of failure here....
-                     #browser()
+                     browser()
                      if (length(x1$raw_list) == 1) {
                        test_raw_reduced <-
                          select_pix(1, raw_list_ord[runNames(x1$raw_list[[1]])], coord_list_reduced)
@@ -467,7 +467,6 @@ DepthAnalysisServer <- function(id,  setup_values) {
                        x4$seg_pp_file <- test_mz_reduced2
                        
                      } else if (input$targeted_pp == "targeted") {
-                       #browser()
                        print("performing targeted analysis")
                        print(paste0("Tolerance set to ", input$tol2))
                        file <- input$masses_file
@@ -512,13 +511,20 @@ DepthAnalysisServer <- function(id,  setup_values) {
                          return()
                        }
                        
-                       x4$seg_pp_file <- test_raw_reduced %>%
-                         normalize(method = "tic") %>%
-                         peakBin(ref = neg_ref_mz,
-                                 tolerance = input$tol2,
-                                 units = "ppm") %>% process()
+                       # x4$seg_pp_file <- test_raw_reduced %>%
+                       #   normalize(method = "tic") %>%
+                       #   peakBin(ref = neg_ref_mz,
+                       #           tolerance = input$tol2,
+                       #           units = "ppm") %>% process()
                        
+                       tmp.img<-try(peakProcess(test_raw_reduced, 
+                                                        ref=neg_ref_mz,
+                                                        #SN=input$SNR,
+                                                        type="area",
+                                                        tolerance=setup_values()[["tol"]], units="ppm") %>% process() %>% summarizeFeatures()
+                       )
                        
+                       x4$seg_pp_file <-tmp.img
                      }
                      #add mass annotations?
                      if (input$targeted_pp == "targeted") {
