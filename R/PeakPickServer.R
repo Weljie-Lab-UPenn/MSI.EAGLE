@@ -170,14 +170,14 @@ PeakPickServer <- function(id, setup_values) {
       switch(
         input$peak_pick_status,
         "pp_no" = list(
-          numericInput(
-            ns("pix_for_peak_picking"),
-            "% of pixels to randomly sample for peak picking",
-            value = 10,
-            min = 1,
-            max = 100
-          ),
-          numericInput(ns("SNR"), "S/N for overview peak picking", 5, min =
+          # numericInput(
+          #   ns("pix_for_peak_picking"),
+          #   "% of pixels to randomly sample for peak picking",
+          #   value = 10,
+          #   min = 1,
+          #   max = 100
+          # ),
+          numericInput(ns("SNR"), "S/N for overview peak picking", 20, min =
                          0),
           numericInput(
             ns("freq_min"),
@@ -189,7 +189,7 @@ PeakPickServer <- function(id, setup_values) {
           textInput(
             ns("pp_method"),
             "Peak picking method (“diff”, “sd”, “mad”, “quantile”, “filter”, “cwt”)",
-            value = "mad",
+            value = "diff",
             placeholder = "Cardinal pp method, adaptive, mad, or simple"
           ),
           actionButton(ns("action"), label = HTML("Start peak picking"))
@@ -339,25 +339,46 @@ PeakPickServer <- function(id, setup_values) {
                        #    return()
                        #  }
                        # 
-                       browser() #figure out plan when 0 peaks picked. Also filter freq.
+                       
                        #use Cardinal 3.6 peak processing method
+                       
+                       msa<-convertMSImagingArrays2Experiment(Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)),
+                                                                                              mass.range = c(setup_values()[["mz_max"]], setup_values()[["mz_min"]]), 
+                                                                                              resolution = setup_values()[["res"]], 
+                                                                                              units = "ppm")
+                       
+                       mse_queue<- msa |>
+                         normalize() |>
+                         #smooth() |>
+                         #reduceBaseline() |>
+                         peakPick(SNR=input$SNR, method=input$method, type="area", tolerance=NA, units="ppm")
+                        
+                       #plot the middle spectrum?
+                       print(plot(mse_queue, i=round(dim(coord(msa))[1]/2,0), linewidth=2))
+                       
                        test_mz_reduced<-try(
-                         peakProcess(
-                           convertMSImagingArrays2Experiment(Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)),
-                                                             mass.range = c(setup_values()[["mz_max"]], setup_values()[["mz_min"]]), 
-                                                             resolution = setup_values()[["res"]], 
-                                                             units = "ppm"),
-                           #combine(x1$raw_list),
-                           method=input$pp_method,
-                           SNR=input$SNR,
-                           #SNR=5,
-                           filterFreq = input$freq_min,
-                           tolerance=setup_values()[["tol"]],
-                           units="ppm",
-                           type="area",
-                           sampleSize=input$pix_for_peak_picking/100
-                        ) %>% summarizeFeatures()
+                          peakAlign(mse_queue, tolerance= setup_values()[["tol"]], units="ppm") %>%
+                          subsetFeatures( freq > input$freq_min)%>% 
+                          summarizeFeatures()
                        )
+                          
+
+                         # peakProcess(
+                         #   convertMSImagingArrays2Experiment(Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)),
+                         #                                     mass.range = c(setup_values()[["mz_max"]], setup_values()[["mz_min"]]), 
+                         #                                     resolution = setup_values()[["res"]], 
+                         #                                     units = "ppm"),
+                         #   #combine(x1$raw_list),
+                         #   method=input$pp_method,
+                         #   SNR=input$SNR,
+                         #   #SNR=5,
+                         #   filterFreq = input$freq_min,
+                         #   tolerance=setup_values()[["tol"]],
+                         #   units="ppm",
+                         #   type="area",
+                         #   sampleSize=input$pix_for_peak_picking/100
+                        
+                       
                        
                        # 
                        # #create list of peaks for referencing
@@ -469,21 +490,21 @@ PeakPickServer <- function(id, setup_values) {
                          return()
                        }
                        
-                       test_mz_reduced<-try(peakProcess(Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)), 
-                                                 ref=mz(test_mz_mean),
-                                                 SN=input$SNR,
-                                                 type="area",
-                                                 tolerance=setup_values()[["tol"]], units="ppm") %>% process() %>% summarizeFeatures()
-                       )
-                       
-                       #test_mz_reduced  <- summarizeFeatures(test_mz_reduced)
-                       
-                      
-                       if(class(test_mz_reduced) %in% "try-error") {
-                         print("peak picking failed, check input files")
-                         showNotification("Mean spectrum peak picking failed, check input files.", type = "error")
-                         return()
-                       }
+                       # test_mz_reduced<-try(peakProcess(Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)), 
+                       #                           ref=mz(test_mz_mean),
+                       #                           SN=input$SNR,
+                       #                           type="area",
+                       #                           tolerance=setup_values()[["tol"]], units="ppm") %>% process() %>% summarizeFeatures()
+                       # )
+                       # 
+                       # #test_mz_reduced  <- summarizeFeatures(test_mz_reduced)
+                       # 
+                       # 
+                       # if(class(test_mz_reduced) %in% "try-error") {
+                       #   print("peak picking failed, check input files")
+                       #   showNotification("Mean spectrum peak picking failed, check input files.", type = "error")
+                       #   return()
+                       # }
                        
                        setCardinalBPPARAM(par_mode())
                        

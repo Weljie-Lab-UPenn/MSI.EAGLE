@@ -454,6 +454,7 @@ SSCsegServer <- function(id, setup_values, preproc_values) {
     observeEvent(input$save_imzml, {
       
       req(input$save_imzml)
+      x2 <- preproc_values()[["x2"]]
       if(is.null(x2$list_proc_img)) {
         showNotification("No processed data to save- do you need to store the data?", type="error", duration=10)
         message( "No processed data to save- do you need to store the data?")
@@ -467,9 +468,9 @@ SSCsegServer <- function(id, setup_values, preproc_values) {
       save_path <- shinyFiles::parseSavePath(volumes, input$save_imzml)
       if (nrow(save_path) == 0) return(NULL)
       
-      browser()
+      
       filen <- as.character(save_path$datapath)
-        x2 <- preproc_values()[["x2"]]
+        
         #pk_img <- x0$overview_peaks
         
         #create tmp data for storage of processed data

@@ -102,7 +102,7 @@ DepthAnalysisServer <- function(id,  setup_values) {
             textInput(
               ns("pp_method2"),
               "Peak picking method (“diff”, “sd”, “mad”, “quantile”, “filter”, “cwt”)",
-              value = "mad",
+              value = "diff",
               placeholder = "Cardinal pp method, adaptive, mad, or simple"
             )
           ),
@@ -161,6 +161,9 @@ DepthAnalysisServer <- function(id,  setup_values) {
       } else if (sum(paste0(runNames(x4$seg_file), ".imzML") %in% names(x1$raw_list)) < 1) {
         
         print("no raw file compatible with dataset")
+        print("runNames(x4$seg_file)")
+        print(names(x1$raw_list))
+        
         x4$seg_filename = "Choose a file compatible with the raw dataset"
         
       }
@@ -408,7 +411,14 @@ DepthAnalysisServer <- function(id,  setup_values) {
                        
                        print("performing untargeted analysis")
                        
+                       browser()
+                       
                        x4$seg_pp_file <-
+                         
+                         
+                         
+                         
+                         a<-
                          try(HTS_reproc(
                            test_raw_reduced,
                            SN = input$SNR2,
@@ -418,6 +428,23 @@ DepthAnalysisServer <- function(id,  setup_values) {
                            freq.min = input$freq_min2
                          ))
                        
+                       
+                       
+                       # mse_queue<- test_raw_reduced |>
+                       #   normalize() |>
+                       #   #smooth() |>
+                       #   #reduceBaseline() |>
+                       #   peakPick(SNR=input$SNR2, method=input$method2, type="area", tolerance=NA, units="ppm")
+                       # 
+                       # #plot the middle spectrum?
+                       # print(plot(mse_queue, i=round(dim(coord(msa))[1]/2,0), linewidth=2))
+                       # 
+                       # b<-try(
+                       #   peakAlign(mse_queue, tolerance= input$tol2, units="ppm") %>%
+                       #     subsetFeatures( freq > input$freq_min2)%>% 
+                       #     summarizeFeatures()
+                       # )
+                       # 
                        if(class(x4$seg_pp_file) %in% "try-error") {
                          print("peak picking failed, check input files and parameters")
                          showNotification("Peak picking failed, check input files and parameters.", type = "error")
