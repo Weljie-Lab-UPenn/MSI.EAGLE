@@ -14,7 +14,9 @@
           
           column(3, offset = 0,
                  radioButtons(ns("ion_viz3"), "Image visualization ions",
-                                 c( "All"="viz_all", "Custom"="custom")),
+                                 c("First ion" = "viz_first", 
+                                   "All ions (TIC)"="viz_all", 
+                                    "Custom single / multiple"="custom")),
                  #numericInput(ns("mz_viz3"), "mz value for visualization",255.2),
                  uiOutput(ns("mz_viz3a")),
                  
@@ -62,17 +64,18 @@
       ns = session$ns
       
       graphics.off()
-      #browser()
-      
+
       #create new overview_peaks_sel object with mean values
-      overview_peaks_sel<-try(Cardinal::summarizeFeatures(overview_peaks_sel))
-      
-      if(class(overview_peaks_sel)=="try-error") {
+      if(is.null(fData(overview_peaks_sel)$mean)) {
+        overview_peaks_sel<-Cardinal::summarizeFeatures(overview_peaks_sel)
+        if(class(overview_peaks_sel)=="try-error") {
           showNotification("No data available, please check your parameters or dataset", type="error")
           return()
         }
+      }
       
       
+ 
       observe({
         
         output$plot.window <- renderUI({
@@ -195,7 +198,9 @@
           
           if(input$plot_pdata){
             list(
-              selectInput(ns("pdata_var_plot"), label="pData variable to plot", choices = colnames(as.data.frame(pData(overview_peaks_sel))))
+              selectInput(ns("pdata_var_plot"), label="pData variable to plot", 
+                          choices = colnames(as.data.frame(pData(overview_peaks_sel)))[-c(1:2)]
+                          )
             )
           }
           
@@ -310,7 +315,7 @@
           #ion <- switch(input$mode,
           #              "p"=786,
           #             "n"=255.2)
-          #browser()
+          
           
           if(!is.null(input$select_runs)) {
             overview_peaks_sel <- subsetPixels(overview_peaks_sel, run %in% input$select_runs)
@@ -354,16 +359,18 @@
           
           if(input$plot_pdata){
             req(input$pdata_var_plot)
-            print(Cardinal::image(overview_peaks_sel,
-                                  as.data.frame(pData(overview_peaks_sel))[,input$pdata_var_plot]~x*y,
-                                  key=(input$colorkey3),
-                                  superpose=input$superpose,
-                                  col=pals::alphabet()),
+            
+            plt_tmp<-Cardinal::image(overview_peaks_sel,
+                                    input$pdata_var_plot,
+                                    key=(input$colorkey3),
+                                    #superpose=input$superpose,
+                                    col=pals::alphabet())
+            print(plt_tmp,
                                   cex.axis=req(cex.axisp),
                                   cex.lab=cex.labp,
                                   cex.main=cex.mainp,
                                   cex.sub=cex.subp,
-                                  mar=new_mar,
+                                  #mar=new_mar,
                                   mgp=new_mgp
                   )
           } else if (input$ion_viz3=="viz_all") {
@@ -481,7 +488,7 @@
               }
             
   
-              browser()
+              
               
               if(sum(is.na(pData(overview_peaks_sel)$xic))==length(overview_peaks_sel)) {
                 showNotification("This calculation does not work!")
@@ -540,6 +547,28 @@
 
               
             }
+          } else if (input$ion_viz3=="viz_first") {
+            
+            
+            tol=0.05
+            #browser()
+            image_command <-Cardinal::image(overview_peaks_sel, 
+                                  col=cpal(input$color3),
+                                  #enhance=input$contrast3,
+                                  #smooth=input$smooth3,
+                                  scale=input$normalize3,
+                                  #superpose=input$superpose,
+                                  key=(input$colorkey3),
+                                  cex.axis=req(cex.axisp),
+                                  cex.lab=cex.labp,
+                                  cex.main=cex.mainp,
+                                  cex.sub=cex.subp,
+                                  mar=new_mar,
+                                  mgp=new_mgp
+            )
+            
+            print(image_command)
+            
           }
           
           
@@ -642,8 +671,8 @@
           
          if(!is.null(overview_peaks_sel)) {
            
-           updateSliderInput(session, ns("int_range_plot"), value = c(round(Cardinal::plot(req(overview_peaks_sel))$channels$y$limits[1],0), 
-                                                                      round(Cardinal::plot(req(overview_peaks_sel))$channels$y$limits[1],0)))
+           updateSliderInput(session, ns("int_range_plot"), value = c(round(Cardinal::plot(req(overview_peaks_sel))$channels$y$limits,0) 
+                                                                      ))
            updateNumericInput(session, ns("param_numeric"), value = round(Cardinal::plot(req(overview_peaks_sel))$channels$y$limits[2],0))
           }
         

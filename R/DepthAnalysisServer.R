@@ -159,7 +159,7 @@ DepthAnalysisServer <- function(id,  setup_values) {
         )
         return(NULL)
       } else if (sum(paste0(runNames(x4$seg_file), ".imzML") %in% names(x1$raw_list)) < 1) {
-        #browser()
+        
         print("no raw file compatible with dataset")
         x4$seg_filename = "Choose a file compatible with the raw dataset"
         
@@ -174,7 +174,7 @@ DepthAnalysisServer <- function(id,  setup_values) {
       #if(is.null(input$stats_input_file))
       #  return()
       #print(input$stats_input_file)
-      #browser()
+      
       #renderPrint(cat(input$stats_input_file))
     })
     
@@ -202,13 +202,13 @@ DepthAnalysisServer <- function(id,  setup_values) {
                      
                      message("setting up coordinates and extracting pixels from raw data")
                      
-                     #browser()
+                     
                      
                      x1 = setup_values()[["x1"]] # bring in raw_files list
                      
                      setCardinalBPPARAM(par_mode())
                      
-                     #browser()
+                     
                      
                      #extract only runs available in raw list
                      
@@ -240,7 +240,7 @@ DepthAnalysisServer <- function(id,  setup_values) {
                      #if only using a subset of the segmented coordinates, reduce to those only in the coordinate set
                      coord_list_segmented <- coord_list_segmented[names(coord_list_segmented) %in% names(raw_list_ord)]
                      
-                     #browser()
+                     
                      
                      if (length(coord_list_segmented) != length(x1$raw_list)) {
                        print(
@@ -256,7 +256,7 @@ DepthAnalysisServer <- function(id,  setup_values) {
                            type = "warning"
                          )
                        
-                         #browser()
+                        
                          
                          coord_list_segmented <-
                            coord_list_segmented[!is.na(names(raw_list_ord))]
@@ -327,10 +327,11 @@ DepthAnalysisServer <- function(id,  setup_values) {
                      
                      
                      #most likely point of failure here....
-                     browser()
+                     
                      if (length(x1$raw_list) == 1) {
                        test_raw_reduced <-
                          select_pix(1, raw_list_ord[runNames(x1$raw_list[[1]])], coord_list_reduced)
+                       tmp_seg_coord_list<-list(test_raw_reduced)
                      } else if (length(x1$raw_list) > 1) {
                        tmp_seg_coord_list<-try( bplapply(1:length(raw_list_ord), function(x)
                          select_pix(x, raw_list_ord, coord_list_reduced)))
@@ -345,11 +346,13 @@ DepthAnalysisServer <- function(id,  setup_values) {
                        
                          tmp_names<-unlist(lapply(tmp_seg_coord_list, runNames))
                          names(tmp_seg_coord_list) <- tmp_names
-                         test_raw_reduced<-tmp_seg_coord_list[[1]]
+                         test_raw_reduced<-convertMSImagingExperiment2Arrays(tmp_seg_coord_list[[1]])
+
+                         
                          while(i< (length(tmp_seg_coord_list))){
                            k=i+1
-                           tmp<-tmp_seg_coord_list[[k]]
-                           test_raw_reduced<-try(combine_card(list(test_raw_reduced, tmp)))
+                           tmp<-convertMSImagingExperiment2Arrays(tmp_seg_coord_list[[k]])
+                           test_raw_reduced<-try(combine(test_raw_reduced, tmp))
                            
                            if(class(test_raw_reduced) %in% "try-error"){
                              message("combining imagesets failed, check data files")
@@ -375,18 +378,26 @@ DepthAnalysisServer <- function(id,  setup_values) {
                      }
                      #px_found<-unlist(lapply(1:length(runNames(test_raw_reduced)), function(x) dim(test_raw_reduced[,run(test_raw_reduced)%in%runNames(test_raw_reduced)[x]])[2]))
                      #raw_reduced<-combine(bplapply(1:length(raw_list), function(x) select_pix(x,raw_list, coord_list_reduced)))
-                     if (dim(test_raw_reduced)[2] != px_expected) {
+                     #browser()
+                     if (length(test_raw_reduced) != px_expected) {
                        print("reduced coordinate set does not match input coordinate set")
                        print("Run names from reduced coordinate set:")
                        print(runNames(test_raw_reduced))
                        print("")
                        print("Run names from raw data list:")
                        print(names(x1$raw_list))
-                       
-                       
-                       
                        return()
-                     }
+                     } else {
+                       
+                       test_raw_reduced<-convertMSImagingArrays2Experiment(test_raw_reduced)
+                       pData(test_raw_reduced)<-pData(seg_file_ord)
+                       
+                      }
+                     
+                       
+                       
+                       
+                     
                      
                      incProgress(amount = 0.2, message = "Coordinates mapped, now binning / pick picking")
                      #create final peak picked file
@@ -398,21 +409,31 @@ DepthAnalysisServer <- function(id,  setup_values) {
                        print("performing untargeted analysis")
                        
                        x4$seg_pp_file <-
-                         HTS_reproc(
+                         try(HTS_reproc(
                            test_raw_reduced,
                            SN = input$SNR2,
                            res = input$res,
                            align_tol = input$tol2,
                            method = input$pp_method2,
                            freq.min = input$freq_min2
-                         )
+                         ))
+                       
+                       if(class(x4$seg_pp_file) %in% "try-error") {
+                         print("peak picking failed, check input files and parameters")
+                         showNotification("Peak picking failed, check input files and parameters.", type = "error")
+                         return()
+                       }
+                       
+                       
+                       
+                       
                      } else if (input$targeted_pp == "mean") {
                        #setCardinalBPPARAM(SerialParam())
                        
                        
                        print("using mean spectrum to create peak list and bin raw data")
                        
-                       #browser()
+                       
                        
                        
                        test_mz_mean <- try(
@@ -420,6 +441,8 @@ DepthAnalysisServer <- function(id,  setup_values) {
                          #Cardinal::combine(x1$raw_list[c(1:3,5:8)]) %>%
                          # convertMSImagingExperiment2Arrays(test_raw_reduced) %>%
                          #   convertMSImagingArrays2Experiment(mass.range=c(setup_values()[["mz_max"]], setup_values()[["mz_min"]])) %>%
+                         
+                         
                          Cardinal::combine(lapply(tmp_seg_coord_list, convertMSImagingExperiment2Arrays)) %>%
                            convertMSImagingArrays2Experiment(mass.range=c(setup_values()[["mz_max"]], setup_values()[["mz_min"]])) %>%
                            estimateReferencePeaks( SNR=input$SNR2, 
@@ -517,6 +540,8 @@ DepthAnalysisServer <- function(id,  setup_values) {
                        #           tolerance = input$tol2,
                        #           units = "ppm") %>% process()
                        
+                       #browser()
+                       
                        tmp.img<-try(peakProcess(test_raw_reduced, 
                                                         ref=neg_ref_mz,
                                                         #SN=input$SNR,
@@ -531,6 +556,7 @@ DepthAnalysisServer <- function(id,  setup_values) {
                        featureData(x4$seg_pp_file)$ID <- neg_masses$ID
                      }
                      
+                    
                      #if using downsampling, re-bin
                      if (input$pix_for_peak_picking2 < 100) {
                        #combine reduced images.
@@ -581,8 +607,8 @@ DepthAnalysisServer <- function(id,  setup_values) {
                        
                      }
                      
-                     #browser()
-                     ordered_pdat<-pdat_match(pData(seg_file_ord), x4$seg_pp_file)
+                     
+                     ordered_pdat<-pdat_match(pdat=pData(seg_file_ord), msddf=x4$seg_pp_file)
                      
                      pData(x4$seg_pp_file) <- ordered_pdat
                      
@@ -649,14 +675,29 @@ DepthAnalysisServer <- function(id,  setup_values) {
       save_path <- shinyFiles::parseSavePath(volumes, input$save_imzml)
       if (nrow(save_path) == 0) return(NULL)
       
-      #browser()
+      
       filen <- as.character(save_path$datapath)
       
         pk_img <- x4$seg_pp_file
         #pData(pk_img) <- pData(x4$seg_file_trimmed)
         writeImzML(pk_img, filen)
+        saveRDS(pk_img, paste0(filen,".rds"))
       }
     )
     
+    # output$save_state2 <- downloadHandler(
+    #   filename = function() {
+    #     paste0(getwd(),
+    #            "/MSI-depth_picked_SN-peak_picked-",
+    #            Sys.Date(),
+    #            ".rds")
+    #   },
+    #   content = function(filen) {
+    #     #
+    #     pk_img <- x4$seg_pp_file
+    #     #pData(pk_img) <- pData(x4$seg_file_trimmed)
+    #     saveRDS(pk_img, filen)
+    #   }
+    #) 
   })
 }

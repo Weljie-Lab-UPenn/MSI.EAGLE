@@ -10,7 +10,7 @@ DataSetupServer <- function(id, rawd, wd) {
         input$pp_params,
         "qtof1" = list(
           numericInput(ns("res"), "resolution for peakpicking (ppm), NA for estimate", NA),
-          numericInput(ns("tol"), "tolerance for spectral alignment (ppm)", 30),
+          numericInput(ns("tol"), "tolerance for spectral alignment (ppm)", 20),
           numericInput(
             ns("mass_range_min"),
             label = p("m/z min for import"),

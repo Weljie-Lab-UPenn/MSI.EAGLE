@@ -268,7 +268,7 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       save_path <- shinyFiles::parseSavePath(volumes, input$save_imzml)
       if (nrow(save_path) == 0) return(NULL)
       
-      #browser()
+      browser()
       filen <- as.character(save_path$datapath)
       pk_img <- x3$img.dat
       pData(pk_img)<-x3$pdata

@@ -31,7 +31,7 @@ StatsPrepServer <- function(id,  setup_values) {
                      session,
                      ns('peakPickfile'),
                      choices = grep(
-                       "rds|RData",
+                       "rds|RData|imzML$",
                        my_files(),
                        ignore.case = T,
                        value = T
@@ -112,7 +112,7 @@ StatsPrepServer <- function(id,  setup_values) {
       #
       #
       # ,
-      #browser()
+     
     })
     
     
@@ -148,7 +148,7 @@ StatsPrepServer <- function(id,  setup_values) {
         ns("stats_input_file"),
         "Imageset for analysis",
         grep(
-          "imzML$",
+          "imzML$|rds|RData",
           my_files(),
           ignore.case = T,
           value = T
@@ -157,15 +157,24 @@ StatsPrepServer <- function(id,  setup_values) {
     })
     
     observeEvent(input$action_read_stats, {
-      if (is.null(input$stats_input_file))
-        return()
+      req(input$stats_input_file)
+        
       
-      x5$data_file <- (readMSIData(input$stats_input_file))
+      
+     
+      
+      if(length(grep("rds", input$stats_input_file)>0)) {
+      
+        x5$data_file <- readRDS(input$stats_input_file)
+      } else {
+        x5$data_file <- readMSIData(input$stats_input_file)
+        #x5$data_file <- readImzML(input$stats_input_file)
+        }
       print(x5$data_file)
       
       if (!is.na(input$debug_n)) {
         message("selecting peaks for debugging")
-        #browser()
+        
         if (dim(x5$data_file)[1] < input$debug_n) {
           message("more debug peaks than features, keeping all peaks")
         } else {
@@ -199,7 +208,7 @@ StatsPrepServer <- function(id,  setup_values) {
       #if(is.null(input$stats_input_file))
       #  return()
       #print(input$stats_input_file)
-      #browser()
+      
       #renderPrint(cat(input$stats_input_file))
     })
     
@@ -330,7 +339,7 @@ StatsPrepServer <- function(id,  setup_values) {
         
         selectInput(
           ns("phen_interaction_stats"),
-          "Choose interaction for grouping",
+          "Choose sample definition variable(s)",
           choices  = c("none", 1, x5$phen_options),
           multiple = T
         )
@@ -484,7 +493,7 @@ StatsPrepServer <- function(id,  setup_values) {
       
       withProgress(message = "Running stats test", value = 0.2, {
         print("running test")
-        #browser()
+        
         
         #create selected data file. The ANOVA variables necessiate a slightly more complex selection
         if (!is.null(input$anova_type) &&
@@ -496,7 +505,7 @@ StatsPrepServer <- function(id,  setup_values) {
             return()
           }
           
-          #browser()
+          
           members <-
             data.frame(t = input$test_membership) %>% tidyr::separate(
               col = t,
@@ -527,10 +536,10 @@ StatsPrepServer <- function(id,  setup_values) {
           #x5$data_file_selected = x5$data_file[1:100,as.data.frame(pData(x5$data_file))[,input$phen_cols_stats]%in%input$test_membership]
           
         }
-        #browser()
+        
         print("checking groups")
         
-        #browser()
+        
         
         #TODO check this..!
         if (input$stats_test == "anova") {
@@ -585,17 +594,17 @@ StatsPrepServer <- function(id,  setup_values) {
         
         
         if (input$stats_test == "meanstest") {
-          #browser()
+          
           
           select_vec <-
             as.data.frame(pData(x5$data_file))[, input$phen_cols_stats] %in% input$test_membership
           
           x5$data_file_selected = x5$data_file[, select_vec]
           
-          #browser()
+          
           
           message("performing means test")
-          #browser()
+          
           
           if (input$phen_cols_stats == "run") {
             pData(x5$data_file_selected)$run <- run(x5$data_file_selected)
@@ -606,7 +615,7 @@ StatsPrepServer <- function(id,  setup_values) {
           mt <- 
             try(meansTest(x5$data_file_selected[, ],
                       as.formula(paste0("~", input$phen_cols_stats)),
-                      groups =
+                      samples =
                         droplevels(groupsx)))
           #mt2<-meansTest(x5$data_file_selected, as.formula(paste("~", input$phen_cols_stats)), groups=droplevels(x5$data_file_selected$Plate.Group))
           
@@ -614,6 +623,7 @@ StatsPrepServer <- function(id,  setup_values) {
             print("meanstest failed. check data and data size")
             return()
           }
+          
           
           
           #code to debug error in meanstest
@@ -628,31 +638,36 @@ StatsPrepServer <- function(id,  setup_values) {
           # 
           #some QC on results-- make sure values are finite, and not NaN, check first 10% of values
           #if(class(try(summary(mt)))=="try-error"){
-          if (sum(class(resultData(mt)[[1]]$model) %in% "try-error") > 0) {
+          
+      
+          
+          if (class(mt@listData[[1]]$model) %in% "try-error") {
             print("cannot create meanstest summary, check grouping variable(s)")
             return()
           }
           
           # check summary results are not NaN
-          ntests = max(round(length(resultData(mt)) / 100), 1)
           
-          if (sum(is.nan(summary(mt[1:ntests])$PValue)) == ntests) {
-            message("first 1% of PValues are NaN, checking median PValue")
-            
-            if (is.nan(summary(mt[median(1:length(resultData(mt)))])$PValue)) {
-              message("Median value Nan, check grouping variable!  ")
-              return(NULL)
-              
-            } else {
-              message("median value non NaN, continuing")
-            }
-          }
+          
+          ntests = max(round(length(mt@listData) / 100), 1)
+          
+          # if (sum(is.nan(summary(mt[1:ntests])$PValue)) == ntests) {
+          #   message("first 1% of PValues are NaN, checking median PValue")
+          #   
+          #   if (is.nan(summary(mt[median(1:length(resultData(mt)))])$PValue)) {
+          #     message("Median value Nan, check grouping variable!  ")
+          #     return(NULL)
+          #     
+          #   } else {
+          #     message("median value non NaN, continuing")
+          #   }
+          # }
           incProgress(amount = 0.5, message = "extracting top features... can take a while for large datasets")
           print("extracting top features... can take a while for large datasets")
           
           
           stats_results <-
-            as.data.frame(topFeatures(mt, n = dim(mt)[1], p.adjust = "BH"))
+            as.data.frame(topFeatures(mt, n=length(mt), p.adjust="BH"))
           x5$stats_results <- stats_results
           
           #x5$stats_results<-Cardinal::subset(x5$stats_results, AdjP<as.numeric(input$FDR_val))
@@ -821,7 +836,7 @@ StatsPrepServer <- function(id,  setup_values) {
             "Spatial DGMM test complete, check Output table tab for table and check FDR cutoff if results not visible."
           )
         } else if (input$stats_test == "anova") {
-          #browser()
+          
           req(input$aov_vars1)
           
           
@@ -841,7 +856,7 @@ StatsPrepServer <- function(id,  setup_values) {
               )
             )
           
-          #browser()
+          
           #dat_long_tech_avg<- dat_long %>% group_by(eval(input$phen_interaction_stats), mz) %>%
           if (sum(input$grouping_variables %in% "none") == 1) {
             print("'none' selected for grouping, so no groupings will be used. Check carefully")
@@ -895,16 +910,16 @@ StatsPrepServer <- function(id,  setup_values) {
           } else {
             print("no 'sample_id' thus proportions not calculated")
           }
-          #browser()
+          
           
           #eventually use lapply or bplapply???
           #create vector of mz values
           
-          #browser()
+          
           if (input$anova_type == "anova_oneway") {
             #this order for input$aov_vars: anova_choices=c("Subject", "Within condition", "Within time")
             
-            #browser()
+            
             #test for more than one variable / group / mz
             x = dat_long_tech_avg$mz[1]
             a <-
@@ -955,7 +970,7 @@ StatsPrepServer <- function(id,  setup_values) {
             #plots modelled from here
             #https://csdaw.github.io/ggprism/articles/pvalues.html
             
-            #browser()
+            
             fm = as.formula(paste0(
               "tech_avg ~",
               input$aov_vars1,
@@ -967,7 +982,7 @@ StatsPrepServer <- function(id,  setup_values) {
               as.data.frame(na.omit(dat_long_tech_avg))[dat_long_tech_avg$mz %in% x, ] %>% rstatix::anova_test(fm)))
             
             if (class(anova_list) == "try-error") {
-              #browser()
+              
               table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz ==
                                                                            mzs[1]) %>% select(.data[[input$aov_vars1]]))
               table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz ==
@@ -1007,7 +1022,7 @@ StatsPrepServer <- function(id,  setup_values) {
               print("Both variables cannot be the same for two-way ANOVA")
               return()
             }
-            #browser()
+            
             #formula for simple two way interaction ANOVA
             fm = as.formula(paste0(
               "tech_avg ~",
@@ -1024,7 +1039,7 @@ StatsPrepServer <- function(id,  setup_values) {
                                                               mz(mzs)[1], ] %>% rstatix::anova_test(fm))
             
             if (sum(class(test_aov) %in% "try-error") > 0) {
-              #browser()
+              
               table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz ==
                                                                            mz(mzs)[1]) %>% select(.data[[input$aov_vars1]]))
               table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz ==
@@ -1037,7 +1052,7 @@ StatsPrepServer <- function(id,  setup_values) {
             nm = table(attributes(test_aov)$args$data[, input$phen_cols_stats])
             
             if (min(nm) < 3) {
-              #browser()
+              
               showModal(modalDialog(
                 title = "Sample size warning!",
                 HTML(paste(
@@ -1092,7 +1107,7 @@ StatsPrepServer <- function(id,  setup_values) {
             
           } else if (input$anova_type == "between_interacting") {
             #order of variables is: anova_choices=c( "Variable 1", "Variable 2", "Subject")
-            #browser()
+            
             
             if (max(table(
               c(
@@ -1104,7 +1119,7 @@ StatsPrepServer <- function(id,  setup_values) {
               print("Require unique subject and predictor variables")
               return()
             }
-            #browser()
+            
             #formula for simple two way interaction ANOVA
             fm = as.formula(
               paste0(
@@ -1154,7 +1169,7 @@ StatsPrepServer <- function(id,  setup_values) {
             #   )
             #
             # }
-            #browser()
+            
             test_aov <- try(two_way_rep(
               dat = dat_long_tech_avg,
               mz_sel = mzs@mz[1],
@@ -1164,7 +1179,7 @@ StatsPrepServer <- function(id,  setup_values) {
             ))
             
             if (class(test_aov) == "try-error") {
-              #browser()
+              
               table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz ==
                                                                            mzs@mz[1]) %>% select(.data[[input$aov_vars1]]))
               table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz ==
@@ -1181,7 +1196,7 @@ StatsPrepServer <- function(id,  setup_values) {
             nm = table(attributes(test_aov)$args$data[, input$phen_cols_stats])
             
             if (min(nm) < 3) {
-              #browser()
+              
               showModal(modalDialog(
                 title = "Sample size warning!",
                 HTML(paste(
@@ -1243,7 +1258,7 @@ StatsPrepServer <- function(id,  setup_values) {
             "ANOVA test complete, Output table tab for table and check FDR cutoff if results not visible."
           )
           
-          #browser()
+          
           
           
           #p_val(dat_long_tech_avg, mzs[2])
@@ -1253,7 +1268,7 @@ StatsPrepServer <- function(id,  setup_values) {
           #adjustp<-apply(pvals, 2, p.adjust)
           # colnames(adjustp)<-paste0(colnames(pvals),".BH")
           #
-          # #browser()
+          # 
           # x5$stats_results<-as.data.frame(cbind(mz=mzs, feature=feats, pvals, adjustp))
           
         } #end of total anova testing
@@ -1264,7 +1279,7 @@ StatsPrepServer <- function(id,  setup_values) {
       #req(input$output_factors)
       req(input$grouping_variables_export)
       
-      #browser()
+      
       
       numdat <- as.matrix(spectra(x5$data_file))
       rownames(numdat) <- mz(x5$data_file)
@@ -1293,7 +1308,7 @@ StatsPrepServer <- function(id,  setup_values) {
     
     observeEvent(input$mummichog, {
       req(x5$stats_results)
-      #browser()
+      
       
       if (input$stats_test %in% c("meanstest", "spatialDGMM")) {
         dat <- x5$stats_results %>%
@@ -1334,7 +1349,7 @@ StatsPrepServer <- function(id,  setup_values) {
     
     observeEvent(input$metaboanalyst, {
       req(x5$stats_results)
-      #browser()
+      
       
       if (input$stats_test %in% c("meanstest", "spatialDGMM")) {
         dat <- x5$stats_results %>%
@@ -1384,7 +1399,7 @@ StatsPrepServer <- function(id,  setup_values) {
       #   print("need to generate meansplots first")
       # }
       
-      #browser()
+      
       
       input_image_dataset <- x5$data_file_selected
       parent_image_dataset <- x5$source_file
@@ -1417,7 +1432,7 @@ StatsPrepServer <- function(id,  setup_values) {
         
         
       } else if (input$stats_test == "meanstest") {
-        #browser()
+        
         print("Saving model")
         means_model <- x5$test_result
         means_test <- x5$test_result_feature_test
@@ -1494,7 +1509,7 @@ StatsPrepServer <- function(id,  setup_values) {
     
     
     observeEvent(input$restore_stats_models, {
-      #browser()
+      
       
       #req(x5$test_result)
       #req(x5$data_file_selected)
@@ -1523,7 +1538,7 @@ StatsPrepServer <- function(id,  setup_values) {
       }
       
       #restore anova models?? test for test type in filename etc
-      #browser()
+      
       if (grepl("means", x5$model_restore_path, ignore.case = T)) {
         selected_test <- "meanstest"
         x5$data_file_selected <- input_image_dataset
@@ -1544,7 +1559,7 @@ StatsPrepServer <- function(id,  setup_values) {
         updateSelectInput(
           session = session,
           ns("phen_interaction_stats"),
-          "Choose interaction for grouping",
+          "Choose sample definition variable(s)",
           choices  = c("none", 1, x5$phen_options),
           selected = input$phen_cols_stats
         )
@@ -1627,7 +1642,7 @@ StatsPrepServer <- function(id,  setup_values) {
     observeEvent(input$write_plots, {
       req(x5$stats_results)
       
-      #browser()
+      
       
       wd <- getwd()
       dir.create(file.path(wd, "plots"), showWarnings = FALSE)
@@ -1668,7 +1683,7 @@ StatsPrepServer <- function(id,  setup_values) {
                 # The width of the plot in inches
                 height = 4
               ) # The height of the plot in inches
-              #browser()
+              
               
               #for means test
               if (input$stats_test == "meanstest") {
@@ -1748,7 +1763,7 @@ StatsPrepServer <- function(id,  setup_values) {
     observe({
       if (is.null(x5$data_file_selected))
         return()
-      #browser()
+      
       req(input$mytable_stats_plate_rows_selected)
       ids <- input$mytable_stats_plate_rows_selected
       x5$mytable_stats_plate_selected <-
@@ -1758,7 +1773,7 @@ StatsPrepServer <- function(id,  setup_values) {
     observe({
       req(x5$data_file_selected)
       req(x5$mytable_stats_plate_selected)
-      #browser()
+      
       x5$tf_list <-
         !is.na(prodlim::row.match(as.data.frame(
           coord(x5$mytable_stats_plate_selected)
@@ -1798,7 +1813,7 @@ StatsPrepServer <- function(id,  setup_values) {
     #
     #   #TODO - use an external module for visualization here
     #   # if (input$ion_viz=="viz_all") {
-    #   #   browser()
+    #   #   
     #   #
     #   #  plusminus=input$plusminus_viz
     #     plusminus=1
@@ -1830,19 +1845,24 @@ StatsPrepServer <- function(id,  setup_values) {
       req(x5$stats_results)
       dat <- x5$stats_results
       
+      browser()
       
-      #browser()
       # if (input$stats_test %in% c("meanstest", "spatialDGMM")) {
       #   dat$AdjP <- round(dat$AdjP, 4)
       #   dat$PValue <- round(dat$PValue, 4)
       # }
       #
-      #browser()
+      
+      
       #apply FDR filter and round
       if (input$stats_test %in% c("meanstest", "spatialDGMM")) {
-        dat <- dat %>%
-          dplyr::filter(AdjP <= input$FDR_val) %>%
-          dplyr::mutate_at(dplyr::vars(PValue, AdjP), ~ (round(., 5)))
+        dat <- x5$stats_results %>%
+          dplyr::filter(fdr <= input$FDR_val) %>%
+            dplyr::mutate(
+              pvalue = formatC(pvalue, format = "fg", digits = 3),
+              fdr = formatC(fdr, format = "fg", digits = 3),
+              statistic = formatC(statistic, format = "fg", digits = 4)
+            )
         
         
         
@@ -1897,7 +1917,7 @@ StatsPrepServer <- function(id,  setup_values) {
           
         } else {
           print("more than two labels in test data, FC not computed")
-          #browser()
+          
           #calculate group statistics
           groups_clean<-as.factor(as.data.frame(
             pData(
@@ -1907,22 +1927,48 @@ StatsPrepServer <- function(id,  setup_values) {
           
           groups_clean<-droplevels(groups_clean)
           
+         
+          
           mean_spectra <-
-            as.data.frame(
+            as.data.frame(fData(
               summarizeFeatures(
                 x5$data_file_selected %>% subsetFeatures(mz %in% dat$mz),
-                groups = groups_clean,
-                as = "DataFrame"
-              )
-            )
+                groups = groups_clean
+              )))
+          
+          #find max from each row, only from columns not named mz or mean in temp_means
+          
+
+          #create temp dataset with only columns of interest
+          pattern <- "^mz$|^mean$|^mean\\..*$|^ID\\..|^ID$"
+          
+          # Use grep to identify columns that match the pattern
+          cols_to_exclude <- grep(pattern, names(mean_spectra))
+          
+          # Exclude those columns using negative indexing
+          df_filtered <- mean_spectra[, -cols_to_exclude]
+          
+          
+          
           temp_means <-
-            cbind(round(mean_spectra[], 4),
-                  max_mean_group = colnames(mean_spectra[,-1])[max.col(mean_spectra[,-1])])
+            cbind( 
+                  round(df_filtered[], 4),
+                  max_mean_group = colnames(df_filtered)[max.col(df_filtered)]
+                  )
+          if(!is.null(mean_spectra$ID)){
+            temp_means <- cbind(mz=round(mean_spectra$mz,4), ID=mean_spectra$ID, temp_means)
+          } else {
+            temp_means <- cbind(mz=round(mean_spectra$mz,4), temp_means)
+          }
+          
+          
           dat$mz <- round(dat$mz, 4)
-          temp_means <-
-            cbind(temp_means, feature = 1:dim(temp_means)[1])
-          dat <- merge(dat, temp_means, by="mz") %>% dplyr::mutate(feature=feature.x)
+          #temp_means <-
+          #  cbind(temp_means, i = 1:dim(temp_means)[1])
+          dat <- merge(dat, temp_means, by="mz") #%>% dplyr::mutate(i=i.x)
           #dat2 <- dat[dat$feature[(x5$stats_results$feature)],] #what is this doing and why?
+          
+          
           x5$stats_table_filtered <- dat
           
         }
@@ -1932,7 +1978,7 @@ StatsPrepServer <- function(id,  setup_values) {
       
       
       
-      #browser()
+      
       
       #add fold change data if available for meanstest, ssctest, and spatialDGMM
       #with condition that only two groups are in the test group for now
@@ -1944,7 +1990,7 @@ StatsPrepServer <- function(id,  setup_values) {
       
       DT::datatable(
         dat,
-        selection = list(mode = "single"),
+        selection = list(mode = "multiple", selected = "none"),
         caption = "Results",
         editable = FALSE,
         #server = FALSE,
@@ -1968,7 +2014,7 @@ StatsPrepServer <- function(id,  setup_values) {
       
       png(outfile, width = 800, height = 600)
       
-      #browser()
+      
       plate1 <-
         x5$data_file_selected[, Cardinal::run(x5$data_file_selected) %in% runNames(x5$data_file_selected)[1]]
       
@@ -2022,12 +2068,12 @@ StatsPrepServer <- function(id,  setup_values) {
       outfile <- tempfile(fileext = '.png')
       
       png(outfile, width = 800, height = 600)
-      #browser()
+      
       
       dat <- x5$stats_table_filtered
       
       #get row from orignial dataset corresponding to selected data
-      m =  which(x5$stats_results$feature %in% dat[input$stats_table_rows_selected, ]$feature)
+      m =  which(x5$stats_results$i %in% dat[input$stats_table_rows_selected, ]$i)
       if (input$stats_test == "ssctest") {
         m = which(round(x5$stats_results$mz, 4) %in% dat[input$stats_table_rows_selected, ]$mz)
       }
@@ -2038,33 +2084,60 @@ StatsPrepServer <- function(id,  setup_values) {
         mycols = ggsci::pal_npg()(as.data.frame(pData(x5$data_file_selected))[, input$phen_cols_stats] %>%
                                     factor() %>% droplevels() %>%
                                     levels() %>% length())
+        
+        
+        #print base plot
+        nplots=length(input$stats_table_rows_selected)
+        mplot <- F
+        
+        
+        #going to ignore mean plots for now, will come back if needed later
+        # if (!is.null(input$output_factors)) {
+        #   print("adding means plot across multiple conditions")
+        #   mplot <- T
+        #   nplots <- nplots + 1
+        # }
+        
+       
+         
         p1 <-
           plot(
             x5$test_result,
-            model = list(dat[input$stats_table_rows_selected, ]$feature),
+            i = c(dat[input$stats_table_rows_selected, ]$i),
             col = mycols,
-            las = 0
+            las = 0,
+            fill=T,
+            panel.first = NULL,
+            panel.last=NULL
           )
-        nplots <- length(p1$facets)
+        print(p1)
+        title_t=paste(
+          "mz= ",
+          round(x5$stats_results$mz[m], 4),
+          " FDR= ",
+          round(x5$stats_results$fdr[m], 2)
+        )
         
-        mplot <- F
+        
+        
+        # p1 <-
+        #   plot(
+        #     x5$test_result,
+        #     i = c(dat[input$stats_table_rows_selected, ]$i),
+        #     col = mycols,
+        #     las = 0,
+        #     fill=T
+        #   )
+        # nplots <- length(p1$plots)
+        # 
         
         
         #TODO NEED to sort out getting aov vars with the means test... how should this work??
         #Also need to test if there are enough variables with aov plots and skip if not
-        if (!is.null(input$output_factors)) {
-          print("adding means plot across multiple conditions")
-          mplot <- T
-          nplots <- nplots + 1
-        }
+
         
-        print(p1, layout = n2mfrow(nplots))
-        title(paste(
-          "mz= ",
-          round(x5$stats_results$mz[m], 4),
-          " FDR= ",
-          round(x5$stats_results$AdjP[m], 2)
-        ))
+       
+
         
         #print(plot(x5$test_result_feature_test, model=list(x5$stats_results$feature[m])), layout=FALSE)
         #title(paste("mz= ",round(x5$stats_results$mz[m],4)," FDR= ", round(x5$stats_results$AdjP[m],2)))
@@ -2072,24 +2145,46 @@ StatsPrepServer <- function(id,  setup_values) {
         
         if (mplot == T) {
           #require(gplots)
-          #browser()
+          
           #mzdat=subset(x5$test_result, mz==x5$stats_results$mz[m])
           # a<-as.matrix(iData(x5$data_file_selected[which(mz(x5$data_file_selected)%in%x5$stats_results$mz[m]),]))
           # b<-pData(x5$data_file_selected[which(mz(x5$data_file_selected)%in%x5$stats_results$mz[m]),])
           # dat=cbind(run=Cardinal::run(x5$data_file_selected),b,value=a[1,])
           #
+          
+          #get spectra for currently selected table ions (m)
           a <-
-            as.matrix(spectra(x5$data_file_selected[which(mz(x5$data_file_selected) %in%
-                                                          x5$stats_results$mz[m]), ]))
+            as.matrix(
+              spectra(
+                x5$data_file_selected[
+                  which(
+                    mz(x5$data_file_selected
+                       ) %in%x5$stats_results$mz[m]
+                  ), 
+                  ]
+                )
+              )
+          
+          #get metadata (pdata) for currently selected table ions (m)
           b <-
-            as.data.frame(pData(x5$data_file_selected[which(mz(x5$data_file_selected) %in%
-                                                              x5$stats_results$mz[m]), ]))
-          dat = cbind(b, value = a[1, ])
+            as.data.frame(
+              pData(
+                x5$data_file_selected[
+                  which(
+                    mz(
+                      x5$data_file_selected
+                      ) %in% x5$stats_results$mz[m]
+                          
+                    ), 
+                  ]
+                )
+              )
+          dat2 = cbind(b, value = a)
           
           
           #dat_long_tech_avg<- as.data.frame(na.omit(dat)) %>% dplyr::group_by_at(c(input$aov_vars1, input$aov_vars2, input$aov_vars3)) %>%
           dat_long_tech_avg <-
-            dat %>% dplyr::group_by_at(c(input$phen_cols_stats, x5$group_var)) %>%
+            dat2 %>% dplyr::group_by_at(c(input$phen_cols_stats, x5$group_var)) %>%
             dplyr::summarize(tech_avg = mean(value),
                              .groups = "keep")  %>% na.omit()
           
@@ -2097,21 +2192,70 @@ StatsPrepServer <- function(id,  setup_values) {
           
           fm <-
             as.formula(paste0("tech_avg~", input$phen_cols_stats))
-          #browser()
-          print(
-            gplots::plotmeans(
-              fm,
-              dat_long_tech_avg,
-              mean.labels = T,
-              digits = 1,
-              las = 2
-            ),
-            layout = FALSE
-          )
-        }
+          
+          df_summary <- dat_long_tech_avg %>%
+            dplyr::group_by(dplyr::across(dplyr::all_of(input$phen_cols_stats))) %>%
+            dplyr::summarize(
+              mean_tech_avg = mean(tech_avg),
+              se_tech_avg = sd(tech_avg) / sqrt(dplyr::n())
+            )
+          
+          # View the summary data
+          df_summary
+          
+          
+          p2<-ggplot2::ggplot(df_summary, ggplot2::aes_string(x = input$phen_cols_stats, y = "mean_tech_avg")) +
+            ggplot2::geom_point(size = 3) + 
+            ggplot2::geom_errorbar(ggplot2::aes(ymin = mean_tech_avg - se_tech_avg, ymax = mean_tech_avg + se_tech_avg), width = 0.2) +
+            ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "gray") + 
+            ggplot2::theme_minimal() +
+            ggplot2::labs(
+              x = "",
+              y = "Mean (normalized intensity, a.u.)",
+              title = title_t
+            ) +
+            ggprism::theme_prism()+
+            ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
+          
+          x=df_summary[[input$phen_cols_stats]]
+          y=df_summary$mean_tech_avg
+          ymin=df_summary$mean_tech_avg-df_summary$se_tech_avg
+          ymax=df_summary$mean_tech_avg+df_summary$se_tech_avg
+          
+          
+          
+           p2<-vizi( x=x, y = y,
+            ymin = ymin, ymax=ymax) 
+           
+
+            p2<- add_mark(p2,
+                "intervals",
+             ) 
+            
+    
+
+          #
+          browser()
+          matter::as_facets(p1, p2, ncol = 1)
+          
+          
+          
+        #   print(
+        #     gplots::plotmeans(
+        #       fm,
+        #       dat_long_tech_avg,
+        #       mean.labels = T,
+        #       digits = 1,
+        #       las = 2
+        #     ),
+        #     layout = FALSE
+        #   )
+         } else {
+          print(p1)
+         }
       } else if (input$stats_test %in% c("spatialDGMM")) {
         req(x5$stats_results)
-        #browser()
+        
         mycols = ggsci::pal_npg()(length(droplevels(as.factor((as.data.frame(pData(
           x5$data_file_selected
         )[, input$phen_cols_stats]))
@@ -2155,7 +2299,7 @@ StatsPrepServer <- function(id,  setup_values) {
         
         
         if (mplot == T) {
-          #browser()
+          
           #require(gplots)
           #mzdat=subset(x5$test_result, mz==x5$stats_results$mz[m])
           a <-
@@ -2204,7 +2348,7 @@ StatsPrepServer <- function(id,  setup_values) {
         
         
       } else if (input$stats_test == "anova") {
-        #browser()
+        
         #dev.new()
         
         #library(gplots)
@@ -2277,7 +2421,7 @@ StatsPrepServer <- function(id,  setup_values) {
         } else if (input$anova_type %in% c("anova_add",
                                            "anova_interaction",
                                            "between_interacting")) {
-          #browser()
+          
           
           #library(ggpubr)
           #library(ggprism)
@@ -2385,7 +2529,7 @@ StatsPrepServer <- function(id,  setup_values) {
           
           
           
-          #browser()
+          
           #add anova plots? qq plots, anything else?
           sig_cols <-
             grep("BH|mz|ID",
@@ -2459,7 +2603,7 @@ StatsPrepServer <- function(id,  setup_values) {
         
         
       } else if (input$stats_test == "ssctest") {
-        #browser()
+        
         #require(gplots)
         #mzdat=subset(x5$test_result, mz==x5$stats_results$mz[m])
         a <-
@@ -2504,7 +2648,7 @@ StatsPrepServer <- function(id,  setup_values) {
         acc = as.data.frame(summary(x5$test_result))$Accuracy
         idx = which(acc %in% max(acc))
         
-        #browser()
+        
         mycols = ggsci::pal_npg()(length(droplevels(as.factor((as.data.frame(pData(
           x5$data_file_selected
         )[, input$phen_cols_stats]))

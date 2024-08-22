@@ -86,7 +86,8 @@ PeakPickServer <- function(id, setup_values) {
             c("Yes" = "pp_y")
           ),
           uiOutput(ns('pk_file')),
-          actionButton(ns("action"), label = HTML("Restore saved file"))
+          actionButton(ns("action"), label = HTML("Restore saved file")),
+          shinyFiles::shinySaveButton(ns("save_imzml"), "Save imzML File", "Save", filetype = list(""))
         ),
         "pp_raw" = list(
           radioButtons(
@@ -338,7 +339,7 @@ PeakPickServer <- function(id, setup_values) {
                        #    return()
                        #  }
                        # 
-                       
+                       browser() #figure out plan when 0 peaks picked. Also filter freq.
                        #use Cardinal 3.6 peak processing method
                        test_mz_reduced<-try(
                          peakProcess(
@@ -459,6 +460,8 @@ PeakPickServer <- function(id, setup_values) {
                                                 method=input$pp_method)
                        )
                        
+                       browser() #add check to see if 0 peaks picked...
+                       
                        #check class of test_mz_mean
                        if(class(test_mz_mean) %in% "try-error") {
                          print("mean spectrum peak picking failed, check input files")
@@ -475,7 +478,7 @@ PeakPickServer <- function(id, setup_values) {
                        
                        #test_mz_reduced  <- summarizeFeatures(test_mz_reduced)
                        
-
+                      
                        if(class(test_mz_reduced) %in% "try-error") {
                          print("peak picking failed, check input files")
                          showNotification("Mean spectrum peak picking failed, check input files.", type = "error")
@@ -745,8 +748,7 @@ PeakPickServer <- function(id, setup_values) {
       
       x2$overview_peaks_sel <- combine_card(b)
       
-      
-      
+
       plot_card_server("card_plot", overview_peaks_sel = x2$overview_peaks_sel)
       
       

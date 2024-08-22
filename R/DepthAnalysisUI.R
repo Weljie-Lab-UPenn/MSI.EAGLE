@@ -16,8 +16,8 @@ DepthAnalysisUI <- function(id) {
                uiOutput(ns("pp_options")),
                actionButton(ns("action_seg_run"), label = HTML("Peak pick or bin segmented data")),
                #downloadButton(ns("save_state2"), "Save binned file")
-               shinyFiles::shinySaveButton(ns("save_imzml"), "Save imzML File", "Save", filetype = list(""))
-  
+               shinyFiles::shinySaveButton(ns("save_imzml"), "Save imzML and .rds Files", "Save", filetype = list("")),
+               #downloadButton(ns("save_state2"), "Save .rds file")
                
              ),
              mainPanel(
