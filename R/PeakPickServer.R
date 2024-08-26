@@ -206,7 +206,7 @@ PeakPickServer <- function(id, setup_values) {
             ns("pp_method"),
             "Peak picking method",
             choices = c("diff", "sd", "mad", "quantile", "filter", "cwt"),
-            selected = "mad"
+            selected = "diff"
           ),
           numericInput(
             ns("freq_min"),
@@ -431,16 +431,14 @@ PeakPickServer <- function(id, setup_values) {
                        print(test_mz_reduced)
                        setCardinalBPPARAM(par_mode())
                        
-                       tol = tol = setup_values()[["tol"]]
                        
+                       a<-Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays))
                        
-                       overview_peaks <- try (
-                         Cardinal::combine(lapply(
-                           x1$raw_list,
-                           ref_to_peaks,
-                           mz_ref = mz(test_mz_reduced),
-                           tol = tol
-                         ))
+                       overview_peaks <- try(peakProcess(a,
+                                                         ref=mz(test_mz_reduced),
+                                                         SN=input$SNR,
+                                                         type="area",
+                                                         tolerance=setup_values()[["tol"]], units="ppm") %>% process() %>% summarizeFeatures()
                        )
                        
                        if(class(overview_peaks) %in% "try-error"){
@@ -457,7 +455,6 @@ PeakPickServer <- function(id, setup_values) {
                          return()
                        }
                        
-                       #browser()
                        
                        
                        #check mz_min and mz_max to make sure they are not the same
@@ -481,7 +478,8 @@ PeakPickServer <- function(id, setup_values) {
                                                 method=input$pp_method)
                        )
                        
-                       browser() #add check to see if 0 peaks picked...
+                       print(test_mz_mean)
+                       #add check to see if 0 peaks picked...
                        
                        #check class of test_mz_mean
                        if(class(test_mz_mean) %in% "try-error") {
@@ -490,27 +488,29 @@ PeakPickServer <- function(id, setup_values) {
                          return()
                        }
                        
-                       # test_mz_reduced<-try(peakProcess(Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)), 
-                       #                           ref=mz(test_mz_mean),
-                       #                           SN=input$SNR,
-                       #                           type="area",
-                       #                           tolerance=setup_values()[["tol"]], units="ppm") %>% process() %>% summarizeFeatures()
-                       # )
-                       # 
-                       # #test_mz_reduced  <- summarizeFeatures(test_mz_reduced)
-                       # 
-                       # 
-                       # if(class(test_mz_reduced) %in% "try-error") {
-                       #   print("peak picking failed, check input files")
-                       #   showNotification("Mean spectrum peak picking failed, check input files.", type = "error")
-                       #   return()
-                       # }
+                       test_mz_reduced<-try(peakProcess(Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)),
+                                                 ref=mz(test_mz_mean),
+                                                 SN=input$SNR,
+                                                 type="area",
+                                                 tolerance=setup_values()[["tol"]], units="ppm") %>% process() %>% summarizeFeatures()
+                       )
+
+                       #test_mz_reduced  <- summarizeFeatures(test_mz_reduced)
+
+
+                       if(class(test_mz_reduced) %in% "try-error") {
+                         print("peak picking failed, check input files")
+                         showNotification("Mean spectrum peak picking failed, check input files.", type = "error")
+                         return()
+                       }
                        
                        setCardinalBPPARAM(par_mode())
                        
                        overview_peaks <-
                          test_mz_reduced
                        
+                       print(test_mz_reduced)
+                       #browser() #number of peaks not changing with SN?
                        
                      }
                      

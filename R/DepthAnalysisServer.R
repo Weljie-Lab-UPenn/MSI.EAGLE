@@ -451,7 +451,8 @@ DepthAnalysisServer <- function(id,  setup_values) {
                          return()
                        }
                        
-                       
+                       #report number of peaks picked
+                       print(paste0("Number of peaks picked: ", ncol(x4$seg_pp_file)))
                        
                        
                      } else if (input$targeted_pp == "mean") {
@@ -516,6 +517,8 @@ DepthAnalysisServer <- function(id,  setup_values) {
                        # 
                        x4$seg_pp_file <- test_mz_reduced2
                        
+                       print(paste0("Number of peaks picked: ", ncol(x4$seg_pp_file)))
+                       
                      } else if (input$targeted_pp == "targeted") {
                        print("performing targeted analysis")
                        print(paste0("Tolerance set to ", input$tol2))
@@ -577,6 +580,10 @@ DepthAnalysisServer <- function(id,  setup_values) {
                        )
                        
                        x4$seg_pp_file <-tmp.img
+                       
+                       #report number of masses binned
+                       print(paste0("Number of masses binned: ", ncol(x4$seg_pp_file)))
+                       
                      }
                      #add mass annotations?
                      if (input$targeted_pp == "targeted") {

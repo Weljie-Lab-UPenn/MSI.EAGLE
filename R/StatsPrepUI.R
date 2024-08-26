@@ -46,11 +46,12 @@ StatsPrepUI <- function(id) {
                  label = "FDR threshold to include in results",
                  value = 0.05,
                  max = 1.0,
-                 min = 0.0
+                 min = 0.0,
+                 step=0.05
                ),
                numericInput(
                  ns("debug_n"),
-                 "# Peaks (debugging); set before reading .rds file",
+                 "# Peaks (debugging); set before reading .rds/.imzML file",
                  value = NULL
                ),
                #downloadButton("save_results", label="Save analysis data")

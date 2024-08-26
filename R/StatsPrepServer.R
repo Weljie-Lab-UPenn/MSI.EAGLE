@@ -1312,7 +1312,7 @@ StatsPrepServer <- function(id,  setup_values) {
       
       if (input$stats_test %in% c("meanstest", "spatialDGMM")) {
         dat <- x5$stats_results %>%
-          dplyr::mutate_at(dplyr::vars(PValue, AdjP), ~ (round(., 5))) %>%
+          dplyr::mutate_at(dplyr::vars(PValue, AdjP), ~ (round(., 5))) %>% 
           dplyr::filter(AdjP <= input$FDR_val)
       } else if (input$stats_test %in% c("anova")) {
         dat <- x5$stats_results %>%
@@ -1845,8 +1845,7 @@ StatsPrepServer <- function(id,  setup_values) {
       req(x5$stats_results)
       dat <- x5$stats_results
       
-      browser()
-      
+
       # if (input$stats_test %in% c("meanstest", "spatialDGMM")) {
       #   dat$AdjP <- round(dat$AdjP, 4)
       #   dat$PValue <- round(dat$PValue, 4)
@@ -1859,9 +1858,9 @@ StatsPrepServer <- function(id,  setup_values) {
         dat <- x5$stats_results %>%
           dplyr::filter(fdr <= input$FDR_val) %>%
             dplyr::mutate(
-              pvalue = formatC(pvalue, format = "fg", digits = 3),
-              fdr = formatC(fdr, format = "fg", digits = 3),
-              statistic = formatC(statistic, format = "fg", digits = 4)
+              pvalue = signif(pvalue, digits = 3),
+              fdr = signif(fdr,  digits = 3),
+              statistic = signif(statistic,  digits = 4)
             )
         
         
@@ -1886,6 +1885,7 @@ StatsPrepServer <- function(id,  setup_values) {
           return(NULL)
         }
         
+         # compute FC
         if (length(labels) == 2) {
           mean_spectra <-
             as.data.frame(
@@ -1893,22 +1893,24 @@ StatsPrepServer <- function(id,  setup_values) {
                 x5$data_file_selected %>% subsetFeatures(mz %in% dat$mz),
                 groups = droplevels(as.factor(as.data.frame(
                   pData(x5$data_file_selected)
-                )[, input$phen_cols_stats])),
-                as = "DataFrame"
+                )[, input$phen_cols_stats]))) %>% fData()
+                
               )
-            )
+            
           #reorder to match x5$stats_results
           mean_spectra <-
             mean_spectra[match(dat$mz, mean_spectra$mz), ]
           
-          log2FC = round(log2(mean_spectra[, 3] / mean_spectra[, 2]), 3)
+          vars=colnames(mean_spectra)[!colnames(mean_spectra) %in% c("mz", "count", "freq")]
+          
+          log2FC = formatC(log2(mean_spectra[, vars[2]] / mean_spectra[, vars[1]]), format="fg", digits=3)
           if (dim(dat)[1] == length(log2FC)) {
             lab <- paste0("log2FC(", labels[2], "/", labels[1], ")")
             dat <- cbind(dat, log2FC)
             names(dat)[names(dat) == "log2FC"] <- lab
-            dat <- cbind(dat, round(mean_spectra[, -1], 3))
+            dat <- cbind(dat, round(mean_spectra[, vars], 3))
             dat <-
-              cbind(dat, max_mean_group = colnames(mean_spectra[, -1])[max.col(mean_spectra[, -1])])
+              cbind(dat, max_mean_group = colnames(mean_spectra[, vars])[max.col(mean_spectra[, vars])])
             
             
           } else {
@@ -2099,26 +2101,6 @@ StatsPrepServer <- function(id,  setup_values) {
         # }
         
        
-         
-        p1 <-
-          plot(
-            x5$test_result,
-            i = c(dat[input$stats_table_rows_selected, ]$i),
-            col = mycols,
-            las = 0,
-            fill=T,
-            panel.first = NULL,
-            panel.last=NULL
-          )
-        print(p1)
-        title_t=paste(
-          "mz= ",
-          round(x5$stats_results$mz[m], 4),
-          " FDR= ",
-          round(x5$stats_results$fdr[m], 2)
-        )
-        
-        
         
         # p1 <-
         #   plot(
@@ -2126,31 +2108,18 @@ StatsPrepServer <- function(id,  setup_values) {
         #     i = c(dat[input$stats_table_rows_selected, ]$i),
         #     col = mycols,
         #     las = 0,
-        #     fill=T
+        #     fill=T,
+        #     panel.first = NULL,
+        #     panel.last=NULL
         #   )
-        # nplots <- length(p1$plots)
+        # print(p1)
+
         # 
         
+        #adjust a and b to work with multiple ions if m is longer than 1
         
-        #TODO NEED to sort out getting aov vars with the means test... how should this work??
-        #Also need to test if there are enough variables with aov plots and skip if not
-
-        
-       
-
-        
-        #print(plot(x5$test_result_feature_test, model=list(x5$stats_results$feature[m])), layout=FALSE)
-        #title(paste("mz= ",round(x5$stats_results$mz[m],4)," FDR= ", round(x5$stats_results$AdjP[m],2)))
-        
-        
-        if (mplot == T) {
-          #require(gplots)
-          
-          #mzdat=subset(x5$test_result, mz==x5$stats_results$mz[m])
-          # a<-as.matrix(iData(x5$data_file_selected[which(mz(x5$data_file_selected)%in%x5$stats_results$mz[m]),]))
-          # b<-pData(x5$data_file_selected[which(mz(x5$data_file_selected)%in%x5$stats_results$mz[m]),])
-          # dat=cbind(run=Cardinal::run(x5$data_file_selected),b,value=a[1,])
-          #
+        plots <- list()
+        for (i in 1:length(m)) {
           
           #get spectra for currently selected table ions (m)
           a <-
@@ -2159,7 +2128,7 @@ StatsPrepServer <- function(id,  setup_values) {
                 x5$data_file_selected[
                   which(
                     mz(x5$data_file_selected
-                       ) %in%x5$stats_results$mz[m]
+                       ) %in%x5$stats_results$mz[m[i]]
                   ), 
                   ]
                 )
@@ -2173,19 +2142,21 @@ StatsPrepServer <- function(id,  setup_values) {
                   which(
                     mz(
                       x5$data_file_selected
-                      ) %in% x5$stats_results$mz[m]
+                      ) %in% x5$stats_results$mz[m[i]]
                           
                     ), 
                   ]
                 )
               )
-          dat2 = cbind(b, value = a)
           
+           
+          
+          dat2 <-  cbind(a, b)
           
           #dat_long_tech_avg<- as.data.frame(na.omit(dat)) %>% dplyr::group_by_at(c(input$aov_vars1, input$aov_vars2, input$aov_vars3)) %>%
           dat_long_tech_avg <-
             dat2 %>% dplyr::group_by_at(c(input$phen_cols_stats, x5$group_var)) %>%
-            dplyr::summarize(tech_avg = mean(value),
+            dplyr::summarize(tech_avg = mean(a),
                              .groups = "keep")  %>% na.omit()
           
           #x5$dat_long_tech_avg<-dat_long_tech_avg
@@ -2203,9 +2174,16 @@ StatsPrepServer <- function(id,  setup_values) {
           # View the summary data
           df_summary
           
+          title_t=paste(
+            "mz= ",
+            round(x5$stats_results$mz[m[i]], 4),
+            " FDR= ",
+            formatC(x5$stats_results$fdr[m[i]], format = "g", digits=2)
+          )
+      
           
-          p2<-ggplot2::ggplot(df_summary, ggplot2::aes_string(x = input$phen_cols_stats, y = "mean_tech_avg")) +
-            ggplot2::geom_point(size = 3) + 
+          plots[[i]]<-ggplot2::ggplot(df_summary, ggplot2::aes_string(x = input$phen_cols_stats, y = "mean_tech_avg")) +
+            ggplot2::geom_point(aes(col=my_cols),size = 3) + 
             ggplot2::geom_errorbar(ggplot2::aes(ymin = mean_tech_avg - se_tech_avg, ymax = mean_tech_avg + se_tech_avg), width = 0.2) +
             ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "gray") + 
             ggplot2::theme_minimal() +
@@ -2216,29 +2194,44 @@ StatsPrepServer <- function(id,  setup_values) {
             ) +
             ggprism::theme_prism()+
             ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
-          
-          x=df_summary[[input$phen_cols_stats]]
-          y=df_summary$mean_tech_avg
-          ymin=df_summary$mean_tech_avg-df_summary$se_tech_avg
-          ymax=df_summary$mean_tech_avg+df_summary$se_tech_avg
+            #facet_wrap(~x5$group_var)
           
           
           
-           p2<-vizi( x=x, y = y,
-            ymin = ymin, ymax=ymax) 
-           
-
-            p2<- add_mark(p2,
-                "intervals",
-             ) 
-            
-    
-
-          #
-          browser()
-          matter::as_facets(p1, p2, ncol = 1)
+        }
+        
+        #browser()
+        # Number of plots
+        num <- length(plots)
+        
+        # Calculate number of columns and rows dynamically
+        ncol_var <- ceiling(sqrt(num))
+        nrow_var <- ceiling(num / ncol_var)
+        
+        print(gridExtra::grid.arrange(grobs = plots, ncol=ncol_var, nrow=nrow_var))
           
-          
+          # x=df_summary[[input$phen_cols_stats]]
+          # y=df_summary$mean_tech_avg
+          # ymin=df_summary$mean_tech_avg-df_summary$se_tech_avg
+          # ymax=df_summary$mean_tech_avg+df_summary$se_tech_avg
+          # 
+          # 
+          # 
+          #  p2<-vizi( x=x, y = y,
+          #   ymin = ymin, ymax=ymax) 
+          #  
+          # 
+          #   p2<- add_mark(p2,
+          #       "intervals",
+          #    ) 
+          #   
+          # 
+          # 
+          # #
+          # browser()
+          # matter::as_facets(p1, p2, ncol = 1)
+          # 
+          # 
           
         #   print(
         #     gplots::plotmeans(
@@ -2250,9 +2243,9 @@ StatsPrepServer <- function(id,  setup_values) {
         #     ),
         #     layout = FALSE
         #   )
-         } else {
-          print(p1)
-         }
+         # } else {
+         #  print(p1)
+         #}
       } else if (input$stats_test %in% c("spatialDGMM")) {
         req(x5$stats_results)
         
