@@ -140,7 +140,7 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
         return()
       #try(if(x3$img.dat=="proc") #no processed data available
       #  return())
-      #browser()
+    
       if(input$phen_method=="breaks"){
         req(input$breaks_thresh)
       }
@@ -159,7 +159,7 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       #reorder input file so plates are in the sample order
       #first only keep overlapping set of runs?
       
-      plates<-plates[plates %in% runNames(x3$img.dat)]
+      plates<-plates[sapply(plates, function(x) grep(x, runNames(x3$img.dat)))]
       x3$img.dat<-combine_card(lapply(1:length(plates), function(x) x3$img.dat[,grep(plates[x], Cardinal::run(x3$img.dat))]))
       
       #ADD code to remove all other ID columns?
@@ -268,7 +268,7 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       save_path <- shinyFiles::parseSavePath(volumes, input$save_imzml)
       if (nrow(save_path) == 0) return(NULL)
       
-      browser()
+      #browser()
       filen <- as.character(save_path$datapath)
       pk_img <- x3$img.dat
       pData(pk_img)<-x3$pdata

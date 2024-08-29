@@ -758,3 +758,29 @@ combine_card <- function(x) {
     return(tmp)
   }
 }
+
+#convert old cardinal object to new one
+convert_card<-function(obj) {
+  
+  #obj<-readRDS("_Neg_761_oxid_targeted_MSI-depth_picked_SN-peak_picked-2022-10-19.rds")
+  spectra <- obj@imageData$data[[1L]]
+  
+  coord <- obj@elementMetadata@coord
+  run <- obj@elementMetadata@run
+  pdat2 <- obj@elementMetadata@listData
+  
+  mz <- obj@featureData@mz
+  ID <- obj@featureData@listData[[1]]
+  
+  #create new cardinal object
+  
+  pdata <- PositionDataFrame(run=run, coord=coord, pdat2)
+  fdata <- MassDataFrame(mz=mz, ID=ID)
+  
+  out <- MSImagingExperiment(spectraData=spectra,
+                             featureData=fdata,
+                             pixelData=pdata)
+  
+  
+  
+}

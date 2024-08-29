@@ -196,7 +196,7 @@ DepthAnalysisServer <- function(id,  setup_values) {
       
       #start timer
       ptm<-proc.time()
-      
+      #browser()
       withProgress(message = "setting up coordinates and extracting pixels from raw data",
                    detail = "using existing coordinates",
                    value = 0.2,
@@ -391,9 +391,9 @@ DepthAnalysisServer <- function(id,  setup_values) {
                        print(names(x1$raw_list))
                        return()
                      } else {
-                       
+                       #browser()
                        test_raw_reduced<-convertMSImagingArrays2Experiment(test_raw_reduced)
-                       pData(test_raw_reduced)<-pData(seg_file_ord)
+                       #pData(test_raw_reduced)<-pData(seg_file_ord)
                        
                       }
                      
@@ -411,14 +411,10 @@ DepthAnalysisServer <- function(id,  setup_values) {
                        
                        print("performing untargeted analysis")
                        
-                       browser()
+                       #browser()
                        
                        x4$seg_pp_file <-
                          
-                         
-                         
-                         
-                         a<-
                          try(HTS_reproc(
                            test_raw_reduced,
                            SN = input$SNR2,

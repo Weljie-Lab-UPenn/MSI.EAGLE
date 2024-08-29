@@ -190,15 +190,27 @@ StatsPrepServer <- function(id,  setup_values) {
     
     observeEvent(input$action_demo, {
       
-      withProgress(message = "Loading demo data",
+      withProgress(message = "Loading rcc demo data, including peak picking. See CardinalWorkflows classification vignette for details.",
                    value = 0.5,
                    detail = "",
                    {
                      data(rcc, package = "CardinalWorkflows")
-                     overview_peaks <- as(rcc, "MSImagingExperiment")
+                     
+                     rcc<-CardinalWorkflows::exampleMSIData("rcc")
+                     
+                     rcc_peaks <- rcc |>
+                       normalize(method="tic") |>
+                       peakProcess(SNR=3, filterFreq=FALSE,
+                                   tolerance=0.5, units="mz")
+                     
+                     rcc_nobg <- subsetPixels(rcc_peaks, !is.na(diagnosis))
+                     
+                     overview_peaks <- rcc_nobg
                      
                      
                      x5$data_file <- overview_peaks
+                     
+                     
                    })
       
     })
@@ -611,12 +623,14 @@ StatsPrepServer <- function(id,  setup_values) {
           }
           
           
+          #convert input$phen_cols_stats to factor in dataset
+          pData(x5$data_file_selected)[,input$phen_cols_stats]<-droplevels(factor(as.data.frame(pData(x5$data_file_selected))[,input$phen_cols_stats]))
           
           mt <- 
             try(meansTest(x5$data_file_selected[, ],
                       as.formula(paste0("~", input$phen_cols_stats)),
                       samples =
-                        droplevels(groupsx)))
+                        droplevels(as.factor(groupsx))))
           #mt2<-meansTest(x5$data_file_selected, as.formula(paste("~", input$phen_cols_stats)), groups=droplevels(x5$data_file_selected$Plate.Group))
           
           if(class(mt) %in% "try-error") {
@@ -693,9 +707,9 @@ StatsPrepServer <- function(id,  setup_values) {
           
           x5$data_file_selected = x5$data_file[, select_vec]
           
-          browser()
+         
           sscr = as.numeric(unlist(strsplit(input$sscr, split = ",")))
-          sscs = as.numeric(unlist(strsplit(input$sscs, split = ",")))
+          sscs = as.numeric(eval(parse(text=input$sscs)))
           ssck = as.numeric(unlist(strsplit(input$ssck, split = ",")))
           
           if (sum(is.na(c(sscr, sscs, ssck))) > 0) {
@@ -711,7 +725,7 @@ StatsPrepServer <- function(id,  setup_values) {
             droplevels(as.data.frame(pData(x5$data_file_selected)))
           dat <- x5$data_file_selected
           
-          pData(dat) <- PositionDataFrame(coord(dat), run = a$run,  a)
+          pData(dat) <- PositionDataFrame(coord(dat), run = a$run,  a[,!colnames(a) %in% c("x", "y", "run")])
           y = a[, input$phen_cols_stats]
           
           myfold <- groupsx
@@ -725,7 +739,7 @@ StatsPrepServer <- function(id,  setup_values) {
                                      s = sscs,
                                      k = ssck)
           
-          print(summary(res))
+          print((res))
           #res <- spatialShrunkenCentroids(x=x5$data_file_selected, groups=groupsx, r=sscr, s=sscs, k=ssck)
           
           incProgress(amount=0.3, message="Initial SSC done, now performing cross-validation. Check console for details.")
@@ -739,16 +753,16 @@ StatsPrepServer <- function(id,  setup_values) {
           # myfold=run(dat_trim)
           #
           cv_ssc <-
-            try(crossValidate(
-              .x = dat,
-              .y = y,
-              .fun = "spatialShrunkenCentroids",
-              .fold = myfold,
+            try(crossValidate(spatialShrunkenCentroids,
+              x = dat,
+              y = y,
+              #.fun = "spatialShrunkenCentroids",
+              folds = myfold,
               #r=sscr, s=sscs, .fold=run(x5$data_file_selected))
               r = sscr,
               s = sscs,
-              k = ssck,
-              .process = TRUE,
+              #k = ssck,
+              .process = FALSE,
               .processControl = list(
                 SNR = 3,
                 tolerance = 15,
@@ -765,16 +779,20 @@ StatsPrepServer <- function(id,  setup_values) {
             return(NULL)
           }
           
-          print(summary(res))
-          print(summary(cv_ssc))
+          print((res))
+          print((cv_ssc))
           #graphics.off()
           #print(plot(summary(cv_ssc), Accuracy ~ s, type='b')) #move to main area eventually
-          
+          browser()
           topFeatures(res, n = 100)
-          
+          a<-cv_ssc$probabilities #likely wrong
+          #choose best model
+          max_macro<-max(a[,"MacroPrecision"])
+          best_model<-which(a[,"MacroPrecision"]==max_macro)
+          res<-res[[best_model]]
           
           bb <-
-            topFeatures(res, n = dim(modelData(res))[1] * dim(featureData(res))[1])
+            topFeatures(res, n = dim(featureData(res))[1])
           
           x5$stats_results <- as.data.frame(bb)
           x5$test_result <- res
@@ -792,17 +810,23 @@ StatsPrepServer <- function(id,  setup_values) {
           
           test_dgmm <-
             try(spatialDGMM(
-              x5$data_file_selected,
+              x5$data_file_selected[,1],
               r = sscr,
               k = sscs,
-              groups = droplevels(groupsx)
+              groups = droplevels(groupsx),
+              weights="adaptive"
             ))
+          
           if (class(test_dgmm) == "try-error") {
-            table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz == mzs[1]) %>% select(.data[[input$aov_vars1]]))
-            table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz ==
-                                                                         mzs[1]) %>% select(.data[[input$aov_vars2]]))
+            #table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz == mzs[1]) %>% dplyr::select(.data[[input$aov_vars1]]))
+            #table(as.data.frame(na.omit(dat_long_tech_avg)) %>% subset(mz ==
+            #                                                             mzs[1]) %>% dplyr::select(.data[[input$aov_vars2]]))
             
             print("check variables")
+            showNotification(
+              "DGMM not able to complete-- check variables and try again",
+              duration = 5
+            )
             return()
             
           }
@@ -1897,13 +1921,21 @@ StatsPrepServer <- function(id,  setup_values) {
                 
               )
             
+          #browser()
           #reorder to match x5$stats_results
           mean_spectra <-
             mean_spectra[match(dat$mz, mean_spectra$mz), ]
           
-          vars=colnames(mean_spectra)[!colnames(mean_spectra) %in% c("mz", "count", "freq")]
+          vars=colnames(mean_spectra)[!colnames(mean_spectra) %in% c("mz", "count", "freq", "ID")]
           
-          log2FC = formatC(log2(mean_spectra[, vars[2]] / mean_spectra[, vars[1]]), format="fg", digits=3)
+          log2FC = try(formatC(log2(mean_spectra[, vars[2]] / mean_spectra[, vars[1]]), format="fg", digits=3))
+          
+          if(class(log2FC)=="try-error") {
+            print('log2FC not computed, check data columns not named "mz", "count", "freq", "ID"')
+            return()
+          }
+          
+          
           if (dim(dat)[1] == length(log2FC)) {
             lab <- paste0("log2FC(", labels[2], "/", labels[1], ")")
             dat <- cbind(dat, log2FC)
@@ -1911,7 +1943,7 @@ StatsPrepServer <- function(id,  setup_values) {
             dat <- cbind(dat, round(mean_spectra[, vars], 3))
             dat <-
               cbind(dat, max_mean_group = colnames(mean_spectra[, vars])[max.col(mean_spectra[, vars])])
-            
+            dat$mz <- round(dat$mz, 4)
             
           } else {
             print("stats table and fold change results have different lengths, not adding FC")
@@ -2151,7 +2183,7 @@ StatsPrepServer <- function(id,  setup_values) {
           
            
           
-          dat2 <-  cbind(a, b)
+          dat2 <-  cbind(a=t(a), b)
           
           #dat_long_tech_avg<- as.data.frame(na.omit(dat)) %>% dplyr::group_by_at(c(input$aov_vars1, input$aov_vars2, input$aov_vars3)) %>%
           dat_long_tech_avg <-
@@ -2181,11 +2213,46 @@ StatsPrepServer <- function(id,  setup_values) {
             formatC(x5$stats_results$fdr[m[i]], format = "g", digits=2)
           )
       
+          # 
+          # plots[[i]]<-ggplot2::ggplot(df_summary, ggplot2::aes_string(x = input$phen_cols_stats, y = "mean_tech_avg")) +
+          #   ggplot2::geom_boxplot(ggplot2::aes(col=mycols),size = 3) + 
+          #   ggplot2::geom_errorbar(ggplot2::aes(ymin = mean_tech_avg - se_tech_avg, ymax = mean_tech_avg + se_tech_avg), width = 0.2) +
+          #   ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "gray") + 
+          #   ggplot2::theme_minimal() +
+          #   ggplot2::labs(
+          #     x = "",
+          #     y = "Mean (normalized intensity, a.u.)",
+          #     title = title_t
+          #   ) +
+          #   ggprism::theme_prism()+
+          #   ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))+
+          # #remove legend
+          #  ggplot2::theme(legend.position = "none")
+          #   #facet_wrap(~x5$group_var)
+          # 
+          # dat_long_tech_avg
+          # 
+          #browser()
+          dat_long_tech_avg<-as.data.frame(dat_long_tech_avg)
           
-          plots[[i]]<-ggplot2::ggplot(df_summary, ggplot2::aes_string(x = input$phen_cols_stats, y = "mean_tech_avg")) +
-            ggplot2::geom_point(aes(col=my_cols),size = 3) + 
-            ggplot2::geom_errorbar(ggplot2::aes(ymin = mean_tech_avg - se_tech_avg, ymax = mean_tech_avg + se_tech_avg), width = 0.2) +
-            ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "gray") + 
+          #check if factor
+          dat_long_tech_avg[,input$phen_cols_stats] <- as.factor(dat_long_tech_avg[,input$phen_cols_stats])
+          names(mycols) <- levels(as.data.frame(dat_long_tech_avg)[,input$phen_cols_stats])
+          
+          #calculate the number of samples in each group
+          n_samples <- dat_long_tech_avg %>% 
+            dplyr::group_by_at(c(input$phen_cols_stats)) %>% 
+            dplyr::summarize(n=dplyr::n(), .groups = 'drop')
+          
+          
+        plots[[i]]<-ggplot2::ggplot(dat_long_tech_avg, 
+                                      ggplot2::aes(x = !!ggplot2::sym(input$phen_cols_stats), 
+                                                   y = tech_avg,
+                                                   fill=!!ggplot2::sym(input$phen_cols_stats)))+
+             
+            ggplot2::geom_jitter(alpha = 0.5, width=0.2) +
+            ggplot2::geom_boxplot(size = 1, alpha=0.8)+
+            #ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "gray") + 
             ggplot2::theme_minimal() +
             ggplot2::labs(
               x = "",
@@ -2193,9 +2260,18 @@ StatsPrepServer <- function(id,  setup_values) {
               title = title_t
             ) +
             ggprism::theme_prism()+
-            ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
-            #facet_wrap(~x5$group_var)
-          
+            ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))+
+            #remove legend
+            ggplot2::theme(legend.position = "none") +
+            ggplot2::scale_fill_manual(values = mycols)+
+            #add number of samples as annotation to plot
+            ggplot2::geom_text(
+              data = n_samples,
+              ggplot2::aes(x = !!ggplot2::sym(input$phen_cols_stats),
+                           y = min(dat_long_tech_avg$tech_avg) - 0.05, 
+                           label = paste0("n=", n)),
+              vjust = -0.5
+            )
           
           
         }
@@ -2596,7 +2672,7 @@ StatsPrepServer <- function(id,  setup_values) {
         
         
       } else if (input$stats_test == "ssctest") {
-        
+        browser()
         #require(gplots)
         #mzdat=subset(x5$test_result, mz==x5$stats_results$mz[m])
         a <-
