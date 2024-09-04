@@ -206,18 +206,46 @@ DepthAnalysisServer <- function(id,  setup_values) {
                      message("setting up coordinates and extracting pixels from raw data")
                      
                      
-                     
+                    
                      x1 = setup_values()[["x1"]] # bring in raw_files list
                      
                      setCardinalBPPARAM(par_mode())
                      
-                     
+                     #browser()
                      
                      #extract only runs available in raw list
                      
                      names(x1$raw_list) <- gsub(".imzML", "", names(x1$raw_list))
                      
+                     #check to make sure names in x4$seg_file are in names of x1$raw_list
+                     if (sum(runNames(x4$seg_file) %in% names(x1$raw_list)) < 1) {
+                       
+                         #if there is only one runName in seg_file and one in raw_list, this will continue with a warning
+                         if (length(runNames(x4$seg_file)) == 1 & length(names(x1$raw_list)) == 1) {
+                           message("only one run in segmented file and one in raw file list, will proceed")
+                           showNotification(
+                             "only one run in segmented file and one in raw file list, will proceed. Ensure correct datasets being used.",
+                             type = "warning"
+                           )
+                           
+                           run(x4$seg_file) <- names(x1$raw_list)
+                           
+                           
+  
+                         } else {
+                         
+                         
+                         message("no raw file compatible with dataset, names shown below:")
+                         showNotification("no raw file compatible with dataset", type = "error")
+                         print(runNames(x4$seg_file))
+                         print(names(x1$raw_list))
+                         return()
+                       }
+                     } 
+                     
                      seg_file_trimmed<- Cardinal::subsetPixels(x4$seg_file, run %in% names(x1$raw_list))
+                     
+                     
                      x4$seg_file_trimmed<-seg_file_trimmed
                      
                      #reorder raw list to match file names in segmented file

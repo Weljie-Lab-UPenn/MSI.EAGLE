@@ -80,6 +80,46 @@ StatsPrepUI <- function(id) {
                    # create an uiOutput for the tabPanel
                    uiOutput(ns("ui"))
                  ),
+                 # create a tabPanel for the tabsetPanel
+                 tabPanel(
+                   "Output Table and Ion Plots",
+                   
+                   # set the value of the tabPanel to the namespace
+                   value = ns("tab6c"),
+                   
+                   # #ask user for choice of cardinal plot or ggplot
+                   # radioButtons(
+                   #   ns("plot_choice"),
+                   #   "Choose plotting package",
+                   #   choices = list(
+                   #     "Cardinal / matter" = "cardinal",
+                   #     "ggplot2 " = "ggplot"
+                   #   )
+                   # ),
+                   # user check box for which plot to output dynamically
+                   uiOutput(ns("plot_choice_ui")),
+                   
+                   # create an imageOutput for the tabPanel
+                   imageOutput(ns("plot11"), width = "800px", height =
+                                 "600px"),
+                   
+                   # create a dataTableOutput for the tabPanel
+                   DT::dataTableOutput(ns("stats_table")),
+                   
+                   # create an actionButton for the tabPanel
+                   actionButton(ns("mummichog"), "Output Mummichog file"),
+                   
+                   # create an actionButton for the tabPanel
+                   actionButton(ns("metaboanalyst"), "Output Metaboanalyst file"),
+                   
+                   # create a textInput for the tabPanel
+                   textInput(ns("plot_prefix"), label = "Prefix for plotting / results output", value =
+                               "output"),
+                   
+                   # create an actionButton for the tabPanel
+                   actionButton(ns("write_plots"), label = "save significant plots from testing to directory")
+                   
+                 ),
                  
                  # create a tabPanel for the tabsetPanel
                  tabPanel(
@@ -105,34 +145,6 @@ StatsPrepUI <- function(id) {
                    
                  ),
                  
-                 # create a tabPanel for the tabsetPanel
-                 tabPanel(
-                   "Output Table and Ion Plots",
-                   
-                   # set the value of the tabPanel to the namespace
-                   value = ns("tab6c"),
-                   
-                   # create an imageOutput for the tabPanel
-                   imageOutput(ns("plot11"), width = "800px", height =
-                                 "600px"),
-                   
-                   # create a dataTableOutput for the tabPanel
-                   DT::dataTableOutput(ns("stats_table")),
-                   
-                   # create an actionButton for the tabPanel
-                   actionButton(ns("mummichog"), "Output Mummichog file"),
-                   
-                   # create an actionButton for the tabPanel
-                   actionButton(ns("metaboanalyst"), "Output Metaboanalyst file"),
-                   
-                   # create a textInput for the tabPanel
-                   textInput(ns("plot_prefix"), label = "Prefix for plotting / results output", value =
-                               "output"),
-                   
-                   # create an actionButton for the tabPanel
-                   actionButton(ns("write_plots"), label = "save significant plots from testing to directory")
-                   
-                 ),
                  
                  # create a tabPanel for the tabsetPanel
                  tabPanel(

@@ -46,18 +46,23 @@ PeakPickServer <- function(id, setup_values) {
                  })
     
     
-    
+    #change depending on value of input$peak_pick_status, pp_y is .imzML, pp_old is .rds
     output$pk_file <- renderUI({
+      
+      # Determine the list of files based on the value of input$peak_pick_status
+      file_choices <- switch(
+        input$peak_pick_status,
+        "pp_old" = grep(".rds", my_files(), ignore.case = TRUE, value = TRUE),
+        "pp_y" = grep(".imzML", my_files(), ignore.case = TRUE, value = TRUE),
+        # Add default or other cases if needed
+        character(0) # Return an empty character vector if no match
+        )
+      
       selectInput(
         ns("peakPickfile"),
         "Imageset with peaked peaks",
-        grep(
-          ".imzML",
-          my_files(),
-          ignore.case = T,
-          value = T
-        )
-      )
+        file_choices)
+      
     })
     
     output$add_file <- renderUI({
@@ -81,10 +86,9 @@ PeakPickServer <- function(id, setup_values) {
         "open_file" = list(
           radioButtons(
             ns("peak_pick_status"),
-            "Start from an existing peak_picked file?",
-            # TODO can remove at some point
-            c("Yes" = "pp_y")
-          ),
+            "Cardinal v3.6+ processed imzML file?",
+            
+            c("Yes" = "pp_y", "No, older .rds" = "pp_old")), 
           uiOutput(ns('pk_file')),
           actionButton(ns("action"), label = HTML("Restore saved file")),
           shinyFiles::shinySaveButton(ns("save_imzml"), "Save imzML File", "Save", filetype = list(""))
@@ -271,6 +275,8 @@ PeakPickServer <- function(id, setup_values) {
       req(input$peak_pick_status)
       print(input$peak_pick_status)
       
+      
+      
       x0$overview_peaks<-NULL
       
       #start clock
@@ -295,6 +301,17 @@ PeakPickServer <- function(id, setup_values) {
                        #browser()
                        
                        #De novo peak picking
+                     }else if (input$peak_pick_status == "pp_old") {
+                       if (length(input$peakPickfile) < 1) {
+                         print("need file to open")
+                         return()
+                         
+                       }
+                       
+                       old_dat<-readRDS(input$peakPickfile)
+                       overview_peaks <- convert_card(old_dat)
+                       print(overview_peaks)
+                       
                      } else if (input$peak_pick_status == "pp_no") {
                        
                        
@@ -837,6 +854,8 @@ PeakPickServer <- function(id, setup_values) {
           print(filen)
           #TODO - why is the ID column replicated??
           #saveRDS(pk_img, file)
+          
+          
           writeImzML(pk_img, filen)
         }
       )
