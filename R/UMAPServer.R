@@ -1801,7 +1801,7 @@ UMAPServer <- function(id, setup_values, preproc_values) {
     })
     
     #create variables required for saving
-    volumes <- c(wd = getwd(), home = fs::path_home())
+    volumes <- c(wd = setup_values()[["wd"]], home = fs::path_home())
     shinyFiles::shinyFileSave(input, "save_imzml", roots = volumes, session = session)
     
     observeEvent(input$save_imzml, {
