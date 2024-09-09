@@ -593,17 +593,19 @@ DepthAnalysisServer <- function(id,  setup_values) {
                        #   peakBin(ref = neg_ref_mz,
                        #           tolerance = input$tol2,
                        #           units = "ppm") %>% process()
-                       
-                       #browser()
-                       
-                       tmp.img<-try(peakProcess(test_raw_reduced, 
-                                                        ref=neg_ref_mz,
-                                                        #SN=input$SNR,
-                                                        type="area",
-                                                        tolerance=setup_values()[["tol"]], units="ppm") %>% process() %>% summarizeFeatures()
+                       gc()
+                       tmp.img<-try(test_raw_reduced |> normalize() |> peakProcess( 
+                                                ref=neg_ref_mz,
+                                                #SN=input$SNR,
+                                                type="area",
+                                                tolerance=setup_values()[["tol"]], units="ppm") %>% process() %>% summarizeFeatures()
                        )
                        
-                       x4$seg_pp_file <-tmp.img
+                       
+                       
+                       
+                       
+                         x4$seg_pp_file <-tmp.img
                        
                        #report number of masses binned
                        print(paste0("Number of masses binned: ", ncol(x4$seg_pp_file)))

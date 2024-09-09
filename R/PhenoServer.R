@@ -135,7 +135,7 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
     
     observeEvent(input$start_phenotype, {
       
-      
+      #browser()
       if(is.null(x3$img.dat) | is.null(x3$txt_data))
         return()
       #try(if(x3$img.dat=="proc") #no processed data available
@@ -159,7 +159,17 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       #reorder input file so plates are in the sample order
       #first only keep overlapping set of runs?
       
-      plates<-plates[sapply(plates, function(x) grep(x, runNames(x3$img.dat)))]
+      plates<-try(plates[sapply(plates, function(x) grep(x, runNames(x3$img.dat)))])
+      
+      if(class(plates)=="try-error") {
+        message("Plate names / run names do not match, please check!")
+        showNotification("Plate names / run names do not match, please check!", type="error")
+        
+        print(plates)
+        print(runNames(x3$img.dat))
+        return()
+      }
+      
       x3$img.dat<-combine_card(lapply(1:length(plates), function(x) x3$img.dat[,grep(plates[x], Cardinal::run(x3$img.dat))]))
       
       #ADD code to remove all other ID columns?

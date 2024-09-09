@@ -671,6 +671,8 @@ pixDatFill_manual<-function(datas, sample_list, variables) {
   #establish plates to work with
   plates=unique(plate_dat$Plate)
   
+  
+  
   pdat<-NULL
   for(p in plates) {
     #create dataset of only selected plate
@@ -721,7 +723,26 @@ pixDatFill_manual<-function(datas, sample_list, variables) {
     print("No new pdata created! Ensure the Plate column of the sample list is matched in run data.")
     return(pixelData(data1_samples))
   } else {
-    pixelData(data1_samples)<-pdat
+    #redorder rows of pdat based on original order
+    #browser()
+    
+    
+    
+    # Step 1: Create an index in 'original_df' to preserve the original order
+    original_df <- pData(datas) %>% as.data.frame() %>%
+      dplyr::mutate(original_order = dplyr::row_number())
+    
+    
+    #Step 2: Use left_join() to join 'new_df' to 'original_df' and reorder based on original_order
+    reordered_df <- as.data.frame(pdat) %>%
+      dplyr::left_join(original_df %>% dplyr::select(x, y, run, original_order), by = c("x", "y", "run")) %>%
+      dplyr::arrange(original_order) %>%
+      dplyr::select(-original_order)  # Drop the original_order column if not needed
+    
+
+    
+    pixelData(data1_samples)<-PositionDataFrame(run=reordered_df$run, coord=coord(datas), reordered_df[,!colnames(reordered_df)%in%c("run", "x", "y")]) 
+    
     return(pixelData(data1_samples))
   }
 }

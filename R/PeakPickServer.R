@@ -652,6 +652,8 @@ PeakPickServer <- function(id, setup_values) {
       
       print("combining files")
       
+      
+      
       if (!setequal(colnames(pData(x)), colnames(pData(y)))) {
         cols <- union(colnames(pData(x)), colnames(pData(y)))
         cols_overview <- cols[!cols %in% (colnames(pData(x)))]
@@ -661,10 +663,8 @@ PeakPickServer <- function(id, setup_values) {
         pData(y)[, cols_selected] <- "NA"
       }
       
-      
-      
-      dat <- Cardinal::combine(x, y)
-      
+      dat<-combine_card(list(x,y))
+
       x0$overview_peaks <- dat
       
     })

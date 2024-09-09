@@ -806,6 +806,8 @@ StatsPrepServer <- function(id,  setup_values) {
           
           
           } else if (input$ssc_MIL) {
+            
+            
             if (length(input$ssc_fold_vars) == 0) {
               showNotification("No fold variables selected for MIL, exiting")
               return(NULL)
@@ -866,7 +868,7 @@ StatsPrepServer <- function(id,  setup_values) {
             
             myfold <- try(create_folds(aa, input$phen_cols_stats, input$ssc_fold_vars, input$ssc_MIL_folds))
             
-            if(class(myfold)=="try-error") {
+            if(class(myfold)[1]=="try-error") {
               showNotification("MIL fold creation failed, check variables and try again")
               return(NULL)
             }
@@ -877,7 +879,7 @@ StatsPrepServer <- function(id,  setup_values) {
                                 y = y,
                                 #.fun = "spatialShrunkenCentroids",
                                 folds = myfold$fold,
-                                bags=pData(dat)$Sample.ID,
+                                bags= groupsx, #pData(dat)[, input$phen_interaction_stats],
                                 #r=sscr, s=sscs, .fold=run(x5$data_file_selected))
                                 r = sscr,
                                 s = sscs
@@ -895,7 +897,7 @@ StatsPrepServer <- function(id,  setup_values) {
             
             
             if (class(cv_ssc) == "try-error") {
-              browser()
+              #browser()
               showNotification(
                 "SSC not able to complete-- try changing Grouping variable to create folds or fixing stray pixels in the Segmentation - UMAP tab, save new file, and try again",
                 duration = 5
@@ -905,8 +907,8 @@ StatsPrepServer <- function(id,  setup_values) {
               return()
             }
             on.exit(bpstop(par_mode()), add = TRUE)
-            print((res))
-            print((cv_ssc))
+            #print((res))
+            #print((cv_ssc))
             #graphics.off()
             #print(plot(summary(cv_ssc), Accuracy ~ s, type='b')) #move to main area eventually
             
@@ -914,10 +916,22 @@ StatsPrepServer <- function(id,  setup_values) {
             #choose best model
             max_macro<-max(a[,"MacroRecall"], na.rm=T)
             best_model<-which(a[,"MacroRecall"]==max_macro)
-            if(length(best_model)>0) {
-              browser()
+            if(length(best_model)==1) {
+              #browser()
               print(a)
-              res<-res[[best_model]]
+              mod_name<-rownames(a)[best_model]
+              
+              # Extract r and s values from the string
+              params <- strsplit(mod_name, ",")[[1]]
+              r_value <- as.numeric(gsub("r=", "", params[1]))
+              s_value <- as.numeric(gsub("s=", "", params[2]))
+              
+              
+              res <- spatialShrunkenCentroids(dat,
+                                                   y=y, r=r_value, s=s_value)
+              
+              
+              
               topFeatures(res, n = 100)
               
             } else {
@@ -932,12 +946,23 @@ StatsPrepServer <- function(id,  setup_values) {
             tf_ssc <-
               topFeatures(res, n = dim(featureData(res))[1])
             
+            tf_ssc<- as.data.frame(tf_ssc) %>% dplyr::mutate(
+              statistic = round(statistic, 2),
+              centers = round(centers, 2),
+              sd = round(sd, 2), model = mod_name
+            )
+            
           }
           
           
           
           
           x5$stats_results <- as.data.frame(tf_ssc)
+          
+          if(class(res)=="SpatialShrunkenCentroids") {
+            x5$test_result <- list(res)
+            names(x5$test_result) <- mod_name
+          }
           x5$test_result <- res
           bpstop(par_mode())
           print(
@@ -945,7 +970,8 @@ StatsPrepServer <- function(id,  setup_values) {
           )
           
         } else if (input$stats_test == "spatialDGMM") {
-          browser()
+          
+          
           sscr = as.numeric(unlist(strsplit(input$sscr, split = ",")))
           sscs = as.numeric(unlist(strsplit(input$sscs, split = ",")))
           
@@ -972,7 +998,7 @@ StatsPrepServer <- function(id,  setup_values) {
               r = sscr,
               k = sscs,
               groups = droplevels(groupsx),
-              weights="adaptive" #add option for weights at somepoint?
+              weights="gaussian" #add option for weights at somepoint?
             ))
           
           on.exit(bpstop(par_mode()), add = TRUE)
@@ -988,8 +1014,9 @@ StatsPrepServer <- function(id,  setup_values) {
               "DGMM not able to complete-- check variables, add or change variance filter and try again",
               duration = 5
             )
-            bpstop(par_mode())
-            stop("DGMM failed")
+            
+            print("DGMM failed")
+            return()
             
           }
           
@@ -1013,7 +1040,7 @@ StatsPrepServer <- function(id,  setup_values) {
           fdat<-as.data.frame(fData(var_red_peaks))
           if("ID" %in% colnames(fdat)) {
             tf <- tf %>%
-              dplyr::mutate(ID = fdat$ID) %>%  # Add the new column
+              dplyr::mutate(ID = fdat$ID[match(tf$mz, fdat$mz)]) %>%  # Add the new column
               dplyr::relocate(ID, .after = mz)  # Relocate it after the "mz" column
           }
           
@@ -1022,7 +1049,7 @@ StatsPrepServer <- function(id,  setup_values) {
           
           x5$stats_results <- tf
           
-          print(summary(x5$test_result))
+          print((x5$test_result))
           bpstop(par_mode())
           print(
             "Spatial DGMM test complete, check Output table tab for table and check FDR cutoff if results not visible."
@@ -2248,11 +2275,19 @@ StatsPrepServer <- function(id,  setup_values) {
           
           
           dat$mz <- round(dat$mz, 4)
-          #temp_means <-
-          #  cbind(temp_means, i = 1:dim(temp_means)[1])
-          dat <- merge(dat, temp_means, by="mz") #%>% dplyr::mutate(i=i.x)
-          #dat2 <- dat[dat$feature[(x5$stats_results$feature)],] #what is this doing and why?
           
+          dat <- merge(dat, temp_means, by=c("mz"))
+          
+          dat2<-dat
+          #if ID.x and ID.y are the same, remove ID.y and rename ID.x to ID
+          if("ID.x" %in% colnames(dat2) & "ID.y" %in% colnames(dat2)){
+            dat2$ID <- ifelse(dat2$ID.x == dat2$ID.y, dat2$ID.x, NA)
+            dat2 <- dat2[, !grepl("ID.y", colnames(dat2))]
+            dat2 <- dat2[, !grepl("ID.x", colnames(dat2))]
+            #relocate ID to first column after mz using dplyr
+            dat2 <- dat2 %>% dplyr::select(i, mz, ID, everything())
+            dat<-dat2
+          }
           
           x5$stats_table_filtered <- dat
           
@@ -2347,10 +2382,17 @@ StatsPrepServer <- function(id,  setup_values) {
              )
       } else if (input$stats_test %in% c("ssctest")) {
         plot_choices <- list(
-          "SSC ion image" = "ion_image",
           "Means Plot" = "means_plot",
+          "SSC ion image" = "ion_image",
           "T-statistic" = "t_statistic",
           "Test Group" = "groupings",
+          "MSI image" = "msi_image"
+        )
+      } else if (input$stats_test %in% c("spatialDGMM")) {
+        plot_choices <- list(
+          "DGMM means test results" = "dgmm_means_test",
+          "DGMM segment ranks image" = "dgmm_ranks",
+          "DGMM estimated segment parameters" = "dgmm_params",
           "MSI image" = "msi_image"
         )
       } else {
@@ -2359,7 +2401,7 @@ StatsPrepServer <- function(id,  setup_values) {
       
       selectInput(
         ns("plot_choice"),
-        "Choose plotting package",
+        "Choose plot type:",
         choices = plot_choices
         #selected = "ggplot"
       )
@@ -2393,10 +2435,19 @@ StatsPrepServer <- function(id,  setup_values) {
       #get row from orignial dataset corresponding to selected data
       m =  which(x5$stats_results$i %in% dat[input$stats_table_rows_selected, ]$i)
       if (input$stats_test == "ssctest") {
-        m = which(round(x5$stats_results$mz, 4) %in% dat[input$stats_table_rows_selected, ]$mz)
-        if(length(m)>1){
+        m_model<-dat[input$stats_table_rows_selected, ]$model
+        
+        #find which rows of x5$stats_result match both ion and model for each value of input$stats_table_rows_selected
+        idx<-NULL
+        for(i in 1:length(m)){
+          if(sum(x5$stats_results$i %in% dat[input$stats_table_rows_selected[i], ]$i & x5$stats_results$model %in% m_model[i])>0) {
+            idx[i] <- which(x5$stats_results$i %in% dat[input$stats_table_rows_selected[i], ]$i & x5$stats_results$model %in% m_model[i])
+          }
+        }
+        
+        if(length(idx)>1){
          showNotification("Multiple ions selected, only first ion will be plotted", duration = 10)
-         m = m[1]
+         m = idx[1]
         }
       }
       
@@ -2703,17 +2754,46 @@ StatsPrepServer <- function(id,  setup_values) {
         mz_vals=x5$stats_results$mz[m]
         i_vals<-x5$stats_results$i[m]
         fdr_vals<-x5$stats_results$fdr[m]
-        names(i_vals)<-(paste0("mz= ",mz_vals, " FDR= ", round(fdr_vals,3)))
+        names(i_vals)<-(paste0("mz= ",round(mz_vals, 4), " FDR= ", round(fdr_vals,3)))
+        
+        #if multiple ions are selected, create idx for the first one and show a message
+        if(length(m)>1){
+          showNotification("Multiple ions selected, only first ion will be plotted", duration = 10)
+          idx = m[1]
+        } else {
+          idx = m
+        }
+        
         
         
         #dgmm plot
-        p1<-plot(x5$test_result, i=i_vals, col=mycols, fill=T, free="xy")
+        p1<-plot(x5$test_result, i=i_vals, fill=T, free="xy")
         #means test plot
         p2<-plot(x5$test_result_feature_test, i=i_vals, col=mycols, fill=T, free="xy")
         p3<-image(x5$test_result, i=i_vals, smooth="bilateral", enhance="adaptive", scale=TRUE)
+        p4 <-
+          image(
+            x5$data_file_selected,
+            mz = (x5$stats_results$mz[idx]),
+            
+            enhance = "histogram",
+            scale = T, free="xy"
+            #col=mycols
+          )
         
-        browser()
-        print(p2)
+        
+        #choose image to plot using switch from input$plot_choice
+        plot_choice <- switch(input$plot_choice,
+                              "dgmm_means_test" = p2,
+                              "dgmm_ranks" = p3,
+                              "dgmm_params" = p1,
+                              "msi_image" = p4
+        )
+        
+        
+        
+        
+        print(plot_choice)
         
         #one day we could combine these...
         # matter::as_facets( p1, p3, free="xy"
@@ -3026,7 +3106,7 @@ StatsPrepServer <- function(id,  setup_values) {
         
         
       } else if (input$stats_test == "ssctest") {
-        browser()
+        
         
         
         
@@ -3074,25 +3154,48 @@ StatsPrepServer <- function(id,  setup_values) {
         
         mycols = ggsci::pal_npg()(ncolors)
         
-        p1 <-
-          image(x5$test_result,
-                model = ssc_model,
-                key = F)
+        
+        
+        if(is.null(names(x5$test_result))){
+          p1 <-
+            image(x5$test_result[[1]],
+                  #model = ssc_model,
+                  key = F,
+                  col=mycols)
+        } else {
+          p1 <-
+            image(x5$test_result,
+                  model = ssc_model,
+                  key = F,
+                  col=mycols)
+          
+        }
+        
+        if(length(mz)>1){
+          showNotification("Multiple ions selected, only first ion will be plotted", duration = 10)
+          idx = idx[1]
+        }
+        
         p2 <-
           image(
             x5$data_file_selected,
-            mz = x5$stats_results$mz[idx],
+            mz = (x5$stats_results$mz[idx]),
             model=ssc_model,
             
             enhance = "histogram",
-            scale = T, free="xy",
-            col=mycols
+            scale = T, free="xy"
+            #col=mycols
           )
         
         fm2 <-
           (paste0(input$phen_cols_stats )) #, "~x*y"))
         
         #if more than one model present, create a matter vizi facet with all models
+        
+       if(class(x5$test_result)=="SpatialShrunkenCentroids") {
+         x5$test_result<-list(x5$test_result)
+       }
+        
         if(length(x5$test_result)>1){
           plot_list <- list()
           nmodels=length(x5$test_result)
@@ -3103,7 +3206,7 @@ StatsPrepServer <- function(id,  setup_values) {
           }
           names(plot_list) <- names(x5$test_result)
         } else {
-          plot_list <- plot(x5$test_result, type="statistic", linewidth=2, col=mycols)
+          plot_list <- plot(x5$test_result[[1]], type="statistic", linewidth=2, col=mycols)
         }
         p3 <-
           matter::as_facets(plot_list, ncol = 1)
@@ -3113,10 +3216,10 @@ StatsPrepServer <- function(id,  setup_values) {
                 fm2,
                 key = T,
                 col = mycols)
-        browser()
+        
         plot_out<-switch(
           input$plot_choice,
-          "SSC ion_image" = p1,
+          "ion_image" = p1,
           "means_plot" = gplots::plotmeans(fm, dat_long_tech_avg),
           "t_statistic" = p3,
           "groupings" = p4,
