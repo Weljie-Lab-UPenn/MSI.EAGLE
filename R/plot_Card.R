@@ -3,6 +3,13 @@
     
     ns <- NS(id)
     
+    col_choices<-c(hcl.pals())
+    initial_cols<-c("Spectral", "Cividis", "Viridis", "Inferno", "Plasma", 
+                    "Zissou 1", "Purple-Green", "Berlin", "PiYG", "Grays", 
+                    "Batlow", "turku", "YlOrRd", "Terrain", 
+                    "PrGn", "Green-Brown", "Hawaii", "Cork", "Rocket", "RdYlBu")
+    
+    col_choices<-c(initial_cols, setdiff(col_choices, initial_cols))
   
     tagList(  
       
@@ -22,15 +29,20 @@
                  
                  fluidRow(
                    column(6, selectInput(ns("contrast3"), "Contrast enhancement", c( "none", "histogram",  "adaptive"))),
-                   column(6, selectInput(ns("color3"), "Colorscale", c(hcl.pals()), selected="Spectral"))
+                   column(6, selectInput(ns("color3"), "Colorscale", col_choices, selected="Spectral"))
                  ),
                  fluidRow(
                    column(6, selectInput(ns("smooth3"), "Smoothing options", c("none", "mean", "gaussian", "bilateral", "adaptive", "diffusion", "guided"))),
                    column(6, checkboxInput(ns("normalize3"), "Scale multiple images?", value = TRUE))
                    ),
+                 
+                 fluidRow(
+                   column(6, checkboxInput(ns("colorkey3"), "Draw color key?", value = TRUE)),
+                   column(6, checkboxInput(ns("dark_bg"), "Dark background?", value = FALSE))
+                   ),
                    
                  
-                 checkboxInput(ns("colorkey3"), "Draw color key?", value = TRUE),
+                 
                  fluidRow(
                    column(6, numericInput(ns("width_im"), "Image plot width (px)", value = 800, step = 50)),
                    column(6, numericInput(ns("height_im"), "Image plot height (px)", value=600, step = 50))
@@ -73,8 +85,16 @@
           return()
         }
       }
-      
-      
+      # browser()
+      # #create new overview_peaks_sel object with media values
+      # if(is.null(fData(overview_peaks_sel)$non_zero)) {
+      #   overview_peaks_sel$non_zero<-Cardinal::summarizeFeatures(overview_peaks_sel, "nnzero")
+      #   if(class(overview_peaks_sel)=="try-error") {
+      #     showNotification("No data available, please check your parameters or dataset", type="error")
+      #     return()
+      #   }
+      # }
+      # 
  
       observe({
         
@@ -135,7 +155,8 @@
  
                checkboxInput(ns("superpose"), "Superpose images?", value=FALSE),
                selectInput(ns("display_mode"), "Ion math?", c("none", "sum", "ratio", "subtract", "min", "max", "mean", "sd", "var",  "multiply")),
-               numericInput(ns("plusminus_viz3"), "plusminus value for visualization",0.05)
+               numericInput(ns("plusminus_viz3"), "+/- m/z for visualization",0.05)
+               
              )
            }
          
@@ -366,11 +387,24 @@
           if(input$plot_pdata){
             req(input$pdata_var_plot)
             
-            plt_tmp<-Cardinal::image(overview_peaks_sel,
-                                    input$pdata_var_plot,
-                                    key=(input$colorkey3),
-                                    #superpose=input$superpose,
-                                    col=pals::alphabet())
+            #create list of arguments for image
+            arg_list<-list(overview_peaks_sel, 
+                       input$pdata_var_plot,
+                        key=(input$colorkey3),
+                        col=pals::alphabet())
+                        
+            if(input$dark_bg) {
+              arg_list$style <- "dark"
+            }
+            
+            plt_tmp<-do.call(Cardinal::image, arg_list)
+            
+            
+            # Cardinal::image(overview_peaks_sel,
+            #                         input$pdata_var_plot,
+            #                         key=(input$colorkey3),
+            #                         #superpose=input$superpose,
+            #                         col=pals::alphabet())
             print(plt_tmp,
                                   #cex.axis=req(cex.axisp),
                                   #cex.lab=cex.labp,
@@ -399,31 +433,59 @@
             mz_set=mz(overview_peaks_sel)[closest_index]
             tol=max(differences) + differences[closest_index]+1
             
-            smoothing_option <- if (input$smooth3 != "none") paste0(", smooth ='", input$smooth3,"'") else ""
-            enhance_option <- if (input$contrast3 != "none") paste0(", enhance ='", input$contrast3,"'") else ""
-            
             plusminus=tol
             
-            image_command <- paste("Cardinal::image(overview_peaks_sel, 
-                                  mz=mz_set,
-                                  tolerance=round(plusminus,3), 
-                                  units='mz',
-                                  col=cpal(input$color3)",
-                                  enhance_option,
-                                  smoothing_option,",
-                                  scale=input$normalize3,
-                                  #superpose=input$superpose,
-                                  key=(input$colorkey3),
-                                  #cex.axis=req(cex.axisp),
-                                  #cex.lab=cex.labp,
-                                  #cex.main=cex.mainp,
-                                  #cex.sub=cex.subp,
-                                  #mar=new_mar,
-                                  #mgp=new_mgp
-            )")
-            browser()
+            #old way-- may be more memory efficient?
+            # smoothing_option <- if (input$smooth3 != "none") paste0(", smooth ='", input$smooth3,"'") else ""
+            # enhance_option <- if (input$contrast3 != "none") paste0(", enhance ='", input$contrast3,"'") else ""
+            # 
+            # image_command <- paste("Cardinal::image(overview_peaks_sel, 
+            #                       mz=mz_set,
+            #                       tolerance=round(plusminus,3), 
+            #                       units='mz',
+            #                       col=cpal(input$color3)",
+            #                       enhance_option,
+            #                       smoothing_option,",
+            #                       scale=input$normalize3,
+            #                       #superpose=input$superpose,
+            #                       key=(input$colorkey3),
+            #                       #cex.axis=req(cex.axisp),
+            #                       #cex.lab=cex.labp,
+            #                       #cex.main=cex.mainp,
+            #                       #cex.sub=cex.subp,
+            #                       #mar=new_mar,
+            #                       #mgp=new_mgp
+            # )")
+            # 
             
-            print(eval(parse(text = image_command)))
+            #print(eval(parse(text = image_command)))
+            
+            
+            
+            smoothing_option <- if (input$smooth3 != "none")  input$smooth3 else NULL
+            enhance_option <- if (input$contrast3 != "none")  input$contrast3 else NULL
+            
+            
+            arg_list<-list(overview_peaks_sel, 
+                           mz=mz_set,
+                           tolerance=round(plusminus,3), 
+                           units='mz',
+                           col=cpal(input$color3),
+                            enhance=enhance_option,
+                           smooth=smoothing_option,
+                           scale=input$normalize3,
+                           #superpose=input$superpose,
+                           key=(input$colorkey3))
+            
+            if(input$dark_bg) {
+              arg_list$style <- "dark"
+            }
+            
+            print(do.call(Cardinal::image, arg_list))
+            
+            
+            
+            
 
             vizi_par(vp_orig)
             
@@ -468,6 +530,7 @@
                   mz2 <- spectra(subsetFeatures(overview_peaks_sel, mz=ion[2]))[1,]
                   overview_peaks_sel$xic <- (1 + mz1) / (1 + mz2)
                   
+                  ion=round(ion, 4)
                   label_txt=paste("ratio of",ion[1],"/",ion[2])
                 }
                 
@@ -480,7 +543,7 @@
                   mz1 <- spectra(subsetFeatures(overview_peaks_sel, mz=ion[1]))[1,]
                   mz2 <- spectra(subsetFeatures(overview_peaks_sel, mz=ion[2]))[1,]
                   overview_peaks_sel$xic <- (mz1) - (mz2)
-                  
+                  ion=round(ion, 4)
                   label_txt=paste("difference of",ion[1],"-",ion[2])
                   
                 }
@@ -493,7 +556,7 @@
                 for(i in 2:nelements){
                   mz2= 1+spectra(subsetFeatures(overview_peaks_sel, mz=ion[i]))[1,]
                   overview_peaks_sel$xic=(xic) * (mz2)
-                  
+                  ion=round(ion, 4)
                   label_txt=paste(ion[1],"*",ion[2])
                   }
                 }
@@ -508,47 +571,51 @@
               
               
               
-              smoothing_option <- if (input$smooth3 != "none") paste0(", smooth ='", input$smooth3,"'") else ""
-              enhance_option <- if (input$contrast3 != "none") paste0(", enhance ='", input$contrast3,"'") else ""
-              
+              # smoothing_option <- if (input$smooth3 != "none") paste0(", smooth ='", input$smooth3,"'") else ""
+              # enhance_option <- if (input$contrast3 != "none") paste0(", enhance ='", input$contrast3,"'") else ""
+              # 
               plusminus=input$plusminus_viz3
               
-              image_command <- paste("Cardinal::image(overview_peaks_sel, 'xic',
-                                  tolerance=round(plusminus,3), 
-                                  units='mz',
-                                  col=cpal(input$color3)",
-                                     enhance_option,
-                                     smoothing_option,",
-                                  scale=input$normalize3,
-                                  #superpose=input$superpose,
-                                  key=(input$colorkey3),
-                                  #cex.axis=req(cex.axisp),
-                                  #cex.lab=cex.labp,
-                                  #cex.main=cex.mainp,
-                                  #cex.sub=cex.subp,
-                                  #mar=new_mar,
-                                  #mgp=new_mgp
-            )")
+            #   image_command <- paste("Cardinal::image(overview_peaks_sel, 'xic',
+            #                       tolerance=round(plusminus,3), 
+            #                       units='mz',
+            #                       col=cpal(input$color3)",
+            #                          enhance_option,
+            #                          smoothing_option,",
+            #                       scale=input$normalize3,
+            #                       #superpose=input$superpose,
+            #                       key=(input$colorkey3),
+            #                       #cex.axis=req(cex.axisp),
+            #                       #cex.lab=cex.labp,
+            #                       #cex.main=cex.mainp,
+            #                       #cex.sub=cex.subp,
+            #                       #mar=new_mar,
+            #                       #mgp=new_mgp
+            # )")
+            #   
+              smoothing_option <- if (input$smooth3 != "none")  input$smooth3 else NULL
+              enhance_option <- if (input$contrast3 != "none")  input$contrast3 else NULL
               
               
-              print(matter::as_facets(eval(parse(text = image_command)), labels=label_txt))
+              arg_list<-list(overview_peaks_sel,
+                             'xic',
+                             tolerance=round(plusminus,3), 
+                             units='mz',
+                             col=cpal(input$color3),
+                             enhance=enhance_option,
+                             smooth=smoothing_option,
+                             scale=input$normalize3,
+                             #superpose=input$superpose,
+                             key=(input$colorkey3))
+              
+              if(input$dark_bg) {
+                arg_list$style <- "dark"
+              }
+              
+              print(matter::as_facets(do.call(Cardinal::image, arg_list), labels=label_txt))
               
               vizi_par(vp_orig)
-              # print(Cardinal::image(overview_peaks_sel, "xic", 
-              #       enhance=input$contrast3,
-              #       colorscale=matter::cpal(input$color3),
-              #       smooth=input$smooth3,
-              #       scale=input$normalize3,
-              #       superpose=input$superpose,
-              #       key=input$colorkey3,
-              #       cex.axis=cex.axisp,
-              #       cex.lab=cex.labp,
-              #       cex.main=cex.mainp,
-              #       cex.sub=cex.subp,
-              #       mar=new_mar,
-              #       mgp=new_mgp
-              #       ))
-              # 
+
             } else {
               
               
@@ -558,31 +625,55 @@
               mz_range=range(mz(overview_peaks_sel))
               
               
-              smoothing_option <- if (input$smooth3 != "none") paste0(", smoothing ='", input$smooth3,"'") else ""
-              enhance_option <- if (input$contrast3 != "none") paste0(", enhance ='", input$contrast3,"'") else ""
-              
+              # smoothing_option <- if (input$smooth3 != "none") paste0(", smoothing ='", input$smooth3,"'") else ""
+              # enhance_option <- if (input$contrast3 != "none") paste0(", enhance ='", input$contrast3,"'") else ""
+              # 
               plusminus=input$plusminus_viz3
               
-              image_command <- paste("Cardinal::image(overview_peaks_sel, 
-                                  mz=mz_set,
-                                  tolerance=round(plusminus,3), 
-                                  units='mz',
-                                  col=cpal(input$color3)",
-                                     enhance_option,
-                                     smoothing_option,",
-                                  scale=input$normalize3,
-                                  superpose=input$superpose,
-                                  key=(input$colorkey3),
-                                  #cex.axis=req(cex.axisp),
-                                  #cex.lab=cex.labp,
-                                  #cex.main=cex.mainp,
-                                  #cex.sub=cex.subp,
-                                  #mar=new_mar,
-                                  #mgp=new_mgp
-            )")
+            #   image_command <- paste("Cardinal::image(overview_peaks_sel, 
+            #                       mz=mz_set,
+            #                       tolerance=round(plusminus,3), 
+            #                       units='mz',
+            #                       col=cpal(input$color3)",
+            #                          enhance_option,
+            #                          smoothing_option,",
+            #                       scale=input$normalize3,
+            #                       superpose=input$superpose,
+            #                       key=(input$colorkey3),
+            #                       #cex.axis=req(cex.axisp),
+            #                       #cex.lab=cex.labp,
+            #                       #cex.main=cex.mainp,
+            #                       #cex.sub=cex.subp,
+            #                       #mar=new_mar,
+            #                       #mgp=new_mgp
+            # )")
+            #   
               
               
-              print(eval(parse(text = image_command)))
+              smoothing_option <- if (input$smooth3 != "none")  input$smooth3 else NULL
+              enhance_option <- if (input$contrast3 != "none")  input$contrast3 else NULL
+              
+              
+              arg_list<-list(overview_peaks_sel,
+                             #'xic',
+                             mz=mz_set,
+                             tolerance=round(plusminus,3), 
+                             units='mz',
+                             col=cpal(input$color3),
+                             enhance=enhance_option,
+                             smooth=smoothing_option,
+                             scale=input$normalize3,
+                             superpose=input$superpose,
+                             key=(input$colorkey3))
+              
+              if(input$dark_bg) {
+                arg_list$style <- "dark"
+              }
+              
+              
+              
+              
+              print(do.call(Cardinal::image, arg_list))
               
               vizi_par(vp_orig)
 
