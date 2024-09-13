@@ -1,0 +1,17 @@
+Spot	Plate	rough_diagnosis	xstart	xend	ystart	yend
+A1	MH0204_33	cancer	0	35	0	100
+A2	MH0204_33	control	36	100	0	100
+A1	UH0505_12	cancer	0	23	0	100
+A2	UH0505_12	control	24	100	0	100
+A1	UH0710_33	cancer	0	28	0	100
+A2	UH0710_33	control	29	100	0	100
+A1	UH9610_15	cancer	0	39	0	100
+A2	UH9610_15	control	40	100	0	100
+A1	UH9812_03	cancer	0	29	0	100
+A2	UH9812_03	control	30	100	0	100
+A1	UH9905_18	cancer	0	28	0	100
+A2	UH9905_18	control	29	100	0	100
+A1	UH9911_05	cancer	0	47	0	100
+A2	UH9911_05	control	48	100	0	100
+A1	UH9912_01	cancer	0	32	0	100
+A2	UH9912_01	control	33	100	0	100
