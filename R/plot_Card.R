@@ -230,7 +230,9 @@
               column(3,numericInput(ns("width_ms"), "Plot width (px)", value = 800)),
               column(3,numericInput(ns("height_ms"), "Plot height (px)", value=300))
             ),
-            imageOutput(ns("plot4")), #, width="800px", height="600px")
+            fluidRow(
+              column(10, imageOutput(ns("plot4")), style = "margin-bottom: 0px; padding-bottom: 0px;")
+              ),
             fluidRow(
               column(3, checkboxInput(ns("calc_ppm"), label = "Show ppm error?", width = '100%')),
               column(3, checkboxInput(ns("show_int"), label = "Show intensity?", width = '100%')),
@@ -320,42 +322,47 @@
             overview_peaks_sel <- subsetPixels(overview_peaks_sel, run %in% input$select_runs)
           }
           
+          vp_orig<-vizi_par()
+          
           #set sizes
           if(input$expand_fonts) {
-            cex.axisp=input$axis_size/100
-            cex.labp=input$label_size/100
-            cex.mainp=input$title_size/100
-            cex.subp=input$subtitle_size/100
+            req(input$axis_size)
             
+            vizi_par(
+              cex.axis=input$axis_size/100,
+              cex.lab=input$label_size/100,
+              cex.main=input$title_size/100,
+              cex.sub=input$subtitle_size/100
+            )
             #get margins
-            cur_mar<-par()$mar
-            
-            new_mar<-c(cur_mar[1]+cex.labp/8, cur_mar[2]+cex.labp/2, cur_mar[3]+cex.mainp/2, cur_mar[4])
-            
-            #if drawing colorkey, add a little on the left
-            if(input$colorkey3) {
-              new_mar[4]=new_mar[4]+cex.axisp
-            }
-            
-            cur_mgp<-par()$mgp
-            
-            #new_mgp<-c(cur_mgp[1]+cex.labp/8, cur_mgp[2], 0)
-            new_mgp<-c(3+max(new_mar[1:2])/20, 1,0)
-            
-            
-            
+            # cur_mar<-par()$mar
+            # 
+            # new_mar<-c(cur_mar[1]+cex.labp/8, cur_mar[2]+cex.labp/2, cur_mar[3]+cex.mainp/2, cur_mar[4])
+            # 
+            # #if drawing colorkey, add a little on the left
+            # if(input$colorkey3) {
+            #   new_mar[4]=new_mar[4]+cex.axisp
+            # }
+            # 
+            # cur_mgp<-par()$mgp
+            # 
+            # #new_mgp<-c(cur_mgp[1]+cex.labp/8, cur_mgp[2], 0)
+            # new_mgp<-c(3+max(new_mar[1:2])/20, 1,0)
+            # 
             
             
-          } else {
-            cex.axisp=1
-            cex.labp=1
-            cex.mainp=1
-            cex.subp=1
-            new_mar<-par()$mar
-            new_mgp<-par()$mgp
             
-          }
-          
+            
+           } else {
+              vizi_par(
+                cex.axis=1,
+                cex.lab=1,
+                cex.main=1,
+                cex.sub=1
+              )
+
+           }
+           
           if(input$plot_pdata){
             req(input$pdata_var_plot)
             
@@ -365,13 +372,15 @@
                                     #superpose=input$superpose,
                                     col=pals::alphabet())
             print(plt_tmp,
-                                  cex.axis=req(cex.axisp),
-                                  cex.lab=cex.labp,
-                                  cex.main=cex.mainp,
-                                  cex.sub=cex.subp,
+                                  #cex.axis=req(cex.axisp),
+                                  #cex.lab=cex.labp,
+                                  #cex.main=cex.mainp,
+                                  #cex.sub=cex.subp,
                                   #mar=new_mar,
-                                  mgp=new_mgp
+                                  #mgp=new_mgp
                   )
+            
+            vizi_par(vp_orig)
           } else if (input$ion_viz3=="viz_all") {
             
             
@@ -405,18 +414,18 @@
                                   scale=input$normalize3,
                                   #superpose=input$superpose,
                                   key=(input$colorkey3),
-                                  cex.axis=req(cex.axisp),
-                                  cex.lab=cex.labp,
-                                  cex.main=cex.mainp,
-                                  cex.sub=cex.subp,
-                                  mar=new_mar,
-                                  mgp=new_mgp
+                                  #cex.axis=req(cex.axisp),
+                                  #cex.lab=cex.labp,
+                                  #cex.main=cex.mainp,
+                                  #cex.sub=cex.subp,
+                                  #mar=new_mar,
+                                  #mgp=new_mgp
             )")
-            
+            browser()
             
             print(eval(parse(text = image_command)))
 
-            
+            vizi_par(vp_orig)
             
             
           } else if (input$ion_viz3=="custom"){
@@ -513,17 +522,18 @@
                                   scale=input$normalize3,
                                   #superpose=input$superpose,
                                   key=(input$colorkey3),
-                                  cex.axis=req(cex.axisp),
-                                  cex.lab=cex.labp,
-                                  cex.main=cex.mainp,
-                                  cex.sub=cex.subp,
-                                  mar=new_mar,
-                                  mgp=new_mgp
+                                  #cex.axis=req(cex.axisp),
+                                  #cex.lab=cex.labp,
+                                  #cex.main=cex.mainp,
+                                  #cex.sub=cex.subp,
+                                  #mar=new_mar,
+                                  #mgp=new_mgp
             )")
               
               
               print(matter::as_facets(eval(parse(text = image_command)), labels=label_txt))
               
+              vizi_par(vp_orig)
               # print(Cardinal::image(overview_peaks_sel, "xic", 
               #       enhance=input$contrast3,
               #       colorscale=matter::cpal(input$color3),
@@ -563,16 +573,18 @@
                                   scale=input$normalize3,
                                   superpose=input$superpose,
                                   key=(input$colorkey3),
-                                  cex.axis=req(cex.axisp),
-                                  cex.lab=cex.labp,
-                                  cex.main=cex.mainp,
-                                  cex.sub=cex.subp,
-                                  mar=new_mar,
-                                  mgp=new_mgp
+                                  #cex.axis=req(cex.axisp),
+                                  #cex.lab=cex.labp,
+                                  #cex.main=cex.mainp,
+                                  #cex.sub=cex.subp,
+                                  #mar=new_mar,
+                                  #mgp=new_mgp
             )")
               
               
               print(eval(parse(text = image_command)))
+              
+              vizi_par(vp_orig)
 
               
             }
@@ -588,15 +600,17 @@
                                   scale=input$normalize3,
                                   #superpose=input$superpose,
                                   key=(input$colorkey3),
-                                  cex.axis=req(cex.axisp),
-                                  cex.lab=cex.labp,
-                                  cex.main=cex.mainp,
-                                  cex.sub=cex.subp,
-                                  mar=new_mar,
-                                  mgp=new_mgp
+                                  #cex.axis=req(cex.axisp),
+                                  #cex.lab=cex.labp,
+                                  #cex.main=cex.mainp,
+                                  #cex.sub=cex.subp,
+                                  #mar=new_mar,
+                                  #mgp=new_mgp
             )
             
             print(image_command)
+            
+            vizi_par(vp_orig)
             
           }
           
@@ -747,38 +761,43 @@
                xlim=input$mass_range_plot
              }
              
-             
+             vp_orig<-vizi_par()
              if(input$spectrum_expand_fonts) {
+               req(input$spectrum_axis_size)
                browser()
-               cex.axisp=input$spectrum_axis_size/100
-               cex.labp=input$spectrum_label_size/100
-               #cex.mainp=input$spectrum_title_size/100
-               #cex.subp=input$spectrum_subtitle_size/100
-               lwdp=input$linewidth/100
+               vizi_par(
+                 cex.axis=req(input$spectrum_axis_size)/100,
+                 cex.lab=input$spectrum_label_size/100,
+                 cex.main=input$spectrum_label_size/100,
+                 #cex.subp=input$spectrum_subtitle_size/100
+                 lwd=input$linewidth/100,
+                 mar = c(0, 0, 1, 1)
+               )
                
                
                #get margins
-               cur_mar<-par()$mar
+               #cur_mar<-par()$mar
                
-               new_mar<-c(cur_mar[1]+cex.labp/8, cur_mar[2]+cex.labp/2, cur_mar[3], cur_mar[4])
+               #new_mar<-c(cur_mar[1]+cex.labp/8, cur_mar[2]+cex.labp/2, cur_mar[3], cur_mar[4])
                
-               cur_mgp<-par()$mgp
+               #cur_mgp<-par()$mgp
                
                #new_mgp<-c(cur_mgp[1]+cex.labp/8, cur_mgp[2], 0)
-               new_mgp<-c(3+max(new_mar[1:2])/20, 1,0)
+               #new_mgp<-c(3+max(new_mar[1:2])/20, 1,0)
+               
+               #lwd=lwdp
                           
                
                
                
                
              } else {
-               cex.axisp=1
-               cex.labp=1
-               #cex.mainp=1
-               #cex.subp=1
-               lwdp=1
-               new_mar<-par()$mar
-               new_mgp<-par()$mgp
+               vizi_par(
+                 cex.axis=1,
+                 cex.lab=1,
+                 cex.main=1,
+                 cex.sub=1
+               )
              }
              
              #browser()
@@ -787,16 +806,18 @@
              p1<-Cardinal::plot(overview_peaks_sel_plot,
                                 xlim=xlim,
                                 ylim =ylim,
-                                cex.axis=req(cex.axisp),
-                                cex.lab=cex.labp,
+                                #cex.axis=req(cex.axisp),
+                                #cex.lab=cex.labp,
                                 #cex.main=cex.mainp,
                                 #cex.sub=cex.subp,
-                                lwd=lwdp,
-                                mar=new_mar, mgp=new_mgp, "mean",
+                                #lwd=lwdp,
+                                # mar=new_mar, 
+                                # mgp=new_mgp, 
+                                "mean",
                                 annPeaks=input$show_mz,
                                 free="y")
              print(p1)
-             
+             vizi_par(vp_orig)
              
              #check for ppm calc
              if(input$calc_ppm) {
