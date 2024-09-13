@@ -562,7 +562,8 @@ DepthAnalysisServer <- function(id,  setup_values) {
                        # 
                        x4$seg_pp_file <- test_mz_reduced2
                        
-                       print(paste0("Number of peaks picked: ", ncol(x4$seg_pp_file)))
+                       
+                       print(paste0("Number of peaks picked: ", nrow(x4$seg_pp_file)))
                        
                      } else if (input$targeted_pp == "targeted") {
                        print("performing targeted analysis")
@@ -637,27 +638,28 @@ DepthAnalysisServer <- function(id,  setup_values) {
                        featureData(x4$seg_pp_file)$ID <- neg_masses$ID
                      }
                      
-                    
-                     #if using downsampling, re-bin
-                     if (input$pix_for_peak_picking2 < 100) {
-                       #combine reduced images.
-                       test_raw_reduced <-
-                         combine_card(bplapply(1:length(raw_list_ord), function(x)
-                           select_pix(x, raw_list_ord, coord_list_segmented)))
-                       #raw_reduced<-combine(bplapply(1:length(raw_list), function(x) select_pix(x,raw_list, coord_list_reduced)))
-                       
-                       
-                       test_mz_reduced <- x4$seg_pp_file
-                       
-                       x4$seg_pp_file <-
-                         ref_to_peaks(
-                           test_raw_reduced,
-                           mz_ref = mz(test_mz_reduced),
-                           tol = input$tol2
-                         )
-                     }
+                    ##removed for now...
+                     # #if using downsampling, re-bin
+                     # if (input$pix_for_peak_picking2 < 100) {
+                     #   #combine reduced images.
+                     #   test_raw_reduced <-
+                     #     combine_card(bplapply(1:length(raw_list_ord), function(x)
+                     #       select_pix(x, raw_list_ord, coord_list_segmented)))
+                     #   #raw_reduced<-combine(bplapply(1:length(raw_list), function(x) select_pix(x,raw_list, coord_list_reduced)))
+                     #   
+                     #   
+                     #   test_mz_reduced <- x4$seg_pp_file
+                     #   
+                     #   x4$seg_pp_file <-
+                     #     ref_to_peaks(
+                     #       test_raw_reduced,
+                     #       mz_ref = mz(test_mz_reduced),
+                     #       tol = input$tol2
+                     #     )
+                     # }
+                     
+                     
                      #restore pdata
-                     #browser()
                      #function to match original pdata to current data coordinates
                      #needed in the event of changes to coordinates externally
                      #pdat is original pData, msddf is the newly created data 
