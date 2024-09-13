@@ -50,8 +50,13 @@ SSCsegServer <- function(id, setup_values, preproc_values) {
     
     observe({
       x2 <- preproc_values()[["x2"]]
-      
       req(x2$ssc)
+      
+      
+      if(class(x2$ssc) == "SpatialShrunkenCentroids") {
+        x2$ssc<-list(x2$ssc)
+      }
+      
       #check if stored coordinates match current dataset; not rigorous, could check names in future
       if (!setequal(dim(x2$mytable_selected), c(req(nrow(coord(x2$ssc[[1]]))), req(nrow(x2$ssc[[1]]@featureData))))) {
         print("stored ssc does not match dimensions of currently selected dataset.")
@@ -207,7 +212,7 @@ SSCsegServer <- function(id, setup_values, preproc_values) {
         radioButtons(
           ns("ssc_model"),
           "Choose model",
-          choices  = x2$ssc_models,
+          choices  = c(x2$ssc_models, "none"),
           selected = "none"
         )
       })
@@ -218,7 +223,7 @@ SSCsegServer <- function(id, setup_values, preproc_values) {
       req(input$ssc_model)
       
       #create tf_list based on selected model and colors
-      
+      browser()
       if (sum(x2$ssc_models %in% input$ssc_model) == 1) {
         model_num <- which(x2$ssc_models %in% input$ssc_model)
         x2$bkcols <- x2$ssc[[model_num]]$class

@@ -10,6 +10,11 @@ PeakPickServer <- function(id, setup_values) {
       setup_values()[["par_mode"]]
     })
     
+    #import chunk size
+    chunks = reactive({
+      setup_values()[["chunks"]]
+    })
+    
     
     has.new.files <- function() {
       unique(list.files(setup_values()[["wd"]]), recursive=T)
@@ -53,7 +58,8 @@ PeakPickServer <- function(id, setup_values) {
       file_choices <- switch(
         input$peak_pick_status,
         "pp_old" = grep(".rds", my_files(), ignore.case = TRUE, value = TRUE),
-        "pp_y" = grep(".imzML", my_files(), ignore.case = TRUE, value = TRUE),
+        "pp_y" = grep(".imzML|.rds", my_files(), ignore.case = TRUE, value = TRUE),
+        "pp_ref" = grep(".imzML|.rds", my_files(), ignore.case = TRUE, value = TRUE),
         # Add default or other cases if needed
         character(0) # Return an empty character vector if no match
         )
@@ -70,7 +76,7 @@ PeakPickServer <- function(id, setup_values) {
         ns("peakAddfile"),
         "Imageset to add to peak file",
         grep(
-          ".imzML",
+          ".rds|.imzML",
           my_files(),
           ignore.case = T,
           value = T
@@ -86,7 +92,7 @@ PeakPickServer <- function(id, setup_values) {
         "open_file" = list(
           radioButtons(
             ns("peak_pick_status"),
-            "Cardinal v3.6+ processed imzML file?",
+            "Cardinal v3.6+ processed .imzML/.rds file?",
             
             c("Yes" = "pp_y", "No, older .rds" = "pp_old")), 
           uiOutput(ns('pk_file')),
@@ -112,6 +118,7 @@ PeakPickServer <- function(id, setup_values) {
           #   ns("save_selected"),
           #   "Save selected runs from peak picked file"
           # ),
+          p(),
           shinyFiles::shinySaveButton(ns("save_imzml"), "Save imzML File", "Save", filetype = list(""))
         ),
         "subset_f" = list(
@@ -212,13 +219,13 @@ PeakPickServer <- function(id, setup_values) {
             choices = c("diff", "sd", "mad", "quantile", "filter", "cwt"),
             selected = "diff"
           ),
-          numericInput(
-            ns("freq_min"),
-            "Minimum peak frequency (0-1)",
-            0.01,
-            min = 0,
-            max = 1
-          ),
+          # numericInput(
+          #   ns("freq_min"),
+          #   "Minimum peak frequency (0-1)",
+          #   0.01,
+          #   min = 0,
+          #   max = 1
+          # ),
           actionButton(ns("action"), label = HTML("Start peak binning"))
         )
       )
@@ -282,7 +289,7 @@ PeakPickServer <- function(id, setup_values) {
       #start clock
       ptm<-proc.time()
       
-  
+      
       withProgress(message = "Performing peak peaking / binning",
                    value = 0.5,
                    detail = "Can take a while for large datasets...",
@@ -295,8 +302,21 @@ PeakPickServer <- function(id, setup_values) {
                          
                        }
                        
-                       overview_peaks <- readImzML(input$peakPickfile)
-                       print(overview_peaks)
+                       
+                       #check filetype and open accordingly
+                       if (length(grep(".rds", input$peakPickfile, ignore.case = T)) > 0) {
+                         overview_peaks <- readRDS(input$peakPickfile)
+                         print(overview_peaks)
+                       } else if (length(grep(".imzML", input$peakPickfile, ignore.case = T) >0)) {
+                         overview_peaks <- readImzML(input$peakPickfile)
+                         print(overview_peaks)
+                       } else {
+                         print("file type not recognized")
+                         return()
+                       }
+                       
+                       # overview_peaks <- readImzML(input$peakPickfile)
+                       # print(overview_peaks)
                        
                        #browser()
                        
@@ -324,6 +344,7 @@ PeakPickServer <- function(id, setup_values) {
                        }
                        
                        setCardinalBPPARAM(par_mode())
+                       setCardinalNChunks(chunks())
                        
                        # commented code not relevant to Cardinal 3.6
                        # coord_list_reduced <-
@@ -374,7 +395,7 @@ PeakPickServer <- function(id, setup_values) {
                        print(plot(mse_queue, i=round(dim(coord(msa))[1]/2,0), linewidth=2))
                        
                        test_mz_reduced<-try(
-                          peakAlign(mse_queue, tolerance= setup_values()[["tol"]], units="ppm") %>%
+                          peakAlign(mse_queue, tolerance= setup_values()[["tol"]], units=setup_values()[["units"]]) %>%
                           subsetFeatures( freq > input$freq_min)%>% 
                           summarizeFeatures()
                        )
@@ -443,19 +464,28 @@ PeakPickServer <- function(id, setup_values) {
                        }
                        #browser()
                        print("binning raw files from reference")
-                       test_mz_reduced <-
-                         readImzML(input$peakPickfile)
+                       #check for rds or imzml and open accordingly
+                       if(length(grep(".rds", input$peakPickfile, ignore.case = T, value = T) == 1)) {
+                         test_mz_reduced <- readRDS(input$peakPickfile)
+                       } else if (length(grep(".imzML", input$peakPickfile, ignore.case = T, value = T) == 1)) {
+                         test_mz_reduced <- readImzML(input$peakPickfile)
+                       } else {
+                         print("file type not recognized")
+                         return()
+                       }
+                       
                        print(test_mz_reduced)
                        setCardinalBPPARAM(par_mode())
+                       setCardinalNChunks(chunks())
                        
                        
                        a<-Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays))
                        
-                       overview_peaks <- try(peakProcess(a,
+                       overview_peaks <- try(a %>% normalize() %>% peakProcess(
                                                          ref=mz(test_mz_reduced),
                                                          SN=input$SNR,
                                                          type="area",
-                                                         tolerance=setup_values()[["tol"]], units="ppm") %>% process() %>% summarizeFeatures()
+                                                         tolerance=setup_values()[["tol"]], units=setup_values()[["units"]]) %>% process() %>% summarizeFeatures()
                        )
                        
                        if(class(overview_peaks) %in% "try-error"){
@@ -485,12 +515,16 @@ PeakPickServer <- function(id, setup_values) {
                        #do.call(cbind, x1$raw_list[c(1:3))
                        
                        setCardinalBPPARAM(par_mode())
+                       setCardinalNChunks(chunks())
                        print("binning raw files from mean spectrum")
                        test_mz_mean <- try(
                          #for debugging
                          #Cardinal::combine(x1$raw_list[c(1:3,5:8)]) %>%
                          Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)) %>%
-                           convertMSImagingArrays2Experiment(mass.range=c(setup_values()[["mz_max"]], setup_values()[["mz_min"]])) %>%
+                         
+                           convertMSImagingArrays2Experiment(mass.range=c(setup_values()[["mz_max"]], setup_values()[["mz_min"]])) %>% 
+                           # normalize() %>% 
+                           # process() %>%
                          estimateReferencePeaks( SNR=input$SNR, 
                                                 method=input$pp_method)
                        )
@@ -505,11 +539,14 @@ PeakPickServer <- function(id, setup_values) {
                          return()
                        }
                        
-                       test_mz_reduced<-try(peakProcess(Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)),
+                       test_mz_reduced<-try(Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)) %>% 
+                                              normalize() %>% 
+                                              peakProcess(
                                                  ref=mz(test_mz_mean),
                                                  SN=input$SNR,
                                                  type="area",
-                                                 tolerance=setup_values()[["tol"]], units="ppm") %>% process() %>% summarizeFeatures()
+                                                 tolerance=setup_values()[["tol"]], units=setup_values()[["units"]]) %>% 
+                                               summarizeFeatures()
                        )
 
                        #test_mz_reduced  <- summarizeFeatures(test_mz_reduced)
@@ -522,6 +559,7 @@ PeakPickServer <- function(id, setup_values) {
                        }
                        
                        setCardinalBPPARAM(par_mode())
+                       setCardinalNChunks(chunks())
                        
                        overview_peaks <-
                          test_mz_reduced
@@ -563,9 +601,20 @@ PeakPickServer <- function(id, setup_values) {
     
     # create subset from peaks within original dataset
     observeEvent(input$action_add_file, {
-      add_peaks <- readImzML(input$peakAddfile)
-      print(add_peaks)
-      
+      #check for .rds or .imzML and open accordingly
+      if(length(grep(".rds", input$peakAddfile, ignore.case = T, value = T) == 1)) {
+        add_peaks <- readRDS(input$peakAddfile)
+        print(add_peaks)
+      } else if (length(grep(".imzML", input$peakAddfile, ignore.case = T, value = T) == 1)) {
+        add_peaks <- readImzML(input$peakAddfile)
+        print(add_peaks)
+      } else {
+        print("file type not recognized")
+        return()
+      }
+      # add_peaks <- readImzML(input$peakAddfile)
+      # print(add_peaks)
+      # 
       
       #check to make sure overview_peaks() exists
       
@@ -631,12 +680,22 @@ PeakPickServer <- function(id, setup_values) {
         return()
         
       }
-      
+      #check filename and open accordinlgy
+      if(length(grep(".rds", input$peakAddfile, ignore.case = T, value = T) == 1)) {
+        add_peaks <- readRDS(input$peakAddfile)
+        print(add_peaks)
+      } else if (length(grep(".imzML", input$peakAddfile, ignore.case = T, value = T) == 1)) {
+        add_peaks <- readImzML(input$peakAddfile)
+        print(add_peaks)
+      } else {
+        print("file type not recognized")
+        return()
+      }
       
       #browser()
-      add_peaks <- readImzML(input$peakAddfile)
-      print(add_peaks)
-      
+      # add_peaks <- readImzML(input$peakAddfile)
+      # print(add_peaks)
+      # 
       
       #check to make sure overview_peaks() exists and has the same number of peaks
       
@@ -857,6 +916,7 @@ PeakPickServer <- function(id, setup_values) {
           
           
           writeImzML(pk_img, filen)
+          saveRDS(pk_img, paste0(filen, ".rds"))
         }
       )
     

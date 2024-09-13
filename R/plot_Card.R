@@ -32,8 +32,8 @@
                  
                  checkboxInput(ns("colorkey3"), "Draw color key?", value = TRUE),
                  fluidRow(
-                   column(6, numericInput(ns("width_im"), "Image plot width (px)", value = 800)),
-                   column(6, numericInput(ns("height_im"), "Image plot height (px)", value=600))
+                   column(6, numericInput(ns("width_im"), "Image plot width (px)", value = 800, step = 50)),
+                   column(6, numericInput(ns("height_im"), "Image plot height (px)", value=600, step = 50))
                  ),
                  checkboxInput(ns("plot_pdata"), "Plot Phenotype data?", value=FALSE),
                  uiOutput(ns("plotpdata")),
@@ -81,15 +81,17 @@
         output$plot.window <- renderUI({
           
           if(input$ion_viz3=="custom") {
-            list(
-              imageOutput(ns("plot3_pk") ), #, width="800px", height="600px"),
-              DT::dataTableOutput(ns('tbl'))
-              
+            fluidRow(
+              column(12, imageOutput(ns("plot3_pk"))),
+              fluidRow(
+                column(12, br()),  # Adding space between the image and the table
+                column(12, DT::dataTableOutput(ns('tbl')))
+              )
             )
           } else {
-            list(
-              imageOutput(ns("plot3_pk") )) #, width="800px", height="600px")
-            
+            fluidRow(
+              column(12, imageOutput(ns("plot3_pk")))
+            )
           }
           
         })
@@ -97,8 +99,8 @@
       })
       
       
-      observe({
-        
+
+      
          output$mz_viz3a <- renderUI ({
            req(overview_peaks_sel)
            
@@ -115,6 +117,12 @@
              }
              tbl$mz<-round(tbl$mz, 4)
              
+             
+             updateNumericInput(session, ("width_im"), value=800, step=50)
+             updateNumericInput(session, ("height_im"), value=450, step=50)
+             
+        
+             
              #add something here at some point to only select mz, freq, count, and mean columns
              
              
@@ -124,18 +132,9 @@
              }, selection = "multiple")
   
              list(
-               # selectInput(ns("mz_viz3"),
-               #           label= "m/z selection",
-               #           multiple=TRUE,
-               #           choices = mz_list
-               #           ),
-               
-               
+ 
                checkboxInput(ns("superpose"), "Superpose images?", value=FALSE),
                selectInput(ns("display_mode"), "Ion math?", c("none", "sum", "ratio", "subtract", "min", "max", "mean", "sd", "var",  "multiply")),
-               #checkboxInput(ns("display_mode"), 
-              #               "Sum m/z TICs?",
-              #                FALSE),
                numericInput(ns("plusminus_viz3"), "plusminus value for visualization",0.05)
              )
            }
@@ -143,7 +142,7 @@
           })
          
         
-      })
+    
       
       mz_viz3 <- reactive({
         req(overview_peaks_sel)
@@ -235,7 +234,7 @@
             fluidRow(
               column(3, checkboxInput(ns("calc_ppm"), label = "Show ppm error?", width = '100%')),
               column(3, checkboxInput(ns("show_int"), label = "Show intensity?", width = '100%')),
-              column(3, checkboxInput(ns("show_mz"), label = "Show mz value?", width = '100%'))
+              column(3, numericInput(ns("show_mz"), label = "# mz values to show?", width = '100%', value=0))
             ),
             checkboxInput(ns("spectrum_expand_fonts"), "Extended font options?", value=FALSE),
             uiOutput(ns("spectrum_fonts")),
@@ -436,7 +435,7 @@
               if(input$display_mode%in%c("min", "max", "min", "mean", "sum", "sd", "var")) { 
           
                 
-                browser()
+                
                 select_vec<-as.character(mz(overview_peaks_sel)) %in% as.character(ion)
                 #test to make sure there are 2 or more elements
                 if(sum(select_vec)<2){
@@ -447,6 +446,8 @@
                 
                 sm<-summarizePixels(overview_peaks_sel[select_vec,], stat=c(xic=input$display_mode), as="DataFrame")
                 pData(overview_peaks_sel)$xic<-sm$xic
+                
+                label_txt=paste(input$display_mode, "mz(s)=", paste(ion, collapse=", "))
             
               }else if(input$display_mode=="ratio"){
                 if(length(ion)!=2){
@@ -456,7 +457,9 @@
                 } else {
                   mz1 <- spectra(subsetFeatures(overview_peaks_sel, mz=ion[1]))[1,]
                   mz2 <- spectra(subsetFeatures(overview_peaks_sel, mz=ion[2]))[1,]
-                  xic <- (1 + mz1) / (1 + mz2)
+                  overview_peaks_sel$xic <- (1 + mz1) / (1 + mz2)
+                  
+                  label_txt=paste("ratio of",ion[1],"/",ion[2])
                 }
                 
               } else if(input$display_mode=="subtract") {
@@ -467,7 +470,10 @@
                 } else {
                   mz1 <- spectra(subsetFeatures(overview_peaks_sel, mz=ion[1]))[1,]
                   mz2 <- spectra(subsetFeatures(overview_peaks_sel, mz=ion[2]))[1,]
-                  xic <- (mz1) - (mz2)
+                  overview_peaks_sel$xic <- (mz1) - (mz2)
+                  
+                  label_txt=paste("difference of",ion[1],"-",ion[2])
+                  
                 }
                 
                 
@@ -477,15 +483,11 @@
                 
                 for(i in 2:nelements){
                   mz2= 1+spectra(subsetFeatures(overview_peaks_sel, mz=ion[i]))[1,]
-                  xic=(xic) * (mz2)
+                  overview_peaks_sel$xic=(xic) * (mz2)
+                  
+                  label_txt=paste(ion[1],"*",ion[2])
+                  }
                 }
-                }else if(input$display_mode=="subtract") {
-                
-                mz1 <- spectra(subsetFeatures(overview_peaks_sel, mz=ion[1]))[1,]
-                mz2 <- spectra(subsetFeatures(overview_peaks_sel, mz=ion[2]))[1,]
-                xic <- (mz1) - (mz2)
-                
-              }
             
   
               
@@ -495,21 +497,48 @@
                 return()
               }
               
-              print(Cardinal::image(overview_peaks_sel, xic~x*y, 
-                    enhance=input$contrast3,
-                    colorscale=matter::cpal(input$color3),
-                    smooth=input$smooth3,
-                    scale=input$normalize3,
-                    superpose=input$superpose,
-                    key=input$colorkey3,
-                    cex.axis=cex.axisp,
-                    cex.lab=cex.labp,
-                    cex.main=cex.mainp,
-                    cex.sub=cex.subp,
-                    mar=new_mar,
-                    mgp=new_mgp
-                    ))
               
+              
+              smoothing_option <- if (input$smooth3 != "none") paste0(", smooth ='", input$smooth3,"'") else ""
+              enhance_option <- if (input$contrast3 != "none") paste0(", enhance ='", input$contrast3,"'") else ""
+              
+              plusminus=input$plusminus_viz3
+              
+              image_command <- paste("Cardinal::image(overview_peaks_sel, 'xic',
+                                  tolerance=round(plusminus,3), 
+                                  units='mz',
+                                  col=cpal(input$color3)",
+                                     enhance_option,
+                                     smoothing_option,",
+                                  scale=input$normalize3,
+                                  #superpose=input$superpose,
+                                  key=(input$colorkey3),
+                                  cex.axis=req(cex.axisp),
+                                  cex.lab=cex.labp,
+                                  cex.main=cex.mainp,
+                                  cex.sub=cex.subp,
+                                  mar=new_mar,
+                                  mgp=new_mgp
+            )")
+              
+              
+              print(matter::as_facets(eval(parse(text = image_command)), labels=label_txt))
+              
+              # print(Cardinal::image(overview_peaks_sel, "xic", 
+              #       enhance=input$contrast3,
+              #       colorscale=matter::cpal(input$color3),
+              #       smooth=input$smooth3,
+              #       scale=input$normalize3,
+              #       superpose=input$superpose,
+              #       key=input$colorkey3,
+              #       cex.axis=cex.axisp,
+              #       cex.lab=cex.labp,
+              #       cex.main=cex.mainp,
+              #       cex.sub=cex.subp,
+              #       mar=new_mar,
+              #       mgp=new_mgp
+              #       ))
+              # 
             } else {
               
               
@@ -532,7 +561,7 @@
                                      enhance_option,
                                      smoothing_option,",
                                   scale=input$normalize3,
-                                  #superpose=input$superpose,
+                                  superpose=input$superpose,
                                   key=(input$colorkey3),
                                   cex.axis=req(cex.axisp),
                                   cex.lab=cex.labp,
@@ -704,10 +733,13 @@
              if(is.null(input$x_target) || is.na(input$x_target)){
                xlim=input$mass_range_plot
                
-               
+               overview_peaks_sel_plot<-overview_peaks_sel
                
              } else {
                xlim=c(input$x_target-input$x_tol, input$x_target+input$x_tol)
+               
+               #subsetFeatures to only include mz values within range
+               overview_peaks_sel_plot<-subsetFeatures(overview_peaks_sel, mz > xlim[1] & mz < xlim[2])
                
              }
              
@@ -717,6 +749,7 @@
              
              
              if(input$spectrum_expand_fonts) {
+               browser()
                cex.axisp=input$spectrum_axis_size/100
                cex.labp=input$spectrum_label_size/100
                #cex.mainp=input$spectrum_title_size/100
@@ -751,7 +784,7 @@
              #browser()
              #overview_peaks_sel<-Cardinal::summarizeFeatures(overview_peaks_sel)
              
-             p1<-Cardinal::plot(overview_peaks_sel,
+             p1<-Cardinal::plot(overview_peaks_sel_plot,
                                 xlim=xlim,
                                 ylim =ylim,
                                 cex.axis=req(cex.axisp),
@@ -759,64 +792,59 @@
                                 #cex.main=cex.mainp,
                                 #cex.sub=cex.subp,
                                 lwd=lwdp,
-                                mar=new_mar, mgp=new_mgp, "mean")
+                                mar=new_mar, mgp=new_mgp, "mean",
+                                annPeaks=input$show_mz,
+                                free="y")
              print(p1)
+             
              
              #check for ppm calc
              if(input$calc_ppm) {
-               #browser()
-               dat=overview_peaks_sel
+               
+               dat=overview_peaks_sel_plot
                x=mz(dat)
                targ_mz<-req(input$x_target)
-               x_sel<-subset(x, x>xlim[1] & x< xlim[2])
+               x_sel<-subset(x, x>=xlim[1] & x<= xlim[2])
                
                ppm_error<- round(1e6*(x_sel-targ_mz)/targ_mz, 2)
                
-               y_labs<-p1$facets[[1]][[1]]$y[p1$facets[[1]][[1]]$x %in% x_sel]
+               p1_coord<-p1[[1]][[1]]$marks$peaks$encoding
+               
+               y_labs<-p1_coord$y[p1_coord$x %in% x_sel]
                
                if(length(ppm_error)==0){
                  showNotification("No ppm error calculated, are there any peaks?", type="warning")
                  return()
                } else {
-                print(text(x=x_sel, y=y_labs+ylim[2]*.05, req(ppm_error)))
+                print(text(x=x_sel, y=y_labs+ylim[2]*.25, req(ppm_error)))
                }
                
              }
              
-             if(input$show_mz) {
-               #browser()
-               dat=overview_peaks_sel
-               x=mz(dat)
-               x_sel<-subset(x, x>xlim[1] & x< xlim[2])
-               
-               
-               y_labs<-p1$facets[[1]][[1]]$y[p1$facets[[1]][[1]]$x %in% x_sel]
-               
-               if(length(x_sel)==0){
-                 showNotification("No mz values in range, are there any peaks?", type="warning")
-                 return()
-               } else {
-                 print(text(x=x_sel, y=y_labs+ylim[2]*.15, req(round(x_sel, 4))))
-               }
-               
-             }
+             
              
              if(input$show_int) {
-               #browser()
-               dat=overview_peaks_sel
+              
+               
+               ###
+               p1_coord<-p1[[1]][[1]]$marks$peaks$encoding
+               
+               
+               
+               dat=overview_peaks_sel_plot
                x=mz(dat)
                
-               x_sel<-subset(x, x>xlim[1] & x< xlim[2])
+               x_sel<-subset(x, x>=xlim[1] & x<= xlim[2])
                
                
                
-               y_labs<-p1$facets[[1]][[1]]$y[p1$facets[[1]][[1]]$x %in% x_sel]
+               y_labs<-p1_coord$y[p1_coord$x %in% x_sel]
                
                if(length(y_labs)==0){
                  showNotification("No intensities found, are there any peaks?", type="warning")
                  return()
                } else {
-                 print(text(x=x_sel, y=y_labs+ylim[2]*.10, req(round(y_labs, 0))))
+                 print(text(x=x_sel, y=y_labs+ylim[2]*.15, req(round(y_labs, 0))))
                }
                
              }

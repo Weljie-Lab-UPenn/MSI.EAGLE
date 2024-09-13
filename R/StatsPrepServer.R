@@ -1611,7 +1611,7 @@ StatsPrepServer <- function(id,  setup_values) {
     observeEvent(input$mummichog, {
       req(x5$stats_results)
       
-      
+      browser()
       if (input$stats_test %in% c("meanstest", "spatialDGMM")) {
         dat <- x5$stats_results %>%
           dplyr::mutate_at(dplyr::vars(PValue, AdjP), ~ (round(., 5))) %>% 
@@ -1652,6 +1652,7 @@ StatsPrepServer <- function(id,  setup_values) {
     observeEvent(input$metaboanalyst, {
       req(x5$stats_results)
       
+      browser()
       
       if (input$stats_test %in% c("meanstest", "spatialDGMM")) {
         dat <- x5$stats_results %>%
@@ -2194,7 +2195,7 @@ StatsPrepServer <- function(id,  setup_values) {
               summarizeFeatures(
                 x5$data_file_selected %>% subsetFeatures(mz %in% dat$mz),
                 groups = droplevels(as.factor(as.data.frame(
-                  pData(x5$data_file_selected)
+                  pData(x5$data_file_selected), na.rm=TRUE
                 )[, input$phen_cols_stats]))) %>% fData()
                 
               )
@@ -2205,6 +2206,9 @@ StatsPrepServer <- function(id,  setup_values) {
             mean_spectra[match(dat$mz, mean_spectra$mz), ]
           
           vars=colnames(mean_spectra)[!colnames(mean_spectra) %in% c("mz", "count", "freq", "ID")]
+          #remove vars that end in .1
+          vars <- vars[!grepl("\\.1$", vars)]
+          
           
           log2FC = try(formatC(log2(mean_spectra[, vars[2]] / mean_spectra[, vars[1]]), format="fg", digits=3))
           
@@ -2222,6 +2226,23 @@ StatsPrepServer <- function(id,  setup_values) {
             dat <-
               cbind(dat, max_mean_group = colnames(mean_spectra[, vars])[max.col(mean_spectra[, vars])])
             dat$mz <- round(dat$mz, 4)
+            
+            
+            #if ID exists in mean_spectra, add it to dat, and reorder to have i, mz and ID first
+            if(!is.null(mean_spectra$ID)){
+              #if ID doesn't exist in DAT already, add it
+              if(!"ID" %in% colnames(dat)){
+                dat <- cbind(ID=mean_spectra$ID, dat)
+              }
+            }
+            
+            #check for ID column, and if it exists, move it to first column after mz
+            if("ID" %in% colnames(dat)){
+              dat <- dat %>% dplyr::select(i, mz, ID, everything())
+            }
+            
+            
+            
             
           } else {
             print("stats table and fold change results have different lengths, not adding FC")

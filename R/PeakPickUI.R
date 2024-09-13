@@ -10,8 +10,8 @@ PeakPickUI <- function(id) {
              sidebarPanel(
                
                radioButtons(ns("pp_operation"), "Peakpeaking operation",
-                            c("Open previously peakpicked file (.imzML / old .rds)"="open_file",
-                              "Peakpick rawfiles (imzML loaded in Data Setup tab)"="pp_raw",
+                            c("Open previously peakpicked file"="open_file",
+                              "Peakpick rawfiles (ie. imzML loaded in Data Setup tab)"="pp_raw",
                               "Add two imagesets (same coordinates)"="subset_f",
                               "Add two imagesets (same peaklist)"="add_same_pklist"
                               #"Demo data from CardinalWorkflows package"="demo"

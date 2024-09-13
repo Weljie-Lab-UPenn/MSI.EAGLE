@@ -80,25 +80,46 @@ DepthAnalysisServer <- function(id,  setup_values) {
       switch(
         input$targeted_pp,
         "untargeted" =
-          list(
-            numericInput(
-              ns("pix_for_peak_picking2"),
-              "% of pixels to for peak picking",
-              100
-            ),
-            numericInput(ns("SNR2"), "S/N for comprehensive peak picking", 20),
-            numericInput(
-              ns("freq_min2"),
-              "Minimum peak frequency (0-1",
-              0.03,
-              min = 0,
-              max = 1
-            ),
-            numericInput(
-              ns("tol2"),
-              "tolerance for  alignment or peak binning (ppm)",
-              30
-            ),
+          #list(
+            # numericInput(
+            #   ns("pix_for_peak_picking2"),
+            #   "% of pixels to for peak picking",
+            #   100
+            # ),
+            list(
+              fluidRow(
+                column(6, 
+                       numericInput(
+                         ns("SNR2"),
+                         "S/N for comprehensive peak picking",
+                         20
+                       )
+                ),
+                column(6, 
+                       numericInput(
+                         ns("freq_min2"),
+                         "Minimum peak frequency (0-1",
+                         0.03,
+                         min = 0,
+                         max = 1
+                       )
+                )
+              ),
+              fluidRow( column(6, numericInput(
+                ns("tol2"),
+                "tolerance",
+                30
+                )
+              ),
+              column(6, selectInput(
+                ns("units2"),
+                "units",
+                choices=c("ppm", "mz"),
+                selected="ppm"
+                )
+              )
+              ),
+            
             textInput(
               ns("pp_method2"),
               "Peak picking method (“diff”, “sd”, “mad”, “quantile”, “filter”, “cwt”)",
@@ -115,7 +136,7 @@ DepthAnalysisServer <- function(id,  setup_values) {
               accept = "text/plain"
             ),
             #must have column called exact.mass
-            numericInput(ns("tol2"), "tolerance for peak binning (ppm)", 15)
+            numericInput(ns("tol2"), "tolerance for peak binning (ppm)", 25)
           ),
         "mean" = list(
           numericInput(ns("SNR2"), "S/N for comprehensive peak picking", 10),

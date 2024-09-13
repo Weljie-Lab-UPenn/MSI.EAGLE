@@ -205,6 +205,7 @@ UMAPServer <- function(id, setup_values, preproc_values) {
         
       }
       
+      browser()
       #if there is already processed data, use that
       if (!is.null(x2$list_proc_img)) {
         img.dat <-

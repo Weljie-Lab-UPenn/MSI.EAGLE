@@ -6,42 +6,55 @@ DataSetupServer <- function(id, rawd, wd) {
     
     
     output$pp_params_display <- renderUI({
-      switch(
+      
+      
+      
+      # Define the dynamic parameters based on the switch
+      params <- switch(
         input$pp_params,
         "qtof1" = list(
-          numericInput(ns("res"), "resolution for peakpicking (ppm), NA for estimate", NA),
-          numericInput(ns("tol"), "tolerance for spectral alignment (ppm)", 20),
-          numericInput(
-            ns("mass_range_min"),
-            label = p("m/z min for import"),
-            min = 0,
-            value = 50
-          ),
-          numericInput(
-            ns("mass_range_max"),
-            label = p("m/z max for import"),
-            min = 0,
-            value = 1700
-          )
+          res = NA, 
+          tol = 30, 
+          mass_range_min = 50, 
+          mass_range_max = 1700
         ),
         "hires" = list(
-          numericInput(ns("res"), "resolution for peakpicking (ppm)", 3),
-          numericInput(ns("tol"), "tolerance for spectral alignment (ppm)", 10),
-          numericInput(
-            ns("mass_range_min"),
-            label = p("m/z min for import"),
-            min = 0,
-            value = 50
-          ),
-          numericInput(
-            ns("mass_range_max"),
-            label = p("m/z max for import"),
-            min = 0,
-            value = 1700
-          )
+          res = NA, 
+          tol = 10, 
+          mass_range_min = 50, 
+          mass_range_max = 1700
         )
       )
       
+        
+        tagList(
+          # Use the parameters to render UI elements dynamically
+          numericInput(ns("res"), "resolution (ppm)", params$res),  
+          
+          fluidRow(
+            column(6, 
+                   numericInput(ns("tol"), "tolerance", params$tol)),
+            column(6, 
+                   selectInput(ns("units"), "units", choices = c("ppm", "mz"), selected = "ppm"))
+          ),
+          fluidRow(
+            column(6,
+                   numericInput(
+                     ns("mass_range_min"),
+                     label = p("m/z min for import"),
+                     min = 0,
+                     value = params$mass_range_min
+                   )),
+            column(6,
+                   numericInput(
+                     ns("mass_range_max"),
+                     label = p("m/z max for import"),
+                     min = 0,
+                     value = params$mass_range_max
+                   ))
+          )
+        )
+    
       
       
     })
@@ -207,7 +220,7 @@ DataSetupServer <- function(id, rawd, wd) {
             paste0(input$folder,"//",x),
             #folder=input$folder,
             resolution = input$res,
-            units = "ppm",
+            units = input$units,
             mass.range = c(input$mass_range_min, input$mass_range_max)
           )
           #Cardinal::centroided(y) <- TRUE
@@ -236,14 +249,14 @@ DataSetupServer <- function(id, rawd, wd) {
         tmp.img <- convertMSImagingArrays2Experiment(tmp.img, 
                                                      mass.range = c(input$mass_range_min, input$mass_range_max), 
                                                      resolution = input$res, 
-                                                     units = "ppm"
+                                                     units = input$units
                                                      )
         #tmp.img <- Cardinal::combine(x1$raw_list[1:length(files())])
         tmp.img<- tmp.img %>% 
-           peakProcess(SNR=3, 
+           peakProcess(SNR=20, 
                        tolerance = input$tol, 
-                       units = "ppm", 
-                       method="mad",
+                       units = input$units, 
+                       method="diff",
                        mass.range = c(input$mass_range_min, input$mass_range_max), 
                        sampleSize=input$pix_to_plot/100, filterFreq=0.2) %>% summarizeFeatures()
       })
@@ -444,6 +457,7 @@ DataSetupServer <- function(id, rawd, wd) {
         wd = input$wd,
         rawd = input$rawd,
         ncores = input$ncores,
+        chunks = input$chunks,
         x1 = x1,
         par_mode_out = setCardinalBPPARAM(par_mode()),
         par_mode = par_mode(),
@@ -451,7 +465,8 @@ DataSetupServer <- function(id, rawd, wd) {
         # used for pick picking. may be better not transferring
         res = input$res, #same as align_tol
         mz_max=input$mass_range_max,
-        mz_min=input$mass_range_min
+        mz_min=input$mass_range_min,
+        units=input$units
       )
     })
     return(setup_values)

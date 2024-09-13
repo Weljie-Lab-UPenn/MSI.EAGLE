@@ -33,17 +33,20 @@ DataSetupUI <- function(id, ncores, rawd, wd) {
         
         textInput(
           ns("regex"),
-          label = p("Regex syntax to extract files if needed."),
+          label = p("Regex syntax for raw files."),
           value = "(.*)imzML$"
         ),
         uiOutput(ns("par_mode_setup")),
-        
-        numericInput(ns("ncores"), "Number of cores to use", ncores),
-        # radioButtons(
-        #   ns("mode"),
-        #   "Ion mode (only for visualization)",
-        #   c("Positive" = "p", "Negative" = "n")
-        # ),
+        fluidRow(
+          column(6, numericInput(ns("ncores"), "# of cores", ncores)),
+          column(6, numericInput(ns("chunks"), "# of chunks", 20))
+        ),
+        # numericInput(ns("ncores"), "# of cores e", ncores),
+        # # radioButtons(
+        # #   ns("mode"),
+        # #   "Ion mode (only for visualization)",
+        # #   c("Positive" = "p", "Negative" = "n")
+        # # ),
         selectInput(
           ns("pp_params"),
           label = "Peak picking params",
@@ -54,26 +57,36 @@ DataSetupUI <- function(id, ncores, rawd, wd) {
         uiOutput(ns("pp_params_display")),
         actionButton(ns("action1"), label = "Import Data"),
         
-        p("Limits for plotting spectrum to ensure MS looks reasonable"),
         
-        numericInput(ns("pix_to_plot"), "% of pixels to randomly sample for plot", 1),
-        actionButton(
-          ns("action2"),
-          label = HTML("Extract sample and <br/> MS Spectrum plot")
-        ),
-        p(),
-        selectInput(
-          ns("cardworkdat"),
-          label = "Choose sample dataset from CardinalWorkflows",
-          choices =
-            c(
-              "Human Renal Cell Carcinoma (RCC) with background",
-              "Human Renal Cell Carcinoma (RCC) (no background)",
-              "Whole Pig Fetus Cross-Section"
-            )
-        ),
-        actionButton(ns("action_demo"), label = HTML("Load demo data"))
+        wellPanel(
+          tags$hr(style = "border-top: 2px solid #FF5733;"),  # Change color and thickness
+          
+          p("Quick Look for Quality Control:"),
+          
+          
+          p("Limits for plotting spectrum to ensure MS looks reasonable"),
         
+          numericInput(ns("pix_to_plot"), "% of pixels to randomly sample for plot", 1),
+          actionButton(
+            ns("action2"),
+            label = HTML("Extract sample and <br/> MS Spectrum plot")
+          )
+        ),
+        wellPanel(
+          p(),
+          tags$hr(style = "border-top: 2px solid #FF5733;"),  # Change color and thickness
+          selectInput(
+            ns("cardworkdat"),
+            label = "Choose sample dataset from CardinalWorkflows",
+            choices =
+              c(
+                "Human Renal Cell Carcinoma (RCC) with background",
+                "Human Renal Cell Carcinoma (RCC) (no background)",
+                "Whole Pig Fetus Cross-Section"
+              )
+          ),
+          actionButton(ns("action_demo"), label = HTML("Load demo data"))
+        )
         
         
         
