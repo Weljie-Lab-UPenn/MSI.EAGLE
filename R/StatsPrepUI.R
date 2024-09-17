@@ -63,6 +63,9 @@ StatsPrepUI <- function(id) {
              
              # create a mainPanel for the sidebarLayout
              mainPanel(# create a tabsetPanel for the mainPanel
+               # create a verbatimTextOutput for the tabPanel
+               verbatimTextOutput(ns("filename_header")),
+               
                tabsetPanel(
                  # create a tabPanel for the tabsetPanel
                  tabPanel(
@@ -71,8 +74,7 @@ StatsPrepUI <- function(id) {
                    # set the value of the tabPanel to the namespace
                    value = ns("tab6a"),
                    
-                   # create a verbatimTextOutput for the tabPanel
-                   verbatimTextOutput(ns("filename_header")),
+                   
                    
                    # create an uiOutput for the tabPanel
                    uiOutput(ns('phen_cols_stats')),
@@ -106,19 +108,21 @@ StatsPrepUI <- function(id) {
                    # create a dataTableOutput for the tabPanel
                    DT::dataTableOutput(ns("stats_table")),
                    
-                   # create an actionButton for the tabPanel
-                   actionButton(ns("mummichog"), "Output Mummichog file"),
-                   
-                   # create an actionButton for the tabPanel
-                   actionButton(ns("metaboanalyst"), "Output Metaboanalyst file"),
-                   
-                   # create a textInput for the tabPanel
-                   textInput(ns("plot_prefix"), label = "Prefix for plotting / results output", value =
-                               "output"),
-                   
-                   # create an actionButton for the tabPanel
-                   actionButton(ns("write_plots"), label = "save significant plots from testing to directory")
-                   
+                   wellPanel(
+                     # create an actionButton for the tabPanel
+                     actionButton(ns("mummichog"), "Output Mummichog file"),
+                     
+                     # create an actionButton for the tabPanel
+                     actionButton(ns("metaboanalyst"), "Output Metaboanalyst file"),
+                   ),
+                   wellPanel(
+                     # create a textInput for the tabPanel
+                     textInput(ns("plot_prefix"), label = "Prefix for plotting / results output", value =
+                                 "output"),
+                     
+                     # create an actionButton for the tabPanel
+                     actionButton(ns("write_plots"), label = "save significant plots from testing to directory")
+                   ),
                  ),
                  
                  # create a tabPanel for the tabsetPanel

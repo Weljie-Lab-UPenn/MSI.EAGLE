@@ -10,6 +10,8 @@ StatsPrepServer <- function(id,  setup_values) {
       setup_values()[["par_mode"]]
     })
     
+
+    
     has.new.files <- function() {
       unique(list.files(setup_values()[["wd"]], recursive = T))
     }
@@ -59,27 +61,27 @@ StatsPrepServer <- function(id,  setup_values) {
         "meanstest" = list(
           uiOutput(ns('test_membership')),
           uiOutput(ns("phen_interaction_stats")),
-          actionButton(ns("run_test"), label = "Run test"),
-          uiOutput(ns("output_factors"))
+          actionButton(ns("run_test"), label = "Run test")
+          #uiOutput(ns("output_factors")),
           #uiOutput(ns('anova_factors')),
           #actionButton(ns("save_stats_models"), label =
           #               "Save means test model"),
-          #actionButton(ns("restore_stats_models"), "Restore means test model"))
+          #actionButton(ns("restore_stats_models"), "Restore means test model")
           ),
         "spatialDGMM" = list(
           uiOutput(ns('test_membership')),
           uiOutput(ns('ssc_params')),
           uiOutput(ns("phen_interaction_stats")),
-          uiOutput(ns("output_factors")),
+          #uiOutput(ns("output_factors")),
           checkboxInput(ns("var_filt"), "Filter by variance?", value = TRUE),
           numericInput(ns("var_thresh"), "Quantile filter for variance-based threshold", 0.8),
           #checkboxInput(ns("dgmm_means_test"), "Perform means test on DGMM results?", value = TRUE),
           actionButton(ns("run_test"), label = "Run test"),
-          #textInput(ns("plot_prefix"), label="Prefix for plotting / results output", value="output"),
+          textInput(ns("plot_prefix"), label="Prefix for plotting / results output", value="output"),
           actionButton(ns("write_plots"), label =
-                         "save significant plots directory 'plots'"),
-          actionButton(ns("save_stats_models"), "Save DGMM model"),
-          actionButton(ns("restore_stats_models"), "Restore DGMM model")
+                         "save significant plots directory 'plots'")
+          #actionButton(ns("save_stats_models"), "Save DGMM model"),
+          #actionButton(ns("restore_stats_models"), "Restore DGMM model")
           ),
         #https://www.datanovia.com/en/lessons/mixed-anova-in-r/ some ANOVA information
         #https://www.datanovia.com/en/lessons/repeated-measures-anova-in-r/
@@ -144,7 +146,8 @@ StatsPrepServer <- function(id,  setup_values) {
       #full set of grouping variables for plot / output / grouping
       group_var = NULL,
       # names of groupign variables
-      stats_table_filtered = NULL #filtered stats table final form
+      stats_table_filtered = NULL, #filtered stats table final form
+      mytable_stats_plate_rows_selected = NULL #selected rows from stats table
     )
     output$final_data <- renderUI({
       selectInput(
@@ -515,6 +518,10 @@ StatsPrepServer <- function(id,  setup_values) {
     observeEvent(input$run_test, {
       message("Running stats test")
       gc()
+      
+      setCardinalBPPARAM(par_mode())
+      setCardinalNChunks(setup_values()[["chunks"]])
+      
       if (is.null(x5$data_file)) {
         print(
           "Select dataset to analyze and then press 'Read file for stats' button in the left panel"
@@ -1611,17 +1618,18 @@ StatsPrepServer <- function(id,  setup_values) {
     observeEvent(input$mummichog, {
       req(x5$stats_results)
       
-      browser()
+     
       if (input$stats_test %in% c("meanstest", "spatialDGMM")) {
         dat <- x5$stats_results %>%
-          dplyr::mutate_at(dplyr::vars(PValue, AdjP), ~ (round(., 5))) %>% 
-          dplyr::filter(AdjP <= input$FDR_val)
+          dplyr::mutate_at(dplyr::vars(pvalue, fdr), ~ (round(., 5))) %>% 
+          dplyr::filter(fdr <= input$FDR_val)
       } else if (input$stats_test %in% c("anova")) {
         dat <- x5$stats_results %>%
           print("not yet- anova")
         return()
       } else {
         print("not yet")
+        showNotification("Not yet implemented for this test")
         return()
         #dat<-x5$stats_results
       }
@@ -1629,10 +1637,10 @@ StatsPrepServer <- function(id,  setup_values) {
       mchog_all <-
         cbind(
           mz = dat$mz,
-          rt = dat[, "feature"],
-          p.value = dat[, "PValue"],
-          LR = dat[, "LR"],
-          fdr = dat[, "AdjP"]
+          rt = dat[, "i"],
+          p.value = dat[, "pvalue"],
+          LR = dat[, "statistic"],
+          fdr = dat[, "fdr"]
         )
       write.table(
         mchog_all,
@@ -1652,14 +1660,15 @@ StatsPrepServer <- function(id,  setup_values) {
     observeEvent(input$metaboanalyst, {
       req(x5$stats_results)
       
-      browser()
+      
       
       if (input$stats_test %in% c("meanstest", "spatialDGMM")) {
         dat <- x5$stats_results %>%
-          dplyr::mutate_at(dplyr::vars(PValue, AdjP), ~ (round(., 5))) %>%
-          dplyr::filter(AdjP <= input$FDR_val)
+          dplyr::mutate_at(dplyr::vars(pvalue, fdr), ~ (round(., 5))) %>%
+          dplyr::filter(fdr <= input$FDR_val)
       } else {
         print("not yet")
+        showNotification("Not yet implemented for this test")
         #dat<-x5$stats_results
       }
       
@@ -1667,10 +1676,10 @@ StatsPrepServer <- function(id,  setup_values) {
       hmdb_all_mc2 <-
         as.data.frame(cbind(
           m.z = dat$mz ,
-          p.value = dat[, "PValue"],
-          t.score = dat[, "LR"]
+          p.value = dat[, "pvalue"],
+          t.score = dat[, "statistic"]
         ))
-      hmdb_all_mc1 <- cbind(m.z = dat$mz[order(dat$PValue)])
+      hmdb_all_mc1 <- cbind(m.z = dat$mz[order(dat$pvalue)])
       write.table(
         hmdb_all_mc2,
         file = paste0(
@@ -1706,7 +1715,7 @@ StatsPrepServer <- function(id,  setup_values) {
       
       input_image_dataset <- x5$data_file_selected
       parent_image_dataset <- x5$source_file
-      
+      browser()
       
       if (input$stats_test == "spatialDGMM") {
         print("Saving model")
@@ -1813,7 +1822,7 @@ StatsPrepServer <- function(id,  setup_values) {
     
     observeEvent(input$restore_stats_models, {
       
-      
+      browser()
       #req(x5$test_result)
       #req(x5$data_file_selected)
       #modeled from here: https://stackoverflow.com/questions/51191701/r-shiny-fileinput-large-files
@@ -1944,93 +1953,72 @@ StatsPrepServer <- function(id,  setup_values) {
     
     observeEvent(input$write_plots, {
       req(x5$stats_results)
+      req(x5$stats_table_filtered)
       
-      
+      #source("~/Box Sync/MSI.EAGLE_2024/MSI.EAGLE/R/plot_stats.R")
       
       wd <- getwd()
       dir.create(file.path(wd, "plots"), showWarnings = FALSE)
       #setwd(file.path(wd, "plots"))
       
       
-      
-      if (input$stats_test %in% c("meanstest", "spatialDGMM")) {
-        withProgress(
-          message = "Saving plots",
+       if (input$stats_test %in% c("meanstest", "spatialDGMM", "ssctest")) {
+         nplots<-dim(x5$stats_table_filtered)[1]
+         
+         
+         withProgress(
+          message = paste0( "Saving ", 
+            nplots,
+            " plots"),
           detail = paste0(
             "folder in ",
             wd,
             ". Can be slow. Only way to cancel is restarting!"
           ),
           {
-            req(x5$stats_results)
-            
-            stats_results_trimmed <-
-              subset(x5$stats_results, AdjP <= input$FDR_val)
             
             
-            for (m in 1:length(stats_results_trimmed$feature)) {
-              incProgress(amount = 1 / length(stats_results_trimmed$feature))
+            for(i in (1:dim(x5$stats_table_filtered)[1])){
+              
+              
+              
+              p1<- try(plot_stats_results(x5 = x5,
+                                          stats_table_rows_selected = i,
+                                          stats_test = input$stats_test,
+                                          phen_cols_stats = input$phen_cols_stats,
+                                          group_var = x5$group_var,
+                                          plot_choice = input$plot_choice,
+              ))
+              
+              
+              if (class(p1)[1] == "try-error") {
+                print("Error in plotting")
+                showNotification("Error in plotting, check variables and try again")
+                return()
+              }
+            
+              
+              incProgress(amount = 1 / dim(x5$stats_table_filtered)[1])
               pdf(
                 file = paste(
                   "plots/",
                   input$plot_prefix,
                   "_",
-                  m,
+                  input$plot_choice,
                   "_",
-                  round(stats_results_trimmed$mz[m], digits = 4),
+                  x5$stats_table_filtered$i[i],
+                  "_",
+                  round(x5$stats_table_filtered$mz[i], digits = 4),
                   ".pdf",
                   sep = ""
                 ),
                 # The directory you want to save the file in
-                width = 4,
+                width = 6,
                 # The width of the plot in inches
                 height = 4
               ) # The height of the plot in inches
               
-              
-              #for means test
-              if (input$stats_test == "meanstest") {
-                p1 <-
-                  image(
-                    x5$test_result,
-                    model = list(x5$stats_results$feature[m]),
-                    normalize.image = 'linear',
-                    contrast.enhance = "histogram",
-                    key = F
-                  )
-              } else {
-                #for DGMM
-                p1 <-
-                  image(
-                    x5$test_result_feature_test,
-                    model = list(x5$stats_results$feature[m]),
-                    values = "mapping",
-                    contrast.enhance = "histogram",
-                    key = F
-                  )
-              }
-              nplots <- length(p1$dpages) + 2
-              
-              
-              print(p1, layout = n2mfrow(nplots))
-              print(plot(
-                x5$test_result,
-                model = list(x5$stats_results$feature[m]),
-                key = F
-              ), layout = FALSE)
-              if (input$stats_test == "spatialDGMM") {
-                print(plot(
-                  x5$test_result_feature_test,
-                  model = list(x5$stats_results$feature[m])
-                ),
-                layout = FALSE)
-              }
-              title(paste(
-                "mz= ",
-                round(x5$stats_results$mz[m], 4),
-                " FDR= ",
-                round(x5$stats_results$AdjP[m], 2)
-              ))
+              print(p1)
               
               
               
@@ -2071,6 +2059,7 @@ StatsPrepServer <- function(id,  setup_values) {
       ids <- input$mytable_stats_plate_rows_selected
       x5$mytable_stats_plate_selected <-
         x5$data_file_selected %>% subsetPixels(Cardinal::run(x5$data_file_selected) %in% runNames(x5$data_file_selected)[ids])
+      x5$mytable_stats_plate_rows_selected <- ids
     })
     
     observe({
@@ -2200,15 +2189,27 @@ StatsPrepServer <- function(id,  setup_values) {
                 
               )
             
-          #browser()
+          
           #reorder to match x5$stats_results
+          new_mean <-summarizeFeatures(
+            x5$data_file_selected %>% 
+              subsetFeatures(mz %in% dat$mz)
+            ) %>% 
+            fData %>% 
+            as.data.frame %>% 
+            dplyr::select(mean, mz)
+          
+          mean_spectra$mean<-new_mean$mean
+          
+          #reorder to match x5$stats_results  
           mean_spectra <-
             mean_spectra[match(dat$mz, mean_spectra$mz), ]
           
-          vars=colnames(mean_spectra)[!colnames(mean_spectra) %in% c("mz", "count", "freq", "ID")]
-          #remove vars that end in .1
-          vars <- vars[!grepl("\\.1$", vars)]
-          
+          # vars=colnames(mean_spectra)[!colnames(mean_spectra) %in% c("mz", "count", "freq", "ID")]
+          # #remove vars that end in .1
+          # vars <- vars[!grepl("\\.1$", vars)]
+          # 
+          vars<- colnames(mean_spectra)[colnames(mean_spectra) %in% paste0(as.character(labels), ".mean")]
           
           log2FC = try(formatC(log2(mean_spectra[, vars[2]] / mean_spectra[, vars[1]]), format="fg", digits=3))
           
@@ -2222,7 +2223,7 @@ StatsPrepServer <- function(id,  setup_values) {
             lab <- paste0("log2FC(", labels[2], "/", labels[1], ")")
             dat <- cbind(dat, log2FC)
             names(dat)[names(dat) == "log2FC"] <- lab
-            dat <- cbind(dat, round(mean_spectra[, vars], 3))
+            dat <- cbind(dat, round(mean_spectra[, vars], 4))
             dat <-
               cbind(dat, max_mean_group = colnames(mean_spectra[, vars])[max.col(mean_spectra[, vars])])
             dat$mz <- round(dat$mz, 4)
@@ -2235,6 +2236,12 @@ StatsPrepServer <- function(id,  setup_values) {
                 dat <- cbind(ID=mean_spectra$ID, dat)
               }
             }
+            
+            #check for mean column in mean_spectr and append it to dat
+            if(!"mean" %in% colnames(dat)){
+              dat <- cbind(dat, mean=round(mean_spectra$mean, 4))
+            }
+            
             
             #check for ID column, and if it exists, move it to first column after mz
             if("ID" %in% colnames(dat)){
@@ -2319,14 +2326,7 @@ StatsPrepServer <- function(id,  setup_values) {
       
       
       
-      
-      
-      #add fold change data if available for meanstest, ssctest, and spatialDGMM
-      #with condition that only two groups are in the test group for now
-      
-      
-      
-      
+      #store filtered table for later use
       x5$stats_table_filtered <- dat
       
       DT::datatable(
@@ -2399,7 +2399,9 @@ StatsPrepServer <- function(id,  setup_values) {
       if (input$stats_test %in% c("meanstest")) {
         plot_choices <- list(
                "Cardinal / matter" = "cardinal",
-               "ggplot2 " = "ggplot"
+               "ggplot2 " = "ggplot",
+               "MSI image" = "msi_image",
+               "Test Phenotype" = "groupings"
              )
       } else if (input$stats_test %in% c("ssctest")) {
         plot_choices <- list(
@@ -2434,8 +2436,7 @@ StatsPrepServer <- function(id,  setup_values) {
     #Plots selected statistical results
     output$plot11 <- renderImage({
       req(input$stats_table_rows_selected)
-      if (is.null(input$stats_table_rows_selected))
-        return()
+
       
       # Setup to ensure proper cleanup
       on.exit({
@@ -2450,434 +2451,452 @@ StatsPrepServer <- function(id,  setup_values) {
       
       png(outfile, width = 800, height = 600)
       
-      
-      dat <- x5$stats_table_filtered
-      
-      #get row from orignial dataset corresponding to selected data
-      m =  which(x5$stats_results$i %in% dat[input$stats_table_rows_selected, ]$i)
-      if (input$stats_test == "ssctest") {
-        m_model<-dat[input$stats_table_rows_selected, ]$model
-        
-        #find which rows of x5$stats_result match both ion and model for each value of input$stats_table_rows_selected
-        idx<-NULL
-        for(i in 1:length(m)){
-          if(sum(x5$stats_results$i %in% dat[input$stats_table_rows_selected[i], ]$i & x5$stats_results$model %in% m_model[i])>0) {
-            idx[i] <- which(x5$stats_results$i %in% dat[input$stats_table_rows_selected[i], ]$i & x5$stats_results$model %in% m_model[i])
-          }
-        }
-        
-        if(length(idx)>1){
-         showNotification("Multiple ions selected, only first ion will be plotted", duration = 10)
-         m = idx[1]
-        }
-      }
-      
-      if (input$stats_test %in% c("meanstest")) {
-        req(x5$stats_results)
-        
-        mycols = ggsci::pal_npg()(as.data.frame(pData(x5$data_file_selected))[, input$phen_cols_stats] %>%
-                                    factor() %>% droplevels() %>%
-                                    levels() %>% length())
+      if(input$stats_test %in% c("meanstest", "spatialDGMM", "ssctest")) {
+        #plot selected statistical results
+        setCardinalBPPARAM(par_mode())
+        setCardinalNChunks(setup_values()[["chunks"]])
         
         
-        #print base plot
-        nplots=length(input$stats_table_rows_selected)
-        mplot <- F
-        
-        
-        #going to ignore mean plots for now, will come back if needed later
-        # if (!is.null(input$output_factors)) {
-        #   print("adding means plot across multiple conditions")
-        #   mplot <- T
-        #   nplots <- nplots + 1
-        # }
-        
-       
-        
-        # p1 <-
-        #   plot(
-        #     x5$test_result,
-        #     i = c(dat[input$stats_table_rows_selected, ]$i),
-        #     col = mycols,
-        #     las = 0,
-        #     fill=T,
-        #     panel.first = NULL,
-        #     panel.last=NULL
-        #   )
-        # print(p1)
 
-        # 
-        
-        #adjust a and b to work with multiple ions if m is longer than 1
-        
-        
-        if(input$plot_choice == "ggplot") {
-          #browser()
-          #plots <- list()
-          
-        #extract all spectra and metadata for selected ions
-          a<-lapply(m, function(x) {
-            spectra(
-            x5$data_file_selected[
-              which(
-                mz(x5$data_file_selected
-                   ) %in% x5$stats_results$mz[x]
-              ), 
-              ]
-            )
-          })
-          
-          i_vals<-x5$stats_results$i[m]
-          mz_vals<-x5$stats_results$mz[m]
-          fdr_vals<-x5$stats_results$fdr[m]
-          
-          names(a) <- paste0("mz=", round(mz_vals, 4), " i=", i_vals, " FDR=", round(fdr_vals, 3))
-          
-          
-          b<-pData(
-            x5$data_file_selected
-            )[, c(input$phen_cols_stats, x5$group_var)]
-          
-          dat_comb<-t(do.call(rbind,a))
-          colnames(dat_comb)<-names(a)
-          
-          dat_comb<-cbind(dat_comb, b)
-          
-          summarized_df <- dat_comb %>% as.data.frame() %>%
-            dplyr::group_by(dplyr::across(dplyr::all_of(c(input$phen_cols_stats, x5$group_var)))) %>%  # Group by the categorical columns
-            dplyr::summarize(dplyr::across(dplyr::everything(), mean, na.rm = TRUE))  # Summarize by calculating the mean for each ion
- 
-          long_format_df <- summarized_df %>%
-            tidyr::pivot_longer(
-              cols = -c(input$phen_cols_stats, x5$group_var),  # Exclude the grouping columns
-              names_to = "ion",  # New column to hold the names of the numeric columns
-              values_to = "value"  # New column to hold the values of the numeric columns
-            ) %>% na.omit()
-          
-          n_samples <- long_format_df %>%
-            dplyr::group_by(ion, !!rlang::sym(input$phen_cols_stats)) %>%
-            dplyr::summarize(n = dplyr::n(), 
-                             min_value = min(value, na.rm = TRUE),  # Calculate max value per ion and group
-                             .groups = 'drop')
-          
-          
-            p1<- ggplot2::ggplot(long_format_df, 
-                          ggplot2::aes(x = !!ggplot2::sym(input$phen_cols_stats), 
-                                       y = value,
-                                       fill=!!ggplot2::sym(input$phen_cols_stats)))+
-            
-            ggplot2::geom_jitter(alpha = 0.5, width=0.2) +
-            ggplot2::geom_boxplot(size = 1, alpha=0.8)+
-            #ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "gray") + 
-            ggplot2::theme_minimal() +
-            ggplot2::labs(
-              x = "",
-              y = "Mean (normalized intensity, a.u.)",
-              #title = title_t
-            ) +
-            ggprism::theme_prism()+
-            ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))+
-            #remove legend
-            ggplot2::theme(legend.position = "none")+
-            ggplot2::facet_wrap(~ion, scales = "free_y")+
-            ggplot2::scale_fill_manual(values = mycols)+
-            #add number of samples as annotation to plot
-            ggplot2::geom_text(
-              data = n_samples,
-              ggplot2::aes(x = !!ggplot2::sym(input$phen_cols_stats),
-                           y = 0.95*(min_value), 
-                           label = paste0("n=", n)),
-              vjust = -0.5
-            )
-          
-          
-          # 
-          # 
-          # plots<-lapply(m, function(x) {
-          # #for (i in 1:length(m)) {
-          #   
-          #   #get spectra for currently selected table ions (m)
-          #   a <-
-          #     as.matrix(
-          #       spectra(
-          #         x5$data_file_selected[
-          #           which(
-          #             mz(x5$data_file_selected
-          #                ) %in%x5$stats_results$mz[x]
-          #           ), 
-          #           ]
-          #         )
-          #       )
-          #   
-          #   #get metadata (pdata) for currently selected table ions (m)
-          #   b <-
-          #     as.data.frame(
-          #       pData(
-          #         x5$data_file_selected[
-          #           which(
-          #             mz(
-          #               x5$data_file_selected
-          #               ) %in% x5$stats_results$mz[x]
-          #                   
-          #             ), 
-          #           ]
-          #         )
-          #       )
-          #   
-          #    
-          #   
-          #   dat2 <-  cbind(a=(a), b)
-          #   
-          #   #dat_long_tech_avg<- as.data.frame(na.omit(dat)) %>% dplyr::group_by_at(c(input$aov_vars1, input$aov_vars2, input$aov_vars3)) %>%
-          #   dat_long_tech_avg <-
-          #     dat2 %>% dplyr::group_by_at(c(input$phen_cols_stats, x5$group_var)) %>%
-          #     dplyr::summarize(tech_avg = mean(a),
-          #                      .groups = "keep")  %>% na.omit()
-          #   
-          #   #x5$dat_long_tech_avg<-dat_long_tech_avg
-          #   
-          #   fm <-
-          #     as.formula(paste0("tech_avg~", input$phen_cols_stats))
-          #   
-          #   df_summary <- dat_long_tech_avg %>%
-          #     dplyr::group_by(dplyr::across(dplyr::all_of(input$phen_cols_stats))) %>%
-          #     dplyr::summarize(
-          #       mean_tech_avg = mean(tech_avg),
-          #       se_tech_avg = sd(tech_avg) / sqrt(dplyr::n())
-          #     )
-          #   
-          #   # View the summary data
-          #   df_summary
-          #   
-          #   title_t=paste(
-          #     "mz= ",
-          #     round(x5$stats_results$mz[x], 4),
-          #     " FDR= ",
-          #     formatC(x5$stats_results$fdr[x], format = "g", digits=2)
-          #   )
-          # 
-          #   
-          #   dat_long_tech_avg<-as.data.frame(dat_long_tech_avg)
-          #   
-          #   #check if factor
-          #   dat_long_tech_avg[,input$phen_cols_stats] <- as.factor(dat_long_tech_avg[,input$phen_cols_stats])
-          #   names(mycols) <- levels(as.data.frame(dat_long_tech_avg)[,input$phen_cols_stats])
-          #   
-          #   #calculate the number of samples in each group
-          #   n_samples <- dat_long_tech_avg %>% 
-          #     dplyr::group_by_at(c(input$phen_cols_stats)) %>% 
-          #     dplyr::summarize(n=dplyr::n(), .groups = 'drop')
-          #   
-          #   
-          # ggplot2::ggplot(dat_long_tech_avg, 
-          #                               ggplot2::aes(x = !!ggplot2::sym(input$phen_cols_stats), 
-          #                                            y = tech_avg,
-          #                                            fill=!!ggplot2::sym(input$phen_cols_stats)))+
-          #      
-          #     ggplot2::geom_jitter(alpha = 0.5, width=0.2) +
-          #     ggplot2::geom_boxplot(size = 1, alpha=0.8)+
-          #     #ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "gray") + 
-          #     ggplot2::theme_minimal() +
-          #     ggplot2::labs(
-          #       x = "",
-          #       y = "Mean (normalized intensity, a.u.)",
-          #       title = title_t
-          #     ) +
-          #     ggprism::theme_prism()+
-          #     ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))+
-          #     #remove legend
-          #     ggplot2::theme(legend.position = "none") +
-          #     ggplot2::scale_fill_manual(values = mycols)+
-          #     #add number of samples as annotation to plot
-          #     ggplot2::geom_text(
-          #       data = n_samples,
-          #       ggplot2::aes(x = !!ggplot2::sym(input$phen_cols_stats),
-          #                    y = min(dat_long_tech_avg$tech_avg) - 0.05/mean(dat_long_tech_avg$tech_avg, na.rm=T), 
-          #                    label = paste0("n=", n)),
-          #       vjust = -0.5
-          #     )
-          # 
-          #   
-          #   
-          # })
-          # 
-          # #browser()
-          # # Number of plots
-          # num <- length(plots)
-          # 
-          # # Calculate number of columns and rows dynamically
-          # ncol_var <- ceiling(sqrt(num))
-          # nrow_var <- ceiling(num / ncol_var)
-          # 
-          #print(gridExtra::grid.arrange(grobs = plots, ncol=ncol_var, nrow=nrow_var))
-          print(p1)
-            bpstop(par_mode())
-        } else {
-          #browser()
-          m=input$stats_table_rows_selected
-          #define mz and features of interest
-          mz_vals=x5$stats_results$mz[m]
-          i_vals<-x5$stats_results$i[m]
-          fdr_vals<-x5$stats_results$fdr[m]
-          names(i_vals)<-(paste0("mz= ",mz_vals, " FDR= ", round(fdr_vals,3)))
-          
-          
-          p1 <- plot(x5$test_result, i = i_vals, col = mycols, las = 0, fill=T, free="y")
-          print(p1)
-          bpstop(par_mode())
-          
-        }
-          # x=df_summary[[input$phen_cols_stats]]
-          # y=df_summary$mean_tech_avg
-          # ymin=df_summary$mean_tech_avg-df_summary$se_tech_avg
-          # ymax=df_summary$mean_tech_avg+df_summary$se_tech_avg
-          # 
-          # 
-          # 
-          #  p2<-vizi( x=x, y = y,
-          #   ymin = ymin, ymax=ymax) 
-          #  
-          # 
-          #   p2<- add_mark(p2,
-          #       "intervals",
-          #    ) 
-          #   
-          # 
-          # 
-          # #
-          # browser()
-          # matter::as_facets(p1, p2, ncol = 1)
-          # 
-          # 
-          
-        #   print(
-        #     gplots::plotmeans(
-        #       fm,
-        #       dat_long_tech_avg,
-        #       mean.labels = T,
-        #       digits = 1,
-        #       las = 2
-        #     ),
-        #     layout = FALSE
-        #   )
-         # } else {
-         #  print(p1)
-         #}
-      } else if (input$stats_test %in% c("spatialDGMM")) {
-        req(x5$stats_results)
-        
-        
-        mycols = ggsci::pal_npg()(as.data.frame(pData(x5$data_file_selected))[, input$phen_cols_stats] %>%
-                                    factor() %>% droplevels() %>%
-                                    levels() %>% length())
-        
-        #define mz and features of interest
-        mz_vals=x5$stats_results$mz[m]
-        i_vals<-x5$stats_results$i[m]
-        fdr_vals<-x5$stats_results$fdr[m]
-        names(i_vals)<-(paste0("mz= ",round(mz_vals, 4), " FDR= ", round(fdr_vals,3)))
-        
-        #if multiple ions are selected, create idx for the first one and show a message
-        if(length(m)>1){
-          showNotification("Multiple ions selected, only first ion will be plotted", duration = 10)
-          idx = m[1]
-        } else {
-          idx = m
-        }
-        
-        
-        
-        #dgmm plot
-        p1<-plot(x5$test_result, i=i_vals, fill=T, free="xy")
-        #means test plot
-        p2<-plot(x5$test_result_feature_test, i=i_vals, col=mycols, fill=T, free="xy")
-        p3<-image(x5$test_result, i=i_vals, smooth="bilateral", enhance="adaptive", scale=TRUE)
-        p4 <-
-          image(
-            x5$data_file_selected,
-            mz = (x5$stats_results$mz[idx]),
-            
-            enhance = "histogram",
-            scale = T, free="xy"
-            #col=mycols
-          )
-        
-        
-        #choose image to plot using switch from input$plot_choice
-        plot_choice <- switch(input$plot_choice,
-                              "dgmm_means_test" = p2,
-                              "dgmm_ranks" = p3,
-                              "dgmm_params" = p1,
-                              "msi_image" = p4
-        )
-        
-        
-        
-        
-        print(plot_choice)
-        
-        #one day we could combine these...
-        # matter::as_facets( p1, p3, free="xy"
-        #                    )
-        # 
-        # 
-        # 
-        # if (mplot == T) {
-        #   
-        #   #require(gplots)
-        #   #mzdat=subset(x5$test_result, mz==x5$stats_results$mz[m])
-        #   a <-
-        #     as.matrix(spectra(x5$data_file_selected[which(mz(x5$data_file_selected) %in%
-        #                                                   x5$stats_results$mz[m]), ]))
-        #   b <-
-        #     pData(x5$data_file_selected[which(mz(x5$data_file_selected) %in% x5$stats_results$mz[m]), ])
-        #   dat = cbind(run = Cardinal::run(x5$data_file_selected),
-        #               b,
-        #               value = a[1, ])
-        #   
-        #   dat_long_tech_avg <-
-        #     as.data.frame(dat) %>% dplyr::group_by_at(c(
-        #       "run",
-        #       input$aov_vars1,
-        #       input$aov_vars2,
-        #       input$aov_vars3
-        #     )) %>%
-        #     dplyr::summarize(tech_avg = mean(value),
-        #                      .groups = "keep")
-        #   
-        #   #x5$dat_long_tech_avg<-dat_long_tech_avg #single m/z?
-        #   
-        #   fm <-
-        #     as.formula(
-        #       paste0(
-        #         "tech_avg~interaction(",
-        #         input$aov_vars2,
-        #         ",",
-        #         input$aov_vars3,
-        #         ")"
-        #       )
-        #     )
-        #   
-        #   print(
-        #     gplots::plotmeans(
-        #       fm,
-        #       dat_long_tech_avg,
-        #       mean.labels = T,
-        #       digits = 1
-        #     ),
-        #     layout = FALSE
-        #   )
-        # }
-        # 
-        
-        
+        #plot selected statistical results
+        p1 <- plot_stats_results(x5 = x5,
+                                 stats_table_rows_selected = input$stats_table_rows_selected,
+                                 stats_test = input$stats_test,
+                                 phen_cols_stats = input$phen_cols_stats,
+                                 group_var = x5$group_var,
+                                 plot_choice = input$plot_choice)
+        print(p1)
+        # return()
+      # 
+      # 
+      # 
+      # dat <- x5$stats_table_filtered
+      # 
+      # #get row from orignial dataset corresponding to selected data
+      # m =  which(x5$stats_results$i %in% dat[input$stats_table_rows_selected, ]$i)
+      # if (input$stats_test == "ssctest") {
+      #   m_model<-dat[input$stats_table_rows_selected, ]$model
+      #   
+      #   #find which rows of x5$stats_result match both ion and model for each value of input$stats_table_rows_selected
+      #   idx<-NULL
+      #   for(i in 1:length(m)){
+      #     if(sum(x5$stats_results$i %in% dat[input$stats_table_rows_selected[i], ]$i & x5$stats_results$model %in% m_model[i])>0) {
+      #       idx[i] <- which(x5$stats_results$i %in% dat[input$stats_table_rows_selected[i], ]$i & x5$stats_results$model %in% m_model[i])
+      #     }
+      #   }
+      #   
+      #   if(length(idx)>1){
+      #    showNotification("Multiple ions selected, only first ion will be plotted", duration = 10)
+      #    m = idx[1]
+      #   }
+      # }
+      # 
+      # if (input$stats_test %in% c("meanstest")) {
+      #   req(x5$stats_results)
+      #   
+      #   mycols = ggsci::pal_npg()(as.data.frame(pData(x5$data_file_selected))[, input$phen_cols_stats] %>%
+      #                               factor() %>% droplevels() %>%
+      #                               levels() %>% length())
+      #   
+      #   
+      #   #print base plot
+      #   nplots=length(input$stats_table_rows_selected)
+      #   mplot <- F
+      #   
+      #   
+      #   #going to ignore mean plots for now, will come back if needed later
+      #   # if (!is.null(input$output_factors)) {
+      #   #   print("adding means plot across multiple conditions")
+      #   #   mplot <- T
+      #   #   nplots <- nplots + 1
+      #   # }
+      #   
+      #  
+      #   
+      #   # p1 <-
+      #   #   plot(
+      #   #     x5$test_result,
+      #   #     i = c(dat[input$stats_table_rows_selected, ]$i),
+      #   #     col = mycols,
+      #   #     las = 0,
+      #   #     fill=T,
+      #   #     panel.first = NULL,
+      #   #     panel.last=NULL
+      #   #   )
+      #   # print(p1)
+      # 
+      #   # 
+      #   
+      #   #adjust a and b to work with multiple ions if m is longer than 1
+      #   
+      #   
+      #   if(input$plot_choice == "ggplot") {
+      #     #browser()
+      #     #plots <- list()
+      #     
+      #   #extract all spectra and metadata for selected ions
+      #     a<-lapply(m, function(x) {
+      #       spectra(
+      #       x5$data_file_selected[
+      #         which(
+      #           mz(x5$data_file_selected
+      #              ) %in% x5$stats_results$mz[x]
+      #         ), 
+      #         ]
+      #       )
+      #     })
+      #     
+      #     i_vals<-x5$stats_results$i[m]
+      #     mz_vals<-x5$stats_results$mz[m]
+      #     fdr_vals<-x5$stats_results$fdr[m]
+      #     
+      #     names(a) <- paste0("mz=", round(mz_vals, 4), " i=", i_vals, " FDR=", round(fdr_vals, 3))
+      #     
+      #     
+      #     b<-pData(
+      #       x5$data_file_selected
+      #       )[, c(input$phen_cols_stats, x5$group_var)]
+      #     
+      #     dat_comb<-t(do.call(rbind,a))
+      #     colnames(dat_comb)<-names(a)
+      #     
+      #     dat_comb<-cbind(dat_comb, b)
+      #     
+      #     summarized_df <- dat_comb %>% as.data.frame() %>%
+      #       dplyr::group_by(dplyr::across(dplyr::all_of(c(input$phen_cols_stats, x5$group_var)))) %>%  # Group by the categorical columns
+      #       dplyr::summarize(dplyr::across(dplyr::everything(), mean, na.rm = TRUE))  # Summarize by calculating the mean for each ion
+      # 
+      #     long_format_df <- summarized_df %>%
+      #       tidyr::pivot_longer(
+      #         cols = -c(input$phen_cols_stats, x5$group_var),  # Exclude the grouping columns
+      #         names_to = "ion",  # New column to hold the names of the numeric columns
+      #         values_to = "value"  # New column to hold the values of the numeric columns
+      #       ) %>% na.omit()
+      #     
+      #     n_samples <- long_format_df %>%
+      #       dplyr::group_by(ion, !!rlang::sym(input$phen_cols_stats)) %>%
+      #       dplyr::summarize(n = dplyr::n(), 
+      #                        min_value = min(value, na.rm = TRUE),  # Calculate max value per ion and group
+      #                        .groups = 'drop')
+      #     
+      #     
+      #       p1<- ggplot2::ggplot(long_format_df, 
+      #                     ggplot2::aes(x = !!ggplot2::sym(input$phen_cols_stats), 
+      #                                  y = value,
+      #                                  fill=!!ggplot2::sym(input$phen_cols_stats)))+
+      #       
+      #       ggplot2::geom_jitter(alpha = 0.5, width=0.2) +
+      #       ggplot2::geom_boxplot(size = 1, alpha=0.8)+
+      #       #ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "gray") + 
+      #       ggplot2::theme_minimal() +
+      #       ggplot2::labs(
+      #         x = "",
+      #         y = "Mean (normalized intensity, a.u.)",
+      #         #title = title_t
+      #       ) +
+      #       ggprism::theme_prism()+
+      #       ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))+
+      #       #remove legend
+      #       ggplot2::theme(legend.position = "none")+
+      #       ggplot2::facet_wrap(~ion, scales = "free_y")+
+      #       ggplot2::scale_fill_manual(values = mycols)+
+      #       #add number of samples as annotation to plot
+      #       ggplot2::geom_text(
+      #         data = n_samples,
+      #         ggplot2::aes(x = !!ggplot2::sym(input$phen_cols_stats),
+      #                      y = 0.95*(min_value), 
+      #                      label = paste0("n=", n)),
+      #         vjust = -0.5
+      #       )
+      #     
+      #     
+      #     # 
+      #     # 
+      #     # plots<-lapply(m, function(x) {
+      #     # #for (i in 1:length(m)) {
+      #     #   
+      #     #   #get spectra for currently selected table ions (m)
+      #     #   a <-
+      #     #     as.matrix(
+      #     #       spectra(
+      #     #         x5$data_file_selected[
+      #     #           which(
+      #     #             mz(x5$data_file_selected
+      #     #                ) %in%x5$stats_results$mz[x]
+      #     #           ), 
+      #     #           ]
+      #     #         )
+      #     #       )
+      #     #   
+      #     #   #get metadata (pdata) for currently selected table ions (m)
+      #     #   b <-
+      #     #     as.data.frame(
+      #     #       pData(
+      #     #         x5$data_file_selected[
+      #     #           which(
+      #     #             mz(
+      #     #               x5$data_file_selected
+      #     #               ) %in% x5$stats_results$mz[x]
+      #     #                   
+      #     #             ), 
+      #     #           ]
+      #     #         )
+      #     #       )
+      #     #   
+      #     #    
+      #     #   
+      #     #   dat2 <-  cbind(a=(a), b)
+      #     #   
+      #     #   #dat_long_tech_avg<- as.data.frame(na.omit(dat)) %>% dplyr::group_by_at(c(input$aov_vars1, input$aov_vars2, input$aov_vars3)) %>%
+      #     #   dat_long_tech_avg <-
+      #     #     dat2 %>% dplyr::group_by_at(c(input$phen_cols_stats, x5$group_var)) %>%
+      #     #     dplyr::summarize(tech_avg = mean(a),
+      #     #                      .groups = "keep")  %>% na.omit()
+      #     #   
+      #     #   #x5$dat_long_tech_avg<-dat_long_tech_avg
+      #     #   
+      #     #   fm <-
+      #     #     as.formula(paste0("tech_avg~", input$phen_cols_stats))
+      #     #   
+      #     #   df_summary <- dat_long_tech_avg %>%
+      #     #     dplyr::group_by(dplyr::across(dplyr::all_of(input$phen_cols_stats))) %>%
+      #     #     dplyr::summarize(
+      #     #       mean_tech_avg = mean(tech_avg),
+      #     #       se_tech_avg = sd(tech_avg) / sqrt(dplyr::n())
+      #     #     )
+      #     #   
+      #     #   # View the summary data
+      #     #   df_summary
+      #     #   
+      #     #   title_t=paste(
+      #     #     "mz= ",
+      #     #     round(x5$stats_results$mz[x], 4),
+      #     #     " FDR= ",
+      #     #     formatC(x5$stats_results$fdr[x], format = "g", digits=2)
+      #     #   )
+      #     # 
+      #     #   
+      #     #   dat_long_tech_avg<-as.data.frame(dat_long_tech_avg)
+      #     #   
+      #     #   #check if factor
+      #     #   dat_long_tech_avg[,input$phen_cols_stats] <- as.factor(dat_long_tech_avg[,input$phen_cols_stats])
+      #     #   names(mycols) <- levels(as.data.frame(dat_long_tech_avg)[,input$phen_cols_stats])
+      #     #   
+      #     #   #calculate the number of samples in each group
+      #     #   n_samples <- dat_long_tech_avg %>% 
+      #     #     dplyr::group_by_at(c(input$phen_cols_stats)) %>% 
+      #     #     dplyr::summarize(n=dplyr::n(), .groups = 'drop')
+      #     #   
+      #     #   
+      #     # ggplot2::ggplot(dat_long_tech_avg, 
+      #     #                               ggplot2::aes(x = !!ggplot2::sym(input$phen_cols_stats), 
+      #     #                                            y = tech_avg,
+      #     #                                            fill=!!ggplot2::sym(input$phen_cols_stats)))+
+      #     #      
+      #     #     ggplot2::geom_jitter(alpha = 0.5, width=0.2) +
+      #     #     ggplot2::geom_boxplot(size = 1, alpha=0.8)+
+      #     #     #ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "gray") + 
+      #     #     ggplot2::theme_minimal() +
+      #     #     ggplot2::labs(
+      #     #       x = "",
+      #     #       y = "Mean (normalized intensity, a.u.)",
+      #     #       title = title_t
+      #     #     ) +
+      #     #     ggprism::theme_prism()+
+      #     #     ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))+
+      #     #     #remove legend
+      #     #     ggplot2::theme(legend.position = "none") +
+      #     #     ggplot2::scale_fill_manual(values = mycols)+
+      #     #     #add number of samples as annotation to plot
+      #     #     ggplot2::geom_text(
+      #     #       data = n_samples,
+      #     #       ggplot2::aes(x = !!ggplot2::sym(input$phen_cols_stats),
+      #     #                    y = min(dat_long_tech_avg$tech_avg) - 0.05/mean(dat_long_tech_avg$tech_avg, na.rm=T), 
+      #     #                    label = paste0("n=", n)),
+      #     #       vjust = -0.5
+      #     #     )
+      #     # 
+      #     #   
+      #     #   
+      #     # })
+      #     # 
+      #     # #browser()
+      #     # # Number of plots
+      #     # num <- length(plots)
+      #     # 
+      #     # # Calculate number of columns and rows dynamically
+      #     # ncol_var <- ceiling(sqrt(num))
+      #     # nrow_var <- ceiling(num / ncol_var)
+      #     # 
+      #     #print(gridExtra::grid.arrange(grobs = plots, ncol=ncol_var, nrow=nrow_var))
+      #     print(p1)
+      #       bpstop(par_mode())
+      #   } else {
+      #     #browser()
+      #     m=input$stats_table_rows_selected
+      #     #define mz and features of interest
+      #     mz_vals=x5$stats_results$mz[m]
+      #     i_vals<-x5$stats_results$i[m]
+      #     fdr_vals<-x5$stats_results$fdr[m]
+      #     names(i_vals)<-(paste0("mz= ",round(mz_vals,4), " FDR= ", round(fdr_vals,3)))
+      #     
+      #     
+      #     p1 <- plot(x5$test_result, i = i_vals, col = mycols, las = 0, fill=T, free="y")
+      #     print(p1)
+      #     bpstop(par_mode())
+      #     
+      #   }
+      #     # x=df_summary[[input$phen_cols_stats]]
+      #     # y=df_summary$mean_tech_avg
+      #     # ymin=df_summary$mean_tech_avg-df_summary$se_tech_avg
+      #     # ymax=df_summary$mean_tech_avg+df_summary$se_tech_avg
+      #     # 
+      #     # 
+      #     # 
+      #     #  p2<-vizi( x=x, y = y,
+      #     #   ymin = ymin, ymax=ymax) 
+      #     #  
+      #     # 
+      #     #   p2<- add_mark(p2,
+      #     #       "intervals",
+      #     #    ) 
+      #     #   
+      #     # 
+      #     # 
+      #     # #
+      #     # browser()
+      #     # matter::as_facets(p1, p2, ncol = 1)
+      #     # 
+      #     # 
+      #     
+      #   #   print(
+      #   #     gplots::plotmeans(
+      #   #       fm,
+      #   #       dat_long_tech_avg,
+      #   #       mean.labels = T,
+      #   #       digits = 1,
+      #   #       las = 2
+      #   #     ),
+      #   #     layout = FALSE
+      #   #   )
+      #    # } else {
+      #    #  print(p1)
+      #    #}
+      # } else if (input$stats_test %in% c("spatialDGMM")) {
+      #   req(x5$stats_results)
+      #   
+      #   
+      #   mycols = ggsci::pal_npg()(as.data.frame(pData(x5$data_file_selected))[, input$phen_cols_stats] %>%
+      #                               factor() %>% droplevels() %>%
+      #                               levels() %>% length())
+      #   
+      #   #define mz and features of interest
+      #   mz_vals=x5$stats_results$mz[m]
+      #   i_vals<-x5$stats_results$i[m]
+      #   fdr_vals<-x5$stats_results$fdr[m]
+      #   names(i_vals)<-(paste0("mz= ",round(mz_vals, 4), " FDR= ", round(fdr_vals,3)))
+      #   
+      #   #if multiple ions are selected, create idx for the first one and show a message
+      #   if(length(m)>1){
+      #     showNotification("Multiple ions selected, only first ion will be plotted", duration = 10)
+      #     idx = m[1]
+      #   } else {
+      #     idx = m
+      #   }
+      #   
+      #   
+      #   
+      #   #dgmm plot
+      #   p1<-plot(x5$test_result, i=i_vals, fill=T, free="xy")
+      #   #means test plot
+      #   p2<-plot(x5$test_result_feature_test, i=i_vals, col=mycols, fill=T, free="xy")
+      #   p3<-image(x5$test_result, i=i_vals, smooth="bilateral", enhance="adaptive", scale=TRUE)
+      #   p4 <-
+      #     image(
+      #       x5$data_file_selected,
+      #       mz = (x5$stats_results$mz[idx]),
+      #       
+      #       enhance = "histogram",
+      #       scale = T, free="xy"
+      #       #col=mycols
+      #     )
+      #   
+      #   
+      #   #choose image to plot using switch from input$plot_choice
+      #   plot_choice <- switch(input$plot_choice,
+      #                         "dgmm_means_test" = p2,
+      #                         "dgmm_ranks" = p3,
+      #                         "dgmm_params" = p1,
+      #                         "msi_image" = p4
+      #   )
+      #   
+      #   
+      #   
+      #   
+      #   print(plot_choice)
+      #   
+      #   #one day we could combine these...
+      #   # matter::as_facets( p1, p3, free="xy"
+      #   #                    )
+      #   # 
+      #   # 
+      #   # 
+      #   # if (mplot == T) {
+      #   #   
+      #   #   #require(gplots)
+      #   #   #mzdat=subset(x5$test_result, mz==x5$stats_results$mz[m])
+      #   #   a <-
+      #   #     as.matrix(spectra(x5$data_file_selected[which(mz(x5$data_file_selected) %in%
+      #   #                                                   x5$stats_results$mz[m]), ]))
+      #   #   b <-
+      #   #     pData(x5$data_file_selected[which(mz(x5$data_file_selected) %in% x5$stats_results$mz[m]), ])
+      #   #   dat = cbind(run = Cardinal::run(x5$data_file_selected),
+      #   #               b,
+      #   #               value = a[1, ])
+      #   #   
+      #   #   dat_long_tech_avg <-
+      #   #     as.data.frame(dat) %>% dplyr::group_by_at(c(
+      #   #       "run",
+      #   #       input$aov_vars1,
+      #   #       input$aov_vars2,
+      #   #       input$aov_vars3
+      #   #     )) %>%
+      #   #     dplyr::summarize(tech_avg = mean(value),
+      #   #                      .groups = "keep")
+      #   #   
+      #   #   #x5$dat_long_tech_avg<-dat_long_tech_avg #single m/z?
+      #   #   
+      #   #   fm <-
+      #   #     as.formula(
+      #   #       paste0(
+      #   #         "tech_avg~interaction(",
+      #   #         input$aov_vars2,
+      #   #         ",",
+      #   #         input$aov_vars3,
+      #   #         ")"
+      #   #       )
+      #   #     )
+      #   #   
+      #   #   print(
+      #   #     gplots::plotmeans(
+      #   #       fm,
+      #   #       dat_long_tech_avg,
+      #   #       mean.labels = T,
+      #   #       digits = 1
+      #   #     ),
+      #   #     layout = FALSE
+      #   #   )
+      #   # }
+      #   # 
+      #   
+      #   
       } else if (input$stats_test == "anova") {
-        
+
         #dev.new()
-        
+
         #library(gplots)
         #library(rstatix)
-        
+
         #m=input$stats_table_rows_selected
         #print(p1, layout=n2mfrow(nplots))
         res.test <- x5$test_result[[m]]
@@ -2887,21 +2906,21 @@ StatsPrepServer <- function(id,  setup_values) {
             na.omit(x5$dat_long_tech_avg),
             mz == x5$stats_results[m, "mz"]
           ))
-        
-        
-        
-        
+
+
+
+
         if (input$anova_type == "anova_oneway") {
           if (!input$aov_vars1 %in% colnames(dat)) {
             print("Check the Group variable, different from comparison variable")
             return()
           }
-          
-          
+
+
           dat[, input$aov_vars1] <-
             as.factor(dat[, input$aov_vars1])
-          
-          
+
+
           library(ggpubr)
           bxp <- ggboxplot(
             dat,
@@ -2919,11 +2938,11 @@ StatsPrepServer <- function(id,  setup_values) {
             (dat) %>% rstatix::tukey_hsd(attributes(res.test)$args$formula)
           pwc <-
             (pwc) %>% rstatix::add_xy_position(x = eval(input$aov_vars1))
-          
+
           print(as.data.frame(pwc))
-          
-          
-          
+
+
+
           p1 <- bxp +
             stat_pvalue_manual(pwc,
                                tip.length = 0,
@@ -2939,9 +2958,9 @@ StatsPrepServer <- function(id,  setup_values) {
               caption = rstatix::get_pwc_label(pwc),
               size = 15
             )
-          
+
           print(p1)
-          
+
         } else if (input$anova_type %in% c("anova_add",
                                            "anova_interaction",
                                            "between_interacting")) {
@@ -3126,129 +3145,129 @@ StatsPrepServer <- function(id,  setup_values) {
         
         
         
-      } else if (input$stats_test == "ssctest") {
-        
-        
-        
-        
-        #require(gplots)
-        #mzdat=subset(x5$test_result, mz==x5$stats_results$mz[m])
-        a <-
-          as.matrix(spectra(
-            subsetFeatures(x5$data_file_selected,
-                           mz == x5$stats_results$mz[m])
-          ))
-        b <-
-          pData(subsetFeatures(x5$data_file_selected,
-                               mz == x5$stats_results$mz[m]))
-        dat = cbind(run = Cardinal::run(x5$data_file_selected),
-                    b,
-                    value = a)
-        
-        dat_long_tech_avg <-
-          as.data.frame(dat) %>% dplyr::group_by_at(unique(
-            c(
-              "run",
-              input$phen_cols_stats
-            )
-          )) %>%
-          dplyr::summarize(tech_avg = mean(value),
-                           .groups = "keep")
-        
-        #x5$dat_long_tech_avg<-dat_long_tech_avg #single m/z
-        
-        
-        fm <-
-          as.formula(
-            paste0(
-              "tech_avg~(",
-              input$phen_cols_stats,")"))
-        
-        #choose one model to plot, hightest accuracy
-        idx<-input$stats_table_rows_selected
-        ssc_model <- x5$stats_table_filtered[idx, "model"]
-        
-        ncolors <- length(levels(as.factor(as.data.frame(
-          pData(x5$data_file_selected)[, input$phen_cols_stats]
-        )[,1])))
-        
-        
-        mycols = ggsci::pal_npg()(ncolors)
-        
-        
-        
-        if(is.null(names(x5$test_result))){
-          p1 <-
-            image(x5$test_result[[1]],
-                  #model = ssc_model,
-                  key = F,
-                  col=mycols)
-        } else {
-          p1 <-
-            image(x5$test_result,
-                  model = ssc_model,
-                  key = F,
-                  col=mycols)
-          
-        }
-        
-        if(length(mz)>1){
-          showNotification("Multiple ions selected, only first ion will be plotted", duration = 10)
-          idx = idx[1]
-        }
-        
-        p2 <-
-          image(
-            x5$data_file_selected,
-            mz = (x5$stats_results$mz[idx]),
-            model=ssc_model,
-            
-            enhance = "histogram",
-            scale = T, free="xy"
-            #col=mycols
-          )
-        
-        fm2 <-
-          (paste0(input$phen_cols_stats )) #, "~x*y"))
-        
-        #if more than one model present, create a matter vizi facet with all models
-        
-       if(class(x5$test_result)=="SpatialShrunkenCentroids") {
-         x5$test_result<-list(x5$test_result)
-       }
-        
-        if(length(x5$test_result)>1){
-          plot_list <- list()
-          nmodels=length(x5$test_result)
-          for(i in 1:nmodels){
-            plot_list[[i]] <-
-              plot(x5$test_result[[i]], type="statistic", linewidth=2, col=mycols)
-            
-          }
-          names(plot_list) <- names(x5$test_result)
-        } else {
-          plot_list <- plot(x5$test_result[[1]], type="statistic", linewidth=2, col=mycols)
-        }
-        p3 <-
-          matter::as_facets(plot_list, ncol = 1)
-        
-        p4 <-
-          image(x5$data_file_selected[, Cardinal::run(x5$data_file_selected) %in% runNames(x5$data_file_selected)[]],
-                fm2,
-                key = T,
-                col = mycols)
-        
-        plot_out<-switch(
-          input$plot_choice,
-          "ion_image" = p1,
-          "means_plot" = gplots::plotmeans(fm, dat_long_tech_avg),
-          "t_statistic" = p3,
-          "groupings" = p4,
-          "msi_image" = p2,
-        )
-        
-        print(plot_out)
-        
+      # } else if (input$stats_test == "ssctest") {
+      #   
+      #   
+      #   
+      #   
+      #   #require(gplots)
+      #   #mzdat=subset(x5$test_result, mz==x5$stats_results$mz[m])
+      #   a <-
+      #     as.matrix(spectra(
+      #       subsetFeatures(x5$data_file_selected,
+      #                      mz == x5$stats_results$mz[m])
+      #     ))
+      #   b <-
+      #     pData(subsetFeatures(x5$data_file_selected,
+      #                          mz == x5$stats_results$mz[m]))
+      #   dat = cbind(run = Cardinal::run(x5$data_file_selected),
+      #               b,
+      #               value = a)
+      #   
+      #   dat_long_tech_avg <-
+      #     as.data.frame(dat) %>% dplyr::group_by_at(unique(
+      #       c(
+      #         "run",
+      #         input$phen_cols_stats
+      #       )
+      #     )) %>%
+      #     dplyr::summarize(tech_avg = mean(value),
+      #                      .groups = "keep")
+      #   
+      #   #x5$dat_long_tech_avg<-dat_long_tech_avg #single m/z
+      #   
+      #   
+      #   fm <-
+      #     as.formula(
+      #       paste0(
+      #         "tech_avg~(",
+      #         input$phen_cols_stats,")"))
+      #   
+      #   #choose one model to plot, hightest accuracy
+      #   idx<-input$stats_table_rows_selected
+      #   ssc_model <- x5$stats_table_filtered[idx, "model"]
+      #   
+      #   ncolors <- length(levels(as.factor(as.data.frame(
+      #     pData(x5$data_file_selected)[, input$phen_cols_stats]
+      #   )[,1])))
+      #   
+      #   
+      #   mycols = ggsci::pal_npg()(ncolors)
+      #   
+      #   
+      #   
+      #   if(is.null(names(x5$test_result))){
+      #     p1 <-
+      #       image(x5$test_result[[1]],
+      #             #model = ssc_model,
+      #             key = F,
+      #             col=mycols)
+      #   } else {
+      #     p1 <-
+      #       image(x5$test_result,
+      #             model = ssc_model,
+      #             key = F,
+      #             col=mycols)
+      #     
+      #   }
+      #   
+      #   if(length(mz)>1){
+      #     showNotification("Multiple ions selected, only first ion will be plotted", duration = 10)
+      #     idx = idx[1]
+      #   }
+      #   
+      #   p2 <-
+      #     image(
+      #       x5$data_file_selected,
+      #       mz = (x5$stats_results$mz[idx]),
+      #       model=ssc_model,
+      #       
+      #       enhance = "histogram",
+      #       scale = T, free="xy"
+      #       #col=mycols
+      #     )
+      #   
+      #   fm2 <-
+      #     (paste0(input$phen_cols_stats )) #, "~x*y"))
+      #   
+      #   #if more than one model present, create a matter vizi facet with all models
+      #   
+      #  if(class(x5$test_result)=="SpatialShrunkenCentroids") {
+      #    x5$test_result<-list(x5$test_result)
+      #  }
+      #   
+      #   if(length(x5$test_result)>1){
+      #     plot_list <- list()
+      #     nmodels=length(x5$test_result)
+      #     for(i in 1:nmodels){
+      #       plot_list[[i]] <-
+      #         plot(x5$test_result[[i]], type="statistic", linewidth=2, col=mycols)
+      #       
+      #     }
+      #     names(plot_list) <- names(x5$test_result)
+      #   } else {
+      #     plot_list <- plot(x5$test_result[[1]], type="statistic", linewidth=2, col=mycols)
+      #   }
+      #   p3 <-
+      #     matter::as_facets(plot_list, ncol = 1)
+      #   
+      #   p4 <-
+      #     image(x5$data_file_selected[, Cardinal::run(x5$data_file_selected) %in% runNames(x5$data_file_selected)[]],
+      #           fm2,
+      #           key = T,
+      #           col = mycols)
+      #   
+      #   plot_out<-switch(
+      #     input$plot_choice,
+      #     "ion_image" = p1,
+      #     "means_plot" = gplots::plotmeans(fm, dat_long_tech_avg),
+      #     "t_statistic" = p3,
+      #     "groupings" = p4,
+      #     "msi_image" = p2,
+      #   )
+      #   
+      #   print(plot_out)
+      #   
       } else{
         print("Plot not supported yet")
       }

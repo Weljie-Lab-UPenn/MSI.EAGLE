@@ -231,6 +231,7 @@ DepthAnalysisServer <- function(id,  setup_values) {
                      x1 = setup_values()[["x1"]] # bring in raw_files list
                      
                      setCardinalBPPARAM(par_mode())
+                     setCardinalNChunks(setup_values()[["chunks"]])
                      
                      #browser()
                      
