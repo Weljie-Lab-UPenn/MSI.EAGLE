@@ -99,7 +99,7 @@ HeatmapUI <- function(id) {
           label = "Heatmap colors",
           choices = c(
             "default",
-            "viridis","magma", "plasma", "inferno", "cividis" 
+            "viridis","spectral", "plasma", "inferno", "cividis" 
           )
           
         ),

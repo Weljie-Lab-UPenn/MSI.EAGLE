@@ -77,7 +77,7 @@ MSI.EAGLE <- function(...) {
     DepthAnalysisServer("tab5", setup_values)
     proc_values<-StatsPrepServer("tab6", setup_values )
     HeatmapServer("tab7", proc_values)
-    CorrelationServer("tab8", proc_values)
+    CorrelationServer("tab8", proc_values, setup_values)
     
     observeEvent(input$browser, {
       browser()

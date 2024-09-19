@@ -46,7 +46,7 @@ HeatmapServer <- function(id,  proc_values) {
             ns("hm_sig_select"),
             "Choose filtering column for heatmap",
             choices  = hmap_choices,
-            selected = "AdjP"
+            selected = "fdr"
           ),
           radioButtons(
             ns("sig_direction"),
@@ -87,16 +87,31 @@ HeatmapServer <- function(id,  proc_values) {
       withProgress(message = "Generating heatmap...", detail = "summarizing data", {
         message("Generating heatmap!")
         
-        #browser()
+        
         
         #data_file_selected<-x5$data_file_selected
         data_file_selected <- proc_values()$x5$data_file_selected
         
-        numdat <- as.matrix(iData(data_file_selected))
+        #library(data.table)
+        numdat <- as.matrix(spectra(data_file_selected))
         rownames(numdat) <- mz(data_file_selected)
         pdat <- as.data.frame(pData(data_file_selected))
         
-        dat <- cbind(pdat, t(numdat))
+        # Convert to data.table for faster binding
+        pdat_dt <- data.table::as.data.table(pdat)
+        numdat_dt <- data.table::as.data.table(t(numdat))
+        
+        # Ensure column names are unique and compatible
+        data.table::setnames(numdat_dt, make.unique(colnames(numdat_dt)))
+        
+        # Bind columns using data.table's `cbind`
+        dat_dt <- cbind(pdat_dt, numdat_dt)
+        
+        # Convert back to data.frame if necessary
+        dat <- as.data.frame(dat_dt)
+        
+        
+        
         
         
         dat_long <-
@@ -130,7 +145,14 @@ HeatmapServer <- function(id,  proc_values) {
             "Plate is the only variable in the data-- are you sure? Check Stats tab for modeling and export"
           )
         }
-        
+        # FIX THIS!!
+        # dat<-proc_values()$x5$data_file_selected
+        # #create interaction of hmap_vars for grouping from pData of dat
+        # group_vars <- unique(c(input$grouping_variables, input$output_factors))
+        # pData(dat)$interaction <- interaction(pData(dat)[, group_vars])
+        # 
+        # summarizeFeatures(proc_values()$x5$data_file_selected, groups = interaction(input$hmap_vars))
+        # 
         x6$dat_long_tech_avg <- dat_long_tech_avg
         
       })
@@ -149,7 +171,7 @@ HeatmapServer <- function(id,  proc_values) {
       
       
       
-      #browser()
+      
       if ("hm_sigOnly" %in% input$hmap_params) {
         req(input$hm_sig_select)
         
@@ -348,20 +370,23 @@ HeatmapServer <- function(id,  proc_values) {
       
       if(input$heatmap_colors!="default") {
         
+        
+        col_choices<-c(hcl.pals())
+        
         hmap_colors<-
           switch(input$heatmap_colors,
-               viridis = Cardinal::viridis(100),
-               magma=Cardinal::magma(100),
-               plasma=Cardinal::plasma(100),
-               inferno=Cardinal::inferno(100),
-               cividis=Cardinal::cividis(100)
-               )
+                 viridis = cpal("viridis")(100),
+                 spectral=cpal("Spectral")(100),
+                 plasma=cpal("plasma")(100),
+                 inferno=cpal("inferno")(100),
+                 cividis=cpal("cividis")(100)
+          )
         #browser()
       } else (
         
         hmap_colors=colorRampPalette(rev(RColorBrewer::brewer.pal(n = 7, name =
-                                                            "RdYlBu")))(100)
-        )
+                                                                    "RdYlBu")))(100)
+      )
       
       
       #browser()

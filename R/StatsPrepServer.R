@@ -632,13 +632,17 @@ StatsPrepServer <- function(id,  setup_values) {
               return(NULL)
             }
             message("continuing by creating a factor. Check the output carefully!")
+            #if interaction(grouping is numeric, create factor)
+            # if(all(grepl("^[0-9]+$", (grouping[1,])))) {
+            #   groupsx = droplevels(as.factor(paste0("X.", interaction(grouping))))
+            # } else {
+              #groupsx = droplevels(as.factor(interaction(grouping)
             groupsx = droplevels(as.factor(interaction(grouping)))
-          }
+           }
         }
         x5$groupsx <- groupsx
         print("groups done")
-        
-        
+
         if (input$stats_test == "meanstest") {
           
           
@@ -658,8 +662,17 @@ StatsPrepServer <- function(id,  setup_values) {
           
           
           #convert input$phen_cols_stats to factor in dataset
-          pData(x5$data_file_selected)[,input$phen_cols_stats]<-droplevels(factor(as.data.frame(pData(x5$data_file_selected))[,input$phen_cols_stats]))
+          #check if numbers
+          tmp<-as.data.frame(pData(x5$data_file_selected)[,input$phen_cols_stats])
+          if(all(grepl("^[0-9]+$", tmp[,1]))) {
+            pData(x5$data_file_selected)[,input$phen_cols_stats]<-droplevels(factor(paste0("X.", tmp[,1])))
+          } else {
+            pData(x5$data_file_selected)[,input$phen_cols_stats]<-droplevels(factor(as.data.frame(pData(x5$data_file_selected))[,input$phen_cols_stats]))
+          }
           
+          
+          
+          #browser
           mt <- 
             try(meansTest(x5$data_file_selected[, ],
                       as.formula(paste0("~", input$phen_cols_stats)),
@@ -667,13 +680,14 @@ StatsPrepServer <- function(id,  setup_values) {
                         droplevels(as.factor(groupsx))))
           #mt2<-meansTest(x5$data_file_selected, as.formula(paste("~", input$phen_cols_stats)), groups=droplevels(x5$data_file_selected$Plate.Group))
           
-          on.exit(bpstop(par_mode()), add = TRUE)
+          #on.exit(bpstop(par_mode()), add = TRUE)
           
           if(class(mt) %in% "try-error") {
             print("meanstest failed. check data and data size")
             showNotification("meanstest failed. check data and data size", type="error")
             print(table(interaction(groupsx, as.data.frame(pData(x5$data_file_selected))[,input$phen_cols_stats])))
-            stop("means test failed")
+            message("means test failed")
+            return()
           }
           
           
@@ -1062,7 +1076,7 @@ StatsPrepServer <- function(id,  setup_values) {
             "Spatial DGMM test complete, check Output table tab for table and check FDR cutoff if results not visible."
           )
         }  else if (input$stats_test == "MIL") {
-          browser()
+          
           sscr = as.numeric(unlist(strsplit(input$sscr, split = ",")))
           sscs = as.numeric(unlist(strsplit(input$sscs, split = ",")))
           
@@ -1579,8 +1593,8 @@ StatsPrepServer <- function(id,  setup_values) {
           #
           # 
           # x5$stats_results<-as.data.frame(cbind(mz=mzs, feature=feats, pvals, adjustp))
-          
-        } #end of total anova testing
+        }  
+        #} #end of total anova testing
       })
     })
     
@@ -2164,6 +2178,7 @@ StatsPrepServer <- function(id,  setup_values) {
       
       
       if (input$stats_test %in% c("meanstest", "spatialDGMM", "ssctest")) {
+        
         labels = (unique(as.data.frame(pData(
           x5$data_file_selected
         ))[, input$phen_cols_stats])) #may mess up consistent coloring with droplevels?
@@ -2210,6 +2225,19 @@ StatsPrepServer <- function(id,  setup_values) {
           # vars <- vars[!grepl("\\.1$", vars)]
           # 
           vars<- colnames(mean_spectra)[colnames(mean_spectra) %in% paste0(as.character(labels), ".mean")]
+          
+          if(length(vars)!=2){
+            print("Two group labels not found, checking for numeric Phenotype test variables")
+            
+            vars<- colnames(mean_spectra)[colnames(mean_spectra) %in% paste0("X", as.character(labels), ".mean")]
+            
+            if(length(vars)!=2) {
+              showNotification("Two group labels not found, check Phenotype test variables", type="error")
+              return()
+            }
+          }
+          
+          
           
           log2FC = try(formatC(log2(mean_spectra[, vars[2]] / mean_spectra[, vars[1]]), format="fg", digits=3))
           
