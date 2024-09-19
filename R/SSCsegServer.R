@@ -223,7 +223,7 @@ SSCsegServer <- function(id, setup_values, preproc_values) {
       req(input$ssc_model)
       
       #create tf_list based on selected model and colors
-      browser()
+    #browser()
       if (sum(x2$ssc_models %in% input$ssc_model) == 1) {
         model_num <- which(x2$ssc_models %in% input$ssc_model)
         x2$bkcols <- x2$ssc[[model_num]]$class

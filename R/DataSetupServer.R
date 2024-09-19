@@ -92,7 +92,7 @@ DataSetupServer <- function(id, rawd, wd) {
       #read list of files to process; end result should be list of imzML files to process
       files <-
         list.files(path = folder,
-                   recursive = T,
+                   recursive = F,
                    pattern = input$regex)
       # files <-
       #   sub("\\.imzML", "", files) #needed because Cardinal automatically adds this to the name

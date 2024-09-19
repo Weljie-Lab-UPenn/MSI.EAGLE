@@ -60,7 +60,7 @@ UMAPServer <- function(id, setup_values, preproc_values) {
           )
       }
       #x2$tf_list<-coord(x2$mytable_selected) %in% coord(x2$mytable_selected)
-      #browser()
+      
       # Update tf_list accordingly TEMP, check carefully
       #x2$tf_list <- rep(TRUE, ncol(x2$mytable_selected))
     })
@@ -71,7 +71,7 @@ UMAPServer <- function(id, setup_values, preproc_values) {
       
       x2 <- preproc_values()[["x2"]]
       req(x2$mytable_selected)
-      #browser()
+      
       if (input$seg_choice == "anat_seg") {
         if (!is.null(x2$list_proc_img)) {
           print("updating selected table from previously processed phenotype data")
@@ -181,7 +181,7 @@ UMAPServer <- function(id, setup_values, preproc_values) {
           img.dat <- x2$mytable_selected #%>% subsetPixels(x2$tf_list)
         }
       } else {
-       # browser()
+       
         
         if(sum(x2$tf_list)==ncol(x2$mytable_selected)) {
           img.dat <- x2$mytable_selected
@@ -189,7 +189,7 @@ UMAPServer <- function(id, setup_values, preproc_values) {
           
           img.dat <- x2$mytable_selected %>% subsetPixels(x2$tf_list)
         } else {
-          #browser()
+          
           message("tf_list is not the same size as the dataset, exiting")
           showNotification("tf_list is not the same size as the dataset, exiting", type="error")
           return(NULL)
@@ -205,7 +205,7 @@ UMAPServer <- function(id, setup_values, preproc_values) {
         
       }
       
-      browser()
+      
       #if there is already processed data, use that
       if (!is.null(x2$list_proc_img)) {
         img.dat <-
