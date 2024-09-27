@@ -10,19 +10,20 @@ DataSetupServer <- function(id, rawd, wd) {
       
       
       # Define the dynamic parameters based on the switch
+      # Any NULL in mass range will force auto detection
       params <- switch(
         input$pp_params,
         "qtof1" = list(
           res = NA, 
           tol = 30, 
-          mass_range_min = 50, 
-          mass_range_max = 1700
+          mass_range_min = NULL, 
+          mass_range_max = NULL
         ),
         "hires" = list(
           res = NA, 
           tol = 10, 
-          mass_range_min = 50, 
-          mass_range_max = 1700
+          mass_range_min = NULL, 
+          mass_range_max = NULL
         )
       )
       
@@ -114,7 +115,8 @@ DataSetupServer <- function(id, rawd, wd) {
     
     #create reactive object for initial data setup
     x1 <- reactiveValues(raw_list = NULL,
-                         file_list = NULL)
+                         file_list = NULL,
+                         mass.range = NULL)
     
     
     observe({
@@ -213,7 +215,18 @@ DataSetupServer <- function(id, rawd, wd) {
       
       #browser()
       withProgress(message = 'Importing data', value = 1, {
-        #browser()
+        
+        
+        #if input$mass_range_min and max are  NULL, set mass.range to NULL
+        if (!is.numeric(input$mass_range_min) | !is.numeric(input$mass_range_max)) {
+          message("mass range is set to NULL")
+          mass.range <- NULL
+          x1$mass.range <- NULL
+        } else {
+          mass.range <- c(input$mass_range_min, input$mass_range_max)
+          x1$mass.range <- mass.range
+        }
+
         x1$raw_list <- sapply(files_selected(), function(x)
         {
           y <- Cardinal::readMSIData(
@@ -221,7 +234,7 @@ DataSetupServer <- function(id, rawd, wd) {
             #folder=input$folder,
             resolution = input$res,
             units = input$units,
-            mass.range = c(input$mass_range_min, input$mass_range_max)
+            mass.range = mass.range
           )
           #Cardinal::centroided(y) <- TRUE
           coord(y)$z <- NULL
@@ -242,12 +255,14 @@ DataSetupServer <- function(id, rawd, wd) {
       if (is.null(x1$raw_list))
         return()
        setCardinalBPPARAM(par_mode())
+       setCardinalNChunks(input$chunks)
      
       
       withProgress(message = "Extracting sample for plotting", value = 1, {
         tmp.img <- Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays))
         tmp.img <- convertMSImagingArrays2Experiment(tmp.img, 
-                                                     mass.range = c(input$mass_range_min, input$mass_range_max), 
+                                                     #mass.range = c(input$mass_range_min, input$mass_range_max), 
+                                                     mass.range= x1$mass.range,
                                                      resolution = input$res, 
                                                      units = input$units
                                                      )
@@ -257,7 +272,7 @@ DataSetupServer <- function(id, rawd, wd) {
                        tolerance = input$tol, 
                        units = input$units, 
                        method="diff",
-                       mass.range = c(input$mass_range_min, input$mass_range_max), 
+                       mass.range = x1$mass.range, 
                        sampleSize=input$pix_to_plot/100, filterFreq=0.2) %>% summarizeFeatures()
       })
     })

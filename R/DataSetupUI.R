@@ -1,7 +1,7 @@
 
 
 ### R/DataSetupUI.R
-DataSetupUI <- function(id, ncores, rawd, wd) {
+DataSetupUI <- function(id, ncores, nchunks, rawd, wd) {
   ns <- NS(id)
   
   tabPanel(
@@ -39,7 +39,7 @@ DataSetupUI <- function(id, ncores, rawd, wd) {
         uiOutput(ns("par_mode_setup")),
         fluidRow(
           column(6, numericInput(ns("ncores"), "# of cores", ncores)),
-          column(6, numericInput(ns("chunks"), "# of chunks", 20))
+          column(6, numericInput(ns("chunks"), "# of chunks", nchunks))
         ),
         # numericInput(ns("ncores"), "# of cores e", ncores),
         # # radioButtons(

@@ -287,7 +287,7 @@ UMAPServer <- function(id, setup_values, preproc_values) {
       #reset colorscale
       x2 <- preproc_values()[["x2"]]
       
-      
+      gc()
       ptm <- proc.time()
       
       withProgress(message = "Performing UMAP analysis and color clustering", value =
@@ -984,7 +984,7 @@ UMAPServer <- function(id, setup_values, preproc_values) {
         req(x2$mytable_selected)
         req(input$seg_pdat_col)
         req(input$show_dat)
-        
+        browser()
         
         #TODO - deal with segmentation from exisitng info, without running UMAP
         img.dat <- x2$mytable_selected

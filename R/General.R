@@ -320,6 +320,8 @@ pixDatFill_mult<-function(datas, sample_list, variables, method=c("spec_density"
     #create dataset of only selected plate
     cat("Working on plate: ", p,"\n")
     
+    browser()
+    
     select_pix<-grep(p, Cardinal::run(data1_samples))
     if(length(select_pix)==0) {
       showNotification(paste0("Plate: ", p, " from sample list not found! skipping"))

@@ -381,7 +381,8 @@ PeakPickServer <- function(id, setup_values) {
                        #use Cardinal 3.6 peak processing method
                        
                        msa<-convertMSImagingArrays2Experiment(Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)),
-                                                                                              mass.range = c(setup_values()[["mz_max"]], setup_values()[["mz_min"]]), 
+                                                                                              #mass.range = c(setup_values()[["mz_max"]], setup_values()[["mz_min"]]), 
+                                                                                              x1$mass.range,
                                                                                               resolution = setup_values()[["res"]], 
                                                                                               units = "ppm")
                        
@@ -504,11 +505,14 @@ PeakPickServer <- function(id, setup_values) {
                        
                        
                        
-                       #check mz_min and mz_max to make sure they are not the same
-                       if (setup_values()[["mz_min"]] == setup_values()[["mz_max"]]) {
-                         print("mz_min and mz_max are the same, please change")
-                         showNotification("mz_min and mz_max are the same, please change", type="error")
-                         return()
+                       
+                       if(!is.null(x1$mass.range)) {
+                         #check mz_min and mz_max to make sure they are not the same
+                         if (setup_values()[["mz_min"]] == setup_values()[["mz_max"]]) {
+                           print("mz_min and mz_max are the same, please change")
+                           showNotification("mz_min and mz_max are the same, please change", type="error")
+                           return()
+                         }
                        }
                        
                        
@@ -522,7 +526,9 @@ PeakPickServer <- function(id, setup_values) {
                          #Cardinal::combine(x1$raw_list[c(1:3,5:8)]) %>%
                          Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)) %>%
                          
-                           convertMSImagingArrays2Experiment(mass.range=c(setup_values()[["mz_max"]], setup_values()[["mz_min"]])) %>% 
+                           convertMSImagingArrays2Experiment(
+                             #mass.range=c(setup_values()[["mz_max"]], setup_values()[["mz_min"]])) %>% 
+                             mass.range=x1$mass.range) %>%
                            # normalize() %>% 
                            # process() %>%
                          estimateReferencePeaks( SNR=input$SNR, 

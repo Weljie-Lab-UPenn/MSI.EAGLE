@@ -2485,14 +2485,16 @@ StatsPrepServer <- function(id,  setup_values) {
         setCardinalNChunks(setup_values()[["chunks"]])
         
         
-
+        
         #plot selected statistical results
         p1 <- plot_stats_results(x5 = x5,
                                  stats_table_rows_selected = input$stats_table_rows_selected,
                                  stats_test = input$stats_test,
                                  phen_cols_stats = input$phen_cols_stats,
                                  group_var = x5$group_var,
-                                 plot_choice = input$plot_choice)
+                                 plot_choice = input$plot_choice,
+                                 chunks = setup_values()[["chunks"]]
+                                 )
         print(p1)
         # return()
       # 

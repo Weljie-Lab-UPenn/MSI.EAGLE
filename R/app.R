@@ -43,9 +43,14 @@ MSI.EAGLE <- function(...) {
     ncores=as.integer(parallel::detectCores())-2
   }
   
+  #check of number of chunks and set if present
+  if(!exists("nchunks")){
+    nchunks=20
+  }
+  
   ui <- navbarPage(p(strong("MSI EAGLE")),
                    theme = shinythemes::shinytheme("sandstone"),                   
-                   DataSetupUI("tab1", ncores, rawd, wd),
+                   DataSetupUI("tab1", ncores, nchunks, rawd, wd),
                    PeakPickUI("tab2"),
                    UMAPUI("tab3"),
                    SSCsegUI("tab3a"),

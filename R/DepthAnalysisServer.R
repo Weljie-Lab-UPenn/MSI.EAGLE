@@ -631,7 +631,7 @@ DepthAnalysisServer <- function(id,  setup_values) {
                          x4$seg_pp_file <-tmp.img
                        
                        #report number of masses binned
-                       print(paste0("Number of masses binned: ", ncol(x4$seg_pp_file)))
+                       print(paste0("Number of masses binned: ", nrow(x4$seg_pp_file)))
                        
                      }
                      #add mass annotations?

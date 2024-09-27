@@ -15,7 +15,8 @@ plot_stats_results <- function(
     aov_vars2 = NULL,
     aov_vars3 = NULL,
     output_factors = NULL,
-    anova_type = NULL
+    anova_type = NULL,
+    chunks = getCardinalNChunks()
 ) {
   if (is.null(stats_table_rows_selected)) {
     stop("No rows selected")
@@ -27,6 +28,9 @@ plot_stats_results <- function(
       bpstop(par_mode())  # Ensure parallel workers are stopped
     }
   }, add = TRUE)
+  
+  #set chunk size
+  setCardinalNChunks(chunks)
   
   dat <- x5$stats_table_filtered
   
@@ -63,6 +67,8 @@ plot_stats_results <- function(
     mplot <- FALSE
     
     if (plot_choice == "ggplot") {
+      
+      browser()
       # Extract all spectra and metadata for selected ions
       a <- lapply(m, function(x) {
         spectra(
@@ -132,12 +138,12 @@ plot_stats_results <- function(
       
     } else if (plot_choice == "cardinal"){
       m <- stats_table_rows_selected
-      mz_vals <- x5$stats_results$mz[m]
-      i_vals <- x5$stats_results$i[m]
-      fdr_vals <- x5$stats_results$fdr[m]
-      names(i_vals) <- paste0("mz= ", round(mz_vals, 4), " FDR= ", round(fdr_vals, 3))
+      mz_vals <- x5$stats_table_filtered$mz[m]
+      i_vals <- x5$stats_table_filtered$i[m]
+      fdr_vals <- x5$stats_table_filtered$fdr[m]
+      names(i_vals) <- paste0("mz= ", round(mz_vals, 4), " FDR= ", formatC(fdr_vals, digits = 3, format = "fg"))
       
-      p1 <- plot(x5$test_result, i = i_vals, col = mycols, las = 0, fill = TRUE, free = "y")
+      p1 <- plot(x5$test_result, i = i_vals, col = mycols, las = 0, fill = TRUE, free = "xy")
       print(p1)
       if (exists("par_mode")) bpstop(par_mode())
       return(p1)
@@ -220,7 +226,7 @@ plot_stats_results <- function(
     # 
     # 
     if(plot_choice=="means_plot") {
-        
+      
       #loop through unique mz values to create means plots
       mz_to_plot<-unique(x5$stats_results$mz[m])
       plot_list <- list()
