@@ -519,6 +519,18 @@ StatsPrepServer <- function(id,  setup_values) {
       message("Running stats test")
       gc()
       
+      # Clear previous test results
+      x5$test_result <- NULL
+      x5$test_result_feature_test <- NULL 
+      x5$stats_results <- NULL
+      x5$data_file_selected <- NULL
+      x5$dat_long_tech_avg <- NULL
+      x5$stats_table_filtered <- NULL
+      x5$size_ok <- NULL
+      x5$groupsx <- NULL
+      x5$plot_list <- NULL
+      
+      
       setCardinalBPPARAM(par_mode())
       setCardinalNChunks(setup_values()[["chunks"]])
       

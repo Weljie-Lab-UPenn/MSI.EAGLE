@@ -53,6 +53,7 @@ MSI.EAGLE <- function(...) {
                    DataSetupUI("tab1", ncores, nchunks, rawd, wd),
                    PeakPickUI("tab2"),
                    UMAPUI("tab3"),
+				           UMAPEmbeddingUI("tab3b"),
                    SSCsegUI("tab3a"),
                    PhenoSetupUI("tab4"),
                    DepthAnalysisUI("tab5"),
@@ -76,8 +77,9 @@ MSI.EAGLE <- function(...) {
     
     setup_values <- DataSetupServer("tab1", rawd = rawd, wd = wd)
     preproc_values <- PeakPickServer("tab2", setup_values)
-    UMAPServer("tab3", setup_values, preproc_values)
+    preproc_values_umap <- UMAPServer("tab3", setup_values, preproc_values)
     SSCsegServer("tab3a", setup_values, preproc_values)
+    UMAPEmbeddingServer("tab3b", setup_values, preproc_values, preproc_values_umap)
     PhenoServer("tab4", setup_values, preproc_values)
     DepthAnalysisServer("tab5", setup_values)
     proc_values<-StatsPrepServer("tab6", setup_values )

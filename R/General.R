@@ -320,7 +320,7 @@ pixDatFill_mult<-function(datas, sample_list, variables, method=c("spec_density"
     #create dataset of only selected plate
     cat("Working on plate: ", p,"\n")
     
-    browser()
+    
     
     select_pix<-grep(p, Cardinal::run(data1_samples))
     if(length(select_pix)==0) {
@@ -806,4 +806,14 @@ convert_card<-function(obj) {
   
   
   
+}
+
+#round to higher integer, ie 2.5 becomes 3, not 2 as in round()
+round2 = function(x, digits) {
+  posneg = sign(x)
+  z = abs(x)*10^digits
+  z = z + 0.5 + sqrt(.Machine$double.eps)
+  z = trunc(z)
+  z = z/10^digits
+  z*posneg
 }
