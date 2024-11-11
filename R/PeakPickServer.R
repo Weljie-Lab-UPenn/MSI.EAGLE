@@ -334,7 +334,7 @@ PeakPickServer <- function(id, setup_values) {
                        
                      } else if (input$peak_pick_status == "pp_no") {
                        
-                       
+                       #browser()
                        
                        x1 = setup_values()[["x1"]] # bring in raw_files list
                        
@@ -382,7 +382,7 @@ PeakPickServer <- function(id, setup_values) {
                        
                        msa<-convertMSImagingArrays2Experiment(Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)),
                                                                                               #mass.range = c(setup_values()[["mz_max"]], setup_values()[["mz_min"]]), 
-                                                                                              x1$mass.range,
+                                                                                              mass.range=x1$mass.range,
                                                                                               resolution = setup_values()[["res"]], 
                                                                                               units = "ppm")
                        

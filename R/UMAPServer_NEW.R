@@ -1044,7 +1044,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
       
       #img.dat<-x2$mytable_selected #x2$overview_peaks_sel  #subset somehow??
       
-      
+      browser()
       
       #if(x2$rcol_plot=="Rcol_reduced"){
       cols = as.data.frame(pData(img.dat))[, x2$rcol_plot]
