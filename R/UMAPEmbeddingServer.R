@@ -235,7 +235,7 @@ UMAPEmbeddingServer <- function(id, setup_values, preproc_values, preproc_values
           plot_colors[mask] <- color_ramp(length(unique_values))[factor_levels]
         }
       }
-      
+      #browser()
       print(pairs(umap_coords(),
                   col = plot_colors,
                   pch = ".",
@@ -267,8 +267,27 @@ UMAPEmbeddingServer <- function(id, setup_values, preproc_values, preproc_values
                                 smooth = "gaussian"))
         } else {
           # Create a subset of data containing only selected colors
-          subset_data <- data_img() %>%
-            subsetPixels(pData(data_img())[[input$color_var]] %in% color_state$selected_colors)
+          
+          #browser()
+          img_vec <- pData(data_img())[[input$color_var]]
+          select_vec <- color_state$selected_colors
+          
+          # Check if select_vec only contains "TRUE" and "FALSE"
+          if (all(select_vec %in% c("TRUE", "FALSE"))) {
+            # Convert to logical
+            select_vec <- as.logical(select_vec)
+          } else {
+            select_vec <- as.character(select_vec)
+          }
+          
+          if (is.logical(img_vec) && is.logical(select_vec) ||
+              (is.character(img_vec) && is.character(select_vec) )) {
+            
+              subset_data <- data_img() %>%
+                subsetPixels(img_vec %in% select_vec)
+          } else {
+            return()
+          }
           
           if(ncol(subset_data) > 0) {
             print(Cardinal::image(subset_data,
