@@ -498,7 +498,7 @@ DepthAnalysisServer <- function(id,  setup_values) {
                        }
                        
                        #report number of peaks picked
-                       print(paste0("Number of peaks picked: ", ncol(x4$seg_pp_file)))
+                       print(paste0("Number of peaks picked: ", nrow(x4$seg_pp_file)))
                        
                        
                      } else if (input$targeted_pp == "mean") {

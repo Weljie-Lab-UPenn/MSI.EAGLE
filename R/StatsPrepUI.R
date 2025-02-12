@@ -1,6 +1,3 @@
-
-
-
 ### R/StatsPrepUI.R
 
 # function to create the UI for the statistics tab

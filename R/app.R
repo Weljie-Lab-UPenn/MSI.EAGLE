@@ -1,3 +1,5 @@
+### R/app.R
+
 #' @import shiny
 #' @import BiocParallel
 #' @import Cardinal

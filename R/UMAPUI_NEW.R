@@ -1,3 +1,5 @@
+### R/UMAPUI_NEW.R
+
 UMAPUI <- function(id) {
   ns <- NS(id)
   tabPanel(

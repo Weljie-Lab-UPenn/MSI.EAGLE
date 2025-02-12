@@ -1,4 +1,5 @@
-### R/UMAPServer.R
+### R/UMAPServer_NEW.R
+
 UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
   moduleServer(id, function(input, output, session) {
     #for dynamic UI

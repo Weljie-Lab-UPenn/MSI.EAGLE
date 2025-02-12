@@ -1,4 +1,5 @@
-### UMAPEmbeddingServer.R 
+### R/UMAPEmbeddingServer.R 
+
 UMAPEmbeddingServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
   moduleServer(id, function(input, output, session) {
     ns = session$ns

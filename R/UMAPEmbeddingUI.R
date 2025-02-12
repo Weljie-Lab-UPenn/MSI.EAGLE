@@ -1,3 +1,5 @@
+### R/UMAPEmbeddingUI.R
+
 UMAPEmbeddingUI <- function(id) {
   ns <- NS(id)
   

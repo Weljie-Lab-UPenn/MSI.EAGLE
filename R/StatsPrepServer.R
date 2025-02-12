@@ -1,4 +1,5 @@
 ### R/StatsPrepServer.R
+
 StatsPrepServer <- function(id,  setup_values) {
   moduleServer(id, function(input, output, session) {
     # output$table <- DT::renderDataTable(mtcars)
@@ -682,14 +683,36 @@ StatsPrepServer <- function(id,  setup_values) {
             pData(x5$data_file_selected)[,input$phen_cols_stats]<-droplevels(factor(as.data.frame(pData(x5$data_file_selected))[,input$phen_cols_stats]))
           }
           
+          #browser()
           
-          
-          #browser
+
+            #check how many groupsx are NA; if any, remove them
+            na_vec<-is.na(x5$groupsx)
+            
+            message("removing pixels with NA sample values")
+            
+
+            dat<-x5$data_file_selected[,!na_vec]
+            groupsx<-(as.character(x5$groupsx[!na_vec]))
+            # 
+            # gc()
+            # nsel=length(groupsx)
+            # mt <- 
+            #   try(meansTest(dat[,1:nsel],
+            #                   as.formula(paste0("~", input$phen_cols_stats)),
+            #                 samples =
+            #                   groupsx[1:nsel]))
+            # topFeatures(mt)
+            # droplevels(interaction(groupsx, as.data.frame(pData(dat))[,input$phen_cols_stats]))
+            # 
+        
+          x5$data_file_selected<-dat
+          x5$groupsx<-groupsx
           mt <- 
             try(meansTest(x5$data_file_selected[, ],
                       as.formula(paste0("~", input$phen_cols_stats)),
                       samples =
-                        droplevels(as.factor(groupsx))))
+                        droplevels(as.factor(x5$groupsx))))
           #mt2<-meansTest(x5$data_file_selected, as.formula(paste("~", input$phen_cols_stats)), groups=droplevels(x5$data_file_selected$Plate.Group))
           
           #on.exit(bpstop(par_mode()), add = TRUE)
@@ -1614,7 +1637,7 @@ StatsPrepServer <- function(id,  setup_values) {
       #req(input$output_factors)
       req(input$grouping_variables_export)
       
-      
+      showNotification("Starting data export.")
       
       numdat <- as.matrix(spectra(x5$data_file))
       rownames(numdat) <- mz(x5$data_file)
@@ -1626,7 +1649,7 @@ StatsPrepServer <- function(id,  setup_values) {
         (dat) %>%  dplyr::group_by_at(c(input$grouping_variables_export)) %>%
         dplyr::summarize(across(where(is.numeric), mean), .groups = 'keep')
       
-      file_name=paste0("data_table_export_", Sys.Date(), ".txt")
+      file_name=paste0("MSI.EAGLE_data_table_export_", Sys.Date(), ".tsv")
       
       print("Exporting datatable summarized by selected variables.")
       showNotification(paste("Exporting datatable in the working directory summarized by selected variables. Filename is: ", file_name, "\n"), duration = 10)
