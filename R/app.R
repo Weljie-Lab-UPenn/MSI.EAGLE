@@ -30,7 +30,9 @@
 # @importFrom DT dataTableOutput renderDataTable
 MSI.EAGLE <- function(...) {
   
-  
+#Prevent session timeout
+options(shiny.idle_timeout = 0)
+	
   #check for directories and set to current wd if not set
   if(!exists("rawd")){
     rawd=getwd()
