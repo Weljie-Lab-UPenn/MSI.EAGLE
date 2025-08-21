@@ -449,9 +449,13 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
           })
         }
         
+        
         # Model-based Clustering (Mclust)
         if ("mclust" %in% input$clustering_methods) {
           print("Starting model-based clustering (Mclust)")
+          
+          library(mclust)
+          
           tryCatch({
             data_list$mclust_umap_separation <- mclust::Mclust(embeddings, G = 1:n_clusters)
           }, error = function(e) {
@@ -464,8 +468,8 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
           print("Starting self-organizing map clustering")
           tryCatch({
             scaled_embeddings <- scale(embeddings)
-            som_grid <- kohonen::somgrid(xdim = round2(input$k_clustering / 2, 0), 
-                                         ydim = round2(input$k_clustering / 2, 0), 
+            som_grid <- kohonen::somgrid(xdim = max(2, round(input$k_clustering/2)), 
+                                         ydim = max(2, round(input$k_clustering/2)), 
                                          topo = "hexagonal")
             som_model <- kohonen::som(scaled_embeddings, grid = som_grid, rlen = 100)
             data_list$som_umap_separation <- som_model
@@ -735,6 +739,9 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
         # Model-based Clustering (Mclust)
         if ("mclust" %in% input$clustering_methods) {
           print("Re-running model-based clustering (Mclust)")
+          
+          library(mclust)
+          
           tryCatch({
             data_list$mclust_umap_separation <- mclust::Mclust(embeddings, G = 1:input$k_clustering)
           }, error = function(e) {
@@ -747,8 +754,8 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
           print("Re-running self-organizing map clustering")
           tryCatch({
             scaled_embeddings <- scale(embeddings)
-            som_grid <- kohonen::somgrid(xdim = round2(input$k_clustering/2,0), 
-                                         ydim = round2(input$k_clustering/2,0), 
+            som_grid <- kohonen::somgrid(xdim = max(2, round(input$k_clustering/2)), 
+                                         ydim = max(2, round(input$k_clustering/2)), 
                                          topo = "hexagonal")
             som_model <- kohonen::som(scaled_embeddings, grid = som_grid, rlen = 100)
             data_list$som_umap_separation <- som_model
