@@ -10,7 +10,7 @@ UMAPUI <- function(id) {
           "Segmentation Goal",
           c(
             "Background removal (pixelData)" = 'bk_seg',
-            "Anatomical segmentation (phenotypeData)" = 'anat_seg',
+            "pData/UMAP Editor" = 'anat_seg',
             "Fix stray pixels" = "fix_pix"
           )
         ),
