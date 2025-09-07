@@ -42,10 +42,13 @@ remotes::install_git("https://github.com/Weljie-Lab-UPenn/MSI.EAGLE")
 ### Basic Setup
 
 In R Studio:
-1) Add the file path to the folder containing your .imzML and .ibd raw data files (rawd), and the path to the folder where your results will be saved (wd).
-2) Then, click "Source with Echo" to run the application.
+1) Create a new R script, and copy and paste the start code below into it.
+2) Add the file path to the folder containing your .imzML and .ibd raw data files (rawd), and the path to the folder where your results will be saved (wd).
+3) Then, click "Source with Echo" to run the application.
 
 ```r
+#MSI.EAGLE Start
+
 library(MSI.EAGLE)
 
 # Set path to raw data files
