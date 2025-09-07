@@ -10,7 +10,9 @@ An interactive Shiny application for processing mass spectrometry imaging (MSI) 
 
 ### Prerequisites
 
-Before installing MSI.EAGLE, you need to install the required Bioconductor packages and Git.
+Before installing MSI.EAGLE, you need to install R and R Studio: https://rstudio-education.github.io/hopr/starting.html
+
+Then the required Bioconductor packages and Git.
 
 ### Step 1: Install Required R Packages
 
@@ -43,14 +45,21 @@ remotes::install_git("https://github.com/Weljie-Lab-UPenn/MSI.EAGLE")
 
 ### Basic Setup
 
+In R Studio:
+1) Create a new R script, and copy and paste the start code below into it.
+2) Add the file path to the folder containing your .imzML and .ibd raw data files (rawd), and the path to the folder where your results will be saved (wd).
+3) Then, click "Source with Echo" to run the application.
+
 ```r
+#MSI.EAGLE Start
+
 library(MSI.EAGLE)
 
 # Set path to raw data files
-rawd <- 'path/to/rawfilesdirectory'
+rawd = 'path/to/rawfilesdirectory'
 
 # Set working directory (can be same as raw data directory)
-wd <- 'path/to/workingdirectory'
+wd = 'path/to/workingdirectory'
 
 # Configure number of CPU cores to use
 # Option 1: Use half of available processors
@@ -62,32 +71,6 @@ ncores <- as.integer(parallel::detectCores()) - 2
 # Launch the application
 MSI.EAGLE()
 ```
-
-## Private Repository Access
-
-If you need to access this as a private repository, you'll need to set up a GitHub Personal Access Token (PAT).
-
-### Setting up GitHub PAT
-
-1. **Create a PAT** on GitHub with appropriate repository permissions
-
-2. **Store the PAT securely** in your `.Renviron` file:
-   ```r
-   # Edit your .Renviron file
-   usethis::edit_r_environ()
-   ```
-
-3. **Add your PAT** to the file:
-   ```
-   GITHUB_PAT=your_personal_access_token
-   ```
-
-4. **Restart R** to load the environment variable
-
-5. **Install the package** using the standard command:
-   ```r
-   remotes::install_github("Weljie-Lab-UPenn/MSI.EAGLE")
-   ```
 
 ## Requirements
 
