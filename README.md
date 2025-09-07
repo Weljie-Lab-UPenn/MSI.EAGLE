@@ -6,7 +6,9 @@ An interactive Shiny application for processing mass spectrometry imaging (MSI) 
 
 ### Prerequisites
 
-Before installing MSI.EAGLE, you need to install the required Bioconductor packages and Git.
+Before installing MSI.EAGLE, you need to install R and R Studio: https://rstudio-education.github.io/hopr/starting.html
+
+Then the required Bioconductor packages and Git.
 
 ### Step 1: Install Required R Packages
 
