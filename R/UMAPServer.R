@@ -1874,7 +1874,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
           }
           
           tmp.img <- x2$mytable_selected[x2$tf_list]
-          x2$pdat_anat <- x2$pdata_anat[x2$tf_list, ]
+          x2$pdat_anat <- x2$pdat_anat[x2$tf_list, ]
           
           # Store UMAP embeddings
           # tmp.img$x_umaps <- x2$data_list$umap_separation$[x2$tf_list]
