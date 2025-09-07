@@ -1,101 +1,97 @@
-
-<!-- README.md is generated from README.Rmd. Please edit that file -->
-
 # MSI.EAGLE
 
-<!-- badges: start -->
-<!-- badges: end -->
-
-The goal of MSI.EAGLE is to create an interactive user app for
-processing of mass spec imaging data. It uses many of the processing
-features from Cardinal, and adds a number of analysis options.
+An interactive Shiny application for processing mass spectrometry imaging (MSI) data. MSI.EAGLE leverages processing features from Cardinal and adds additional analysis options for comprehensive MSI data analysis.
 
 ## Installation
 
-You can install the development version of MSI.EAGLE as follows:
+### Prerequisites
 
-``` r
-<!-- # FILL THIS IN! HOW CAN PEOPLE INSTALL YOUR DEV PACKAGE? -->
-Install using: 
+Before installing MSI.EAGLE, you need to install the required Bioconductor packages and Git.
 
-Step 1*: Install Bioconductor packages
+### Step 1: Install Required R Packages
 
+```r
+# Install remotes package
 install.packages("remotes")
 
+# Install BiocManager if not already installed
 if (!require("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
 
+# Install required Bioconductor packages
 BiocManager::install(c("BiocParallel", "Cardinal"))
 
-One can also install the CardinalWorkflows package for demo data
+# Optional: Install CardinalWorkflows for demo data
 BiocManager::install("CardinalWorkflows")
 ```
 
-    Step 2: Install Git
+### Step 2: Install Git
 
-<https://git-scm.com/book/en/v2/Getting-Started-Installing-Git>
+If you don't have Git installed, download and install it from: https://git-scm.com/book/en/v2/Getting-Started-Installing-Git
 
+### Step 3: Install MSI.EAGLE
 
-    Step 3: Install MSI.EAGLE
+```r
+remotes::install_git("https://github.com/Weljie-Lab-UPenn/MSI.EAGLE")
+```
 
-    remotes::install_git("https://github.com/Weljie-Lab-UPenn/MSI.EAGLE")
+## Usage
 
+### Basic Setup
 
-    ## Example
+```r
+library(MSI.EAGLE)
 
-    This is a basic example which shows you how to setup and start the app:
+# Set path to raw data files
+rawd <- 'path/to/rawfilesdirectory'
 
+# Set working directory (can be same as raw data directory)
+wd <- 'path/to/workingdirectory'
 
-    ``` r
-    # basic startup script
+# Configure number of CPU cores to use
+# Option 1: Use half of available processors
+ncores <- as.integer(parallel::detectCores()/2)
 
-    # set up the directory with raw data
-     rawd = ('path/to/rawfilesdirectory')
+# Option 2: Use all but 2 processors (recommended)
+ncores <- as.integer(parallel::detectCores()) - 2
 
-    # set up the working directory
-    wd = ('path/to/workingdirectory') # wd = rawd
+# Launch the application
+MSI.EAGLE()
+```
 
-    # ncores = as.integer(parallel::detectCores()/2) # use 1/2 of the available processors
-     ncores = as.integer(parallel::detectCores())-2 # us all but 2 available processors
-     library(MSI.EAGLE)
-     #MSI.EAGLE() # uncomment to start the app
+## Private Repository Access
 
-## Access as a private repository (TEMP)
+If you need to access this as a private repository, you'll need to set up a GitHub Personal Access Token (PAT).
 
-3.  Store the PAT in .Renviron (Recommended)
+### Setting up GitHub PAT
 
-A more secure way is to store the PAT in your .Renviron file, which is
-loaded into your environment when you start R. This way, you don’t have
-to expose the PAT in your scripts.
+1. **Create a PAT** on GitHub with appropriate repository permissions
 
-    Edit .Renviron:
-        You can edit or create a .Renviron file in your home directory or the project directory:
+2. **Store the PAT securely** in your `.Renviron` file:
+   ```r
+   # Edit your .Renviron file
+   usethis::edit_r_environ()
+   ```
 
-        r
+3. **Add your PAT** to the file:
+   ```
+   GITHUB_PAT=your_personal_access_token
+   ```
 
-usethis::edit_r_environ()
+4. **Restart R** to load the environment variable
 
-Add the following line to the file:
+5. **Install the package** using the standard command:
+   ```r
+   remotes::install_github("Weljie-Lab-UPenn/MSI.EAGLE")
+   ```
 
-makefile
+## Requirements
 
-        GITHUB_PAT=your_personal_access_token
+- R version 3.6 or higher
+- Bioconductor packages: Cardinal, BiocParallel
+- Git (for installation)
+- Sufficient RAM for mass spectrometry imaging data processing
 
-    Restart R to load the new environment variable.
+## Support
 
-    Install the Package:
-        Now you can simply use remotes::install_github("username/repo_name") without needing to pass the PAT each time.
-
-This approach keeps your PAT secure while still allowing you to install
-packages from private repositories.
-
-<!-- What is special about using `README.Rmd` instead of just `README.md`? You can include R chunks like so: -->
-<!-- ```{r cars} -->
-<!-- summary(cars) -->
-<!-- ``` -->
-<!-- You'll still need to render `README.Rmd` regularly, to keep `README.md` up-to-date. `devtools::build_readme()` is handy for this. You could also use GitHub Actions to re-render `README.Rmd` every time you push. An example workflow can be found here: <https://github.com/r-lib/actions/tree/v1/examples>. -->
-<!-- You can also embed plots, for example: -->
-<!-- ```{r pressure, echo = FALSE} -->
-<!-- plot(pressure) -->
-<!-- ``` -->
-<!-- In that case, don't forget to commit and push the resulting figure files, so they display on GitHub and CRAN. -->
+For issues and questions, please use the GitHub Issues page for this repository.
