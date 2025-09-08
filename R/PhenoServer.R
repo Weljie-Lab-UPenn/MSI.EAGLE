@@ -269,6 +269,150 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       x3$pdata[, paste0(input$int_cols_out, collapse = ".")]<-int
     })
     
+    # Variable management functionality
+    output$var_management_ui <- renderUI({
+      req(x3$pdata)
+      
+      dat <- as.data.frame(x3$pdata)
+      cols <- colnames(dat)
+      
+      tagList(
+        h5("Current Variables:"),
+        selectInput(ns("selected_var"), "Select variable to manage:", 
+                   choices = cols, selected = NULL),
+        
+        radioButtons(ns("var_action"), "Choose action:",
+                    choices = list(
+                      "Rename variable" = "rename",
+                      "Create new variable from pixels" = "create_new"
+                    )),
+        
+        conditionalPanel(
+          condition = sprintf("input['%s'] == 'rename'", ns("var_action")),
+          textInput(ns("new_var_name"), "New variable name:", ""),
+          actionButton(ns("rename_var"), "Rename Variable", class = "btn-primary")
+        ),
+        
+        conditionalPanel(
+          condition = sprintf("input['%s'] == 'create_new'", ns("var_action")),
+          h6("Select pixels to include in new variable:"),
+          helpText("Use the data table below to select specific rows/pixels"),
+          textInput(ns("new_var_name_create"), "New variable name:", ""),
+          selectInput(ns("aggregation_method"), "Aggregation method:",
+                     choices = list(
+                       "Mean" = "mean",
+                       "Median" = "median", 
+                       "Sum" = "sum",
+                       "Count" = "count"
+                     ), selected = "mean"),
+          actionButton(ns("create_var"), "Create New Variable", class = "btn-success")
+        ),
+        
+        hr(),
+        h6("Variable Management Table:"),
+        DT::dataTableOutput(ns("var_management_table"))
+      )
+    })
+    
+    # Render the variable management table
+    output$var_management_table <- DT::renderDataTable({
+      req(x3$pdata)
+      
+      dat <- as.data.frame(x3$pdata)
+      
+      DT::datatable(
+        dat,
+        escape = FALSE,
+        rownames = TRUE,
+        filter = 'top',
+        class = "compact hover row-border",
+        extensions = c('Scroller', 'Select', 'Buttons'),
+        options = list(
+          select = list(style = "multi", items = "row"),
+          columnDefs = list(list(className = 'dt-center', targets = "_all")),
+          language = list(info = 'Showing _START_ to _END_ of _TOTAL_ pixels'),
+          deferRender = TRUE,
+          scrollY = 300,
+          scroller = TRUE,
+          dom = "Blfrtip",
+          buttons = list(
+            list(extend = 'selectAll', className = 'selectAll',
+                 text = "Select all rows"),
+            list(extend = 'selectNone', text = "Deselect all")
+          )
+        ),
+        selection = "none"
+      )
+    }, server = FALSE)
+    
+    # Handle variable renaming
+    observeEvent(input$rename_var, {
+      req(input$selected_var, input$new_var_name)
+      
+      if (input$new_var_name == "") {
+        showNotification("Please enter a new variable name", type = "error")
+        return()
+      }
+      
+      if (input$new_var_name %in% colnames(x3$pdata)) {
+        showNotification("Variable name already exists. Please choose a different name.", type = "error")
+        return()
+      }
+      
+      # Rename the variable in pdata
+      pdata_df <- as.data.frame(x3$pdata)
+      col_index <- which(colnames(pdata_df) == input$selected_var)
+      
+      if (length(col_index) > 0) {
+        colnames(pdata_df)[col_index] <- input$new_var_name
+        x3$pdata <- pdata_df
+        
+        showNotification(paste("Variable '", input$selected_var, "' renamed to '", input$new_var_name, "'"), 
+                        type = "message")
+      }
+    })
+    
+    # Handle creating new variables from selected pixels
+    observeEvent(input$create_var, {
+      req(input$selected_var, input$new_var_name_create, input$aggregation_method)
+      
+      if (input$new_var_name_create == "") {
+        showNotification("Please enter a new variable name", type = "error")
+        return()
+      }
+      
+      if (input$new_var_name_create %in% colnames(x3$pdata)) {
+        showNotification("Variable name already exists. Please choose a different name.", type = "error")
+        return()
+      }
+      
+      # Get selected rows from the data table
+      selected_rows <- input$var_management_table_rows_selected
+      
+      if (is.null(selected_rows) || length(selected_rows) == 0) {
+        showNotification("Please select at least one row/pixel from the table", type = "error")
+        return()
+      }
+      
+      pdata_df <- as.data.frame(x3$pdata)
+      selected_data <- pdata_df[selected_rows, input$selected_var]
+      
+      # Apply aggregation method
+      new_var_value <- switch(input$aggregation_method,
+                             "mean" = mean(selected_data, na.rm = TRUE),
+                             "median" = median(selected_data, na.rm = TRUE),
+                             "sum" = sum(selected_data, na.rm = TRUE),
+                             "count" = length(selected_data))
+      
+      # Create new variable for all rows (broadcast the aggregated value)
+      pdata_df[[input$new_var_name_create]] <- new_var_value
+      x3$pdata <- pdata_df
+      
+      showNotification(paste("New variable '", input$new_var_name_create, "' created using", 
+                           input$aggregation_method, "of", length(selected_rows), "selected pixels"), 
+                      type = "message")
+    })
+    
     
     
     observeEvent(input$save_imzml, {

@@ -24,6 +24,16 @@ PhenoSetupUI <- function(id) {
                uiOutput(ns('plot_cols')),
                uiOutput(ns("phen_interaction")),
                actionButton(ns("interaction"), label="Add interaction data"),
+               
+               # Variable management section
+               hr(),
+               checkboxInput(ns("manage_vars"), "Add or rename variables?", value = FALSE),
+               conditionalPanel(
+                 condition = sprintf("input['%s']", ns("manage_vars")),
+                 h4("Variable Management"),
+                 uiOutput(ns("var_management_ui"))
+               ),
+               
                shinyFiles::shinySaveButton(ns("save_imzml"), "Save imzML File", "Save", filetype = list(""))
                
              ),
