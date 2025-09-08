@@ -289,20 +289,20 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
                     )),
         
         conditionalPanel(
-          condition = sprintf("input['%s'] == 'rename'", ns("var_action")),
+          condition = paste0("input['", ns("var_action"), "'] == 'rename'"),
           textInput(ns("new_var_name"), "New variable name:", ""),
           actionButton(ns("rename_var"), "Rename Variable", class = "btn-primary")
         ),
         
         conditionalPanel(
-          condition = sprintf("input['%s'] == 'delete'", ns("var_action")),
+          condition = paste0("input['", ns("var_action"), "'] == 'delete'"),
           div(style = "padding: 10px; margin: 10px 0; background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px;",
               strong("Warning: "), "This action cannot be undone. The selected variable will be permanently removed."),
           actionButton(ns("delete_var"), "Delete Variable", class = "btn-danger")
         ),
         
         conditionalPanel(
-          condition = sprintf("input['%s'] == 'create_new'", ns("var_action")),
+          condition = paste0("input['", ns("var_action"), "'] == 'create_new'"),
           h6("Select pixels to include in new variable:"),
           helpText("Use the data table below to select specific rows/pixels"),
           textInput(ns("new_var_name_create"), "New variable name:", ""),
@@ -312,7 +312,7 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
                         "Binary (selected/not selected)" = "binary"
                       ), selected = "numeric"),
           conditionalPanel(
-            condition = sprintf("input['%s'] == 'numeric'", ns("new_var_type")),
+            condition = paste0("input['", ns("new_var_type"), "'] == 'numeric'"),
             selectInput(ns("aggregation_method"), "Aggregation method:",
                        choices = list(
                          "Mean" = "mean",
@@ -322,7 +322,7 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
                        ), selected = "mean")
           ),
           conditionalPanel(
-            condition = sprintf("input['%s'] == 'binary'", ns("new_var_type")),
+            condition = paste0("input['", ns("new_var_type"), "'] == 'binary'"),
             helpText("Creates a binary variable: 1 for selected pixels, 0 for others")
           ),
           actionButton(ns("create_var"), "Create New Variable", class = "btn-success")
