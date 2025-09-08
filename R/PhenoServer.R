@@ -284,6 +284,7 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
         radioButtons(ns("var_action"), "Choose action:",
                     choices = list(
                       "Rename variable" = "rename",
+                      "Delete variable" = "delete",
                       "Create new variable from pixels" = "create_new"
                     )),
         
@@ -294,17 +295,36 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
         ),
         
         conditionalPanel(
+          condition = sprintf("input['%s'] == 'delete'", ns("var_action")),
+          div(style = "padding: 10px; margin: 10px 0; background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px;",
+              strong("Warning: "), "This action cannot be undone. The selected variable will be permanently removed."),
+          actionButton(ns("delete_var"), "Delete Variable", class = "btn-danger")
+        ),
+        
+        conditionalPanel(
           condition = sprintf("input['%s'] == 'create_new'", ns("var_action")),
           h6("Select pixels to include in new variable:"),
           helpText("Use the data table below to select specific rows/pixels"),
           textInput(ns("new_var_name_create"), "New variable name:", ""),
-          selectInput(ns("aggregation_method"), "Aggregation method:",
-                     choices = list(
-                       "Mean" = "mean",
-                       "Median" = "median", 
-                       "Sum" = "sum",
-                       "Count" = "count"
-                     ), selected = "mean"),
+          radioButtons(ns("new_var_type"), "Variable type:",
+                      choices = list(
+                        "Aggregated numeric" = "numeric",
+                        "Binary (selected/not selected)" = "binary"
+                      ), selected = "numeric"),
+          conditionalPanel(
+            condition = sprintf("input['%s'] == 'numeric'", ns("new_var_type")),
+            selectInput(ns("aggregation_method"), "Aggregation method:",
+                       choices = list(
+                         "Mean" = "mean",
+                         "Median" = "median", 
+                         "Sum" = "sum",
+                         "Count" = "count"
+                       ), selected = "mean")
+          ),
+          conditionalPanel(
+            condition = sprintf("input['%s'] == 'binary'", ns("new_var_type")),
+            helpText("Creates a binary variable: 1 for selected pixels, 0 for others")
+          ),
           actionButton(ns("create_var"), "Create New Variable", class = "btn-success")
         ),
         
@@ -354,8 +374,23 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
         return()
       }
       
+      # Protect essential variables from renaming
+      essential_vars <- c("x", "y", "run", "Spot")
+      if (input$selected_var %in% essential_vars) {
+        showNotification(paste("Cannot rename essential variable '", input$selected_var, 
+                              "'. Essential variables are: ", paste(essential_vars, collapse = ", ")), 
+                        type = "error")
+        return()
+      }
+      
       if (input$new_var_name %in% colnames(x3$pdata)) {
         showNotification("Variable name already exists. Please choose a different name.", type = "error")
+        return()
+      }
+      
+      # Validate variable name (only alphanumeric and underscore allowed)
+      if (!grepl("^[a-zA-Z][a-zA-Z0-9_]*$", input$new_var_name)) {
+        showNotification("Variable name must start with a letter and contain only letters, numbers, and underscores.", type = "error")
         return()
       }
       
@@ -372,9 +407,35 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       }
     })
     
+    # Handle variable deletion
+    observeEvent(input$delete_var, {
+      req(input$selected_var)
+      
+      # Protect essential variables from deletion
+      essential_vars <- c("x", "y", "run", "Spot")
+      if (input$selected_var %in% essential_vars) {
+        showNotification(paste("Cannot delete essential variable '", input$selected_var, 
+                              "'. Essential variables are: ", paste(essential_vars, collapse = ", ")), 
+                        type = "error")
+        return()
+      }
+      
+      # Remove the variable from pdata
+      pdata_df <- as.data.frame(x3$pdata)
+      if (input$selected_var %in% colnames(pdata_df)) {
+        pdata_df[[input$selected_var]] <- NULL
+        x3$pdata <- pdata_df
+        
+        showNotification(paste("Variable '", input$selected_var, "' has been deleted"), 
+                        type = "message")
+      } else {
+        showNotification("Variable not found", type = "error")
+      }
+    })
+    
     # Handle creating new variables from selected pixels
     observeEvent(input$create_var, {
-      req(input$selected_var, input$new_var_name_create, input$aggregation_method)
+      req(input$selected_var, input$new_var_name_create, input$new_var_type)
       
       if (input$new_var_name_create == "") {
         showNotification("Please enter a new variable name", type = "error")
@@ -383,6 +444,12 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       
       if (input$new_var_name_create %in% colnames(x3$pdata)) {
         showNotification("Variable name already exists. Please choose a different name.", type = "error")
+        return()
+      }
+      
+      # Validate variable name
+      if (!grepl("^[a-zA-Z][a-zA-Z0-9_]*$", input$new_var_name_create)) {
+        showNotification("Variable name must start with a letter and contain only letters, numbers, and underscores.", type = "error")
         return()
       }
       
@@ -395,22 +462,46 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       }
       
       pdata_df <- as.data.frame(x3$pdata)
-      selected_data <- pdata_df[selected_rows, input$selected_var]
       
-      # Apply aggregation method
-      new_var_value <- switch(input$aggregation_method,
-                             "mean" = mean(selected_data, na.rm = TRUE),
-                             "median" = median(selected_data, na.rm = TRUE),
-                             "sum" = sum(selected_data, na.rm = TRUE),
-                             "count" = length(selected_data))
+      if (input$new_var_type == "binary") {
+        # Create binary variable: 1 for selected pixels, 0 for others
+        new_var_values <- rep(0, nrow(pdata_df))
+        new_var_values[selected_rows] <- 1
+        pdata_df[[input$new_var_name_create]] <- new_var_values
+        
+        showNotification(paste("New binary variable '", input$new_var_name_create, "' created with", 
+                             length(selected_rows), "pixels marked as 1"), 
+                        type = "message")
+        
+      } else {
+        # Create aggregated numeric variable
+        req(input$aggregation_method)
+        
+        selected_data <- pdata_df[selected_rows, input$selected_var]
+        
+        # Check if the selected variable is numeric for aggregation operations
+        if (!is.numeric(selected_data) && input$aggregation_method != "count") {
+          showNotification("Selected variable must be numeric for this aggregation method. Use 'count' for non-numeric variables.", type = "error")
+          return()
+        }
+        
+        # Apply aggregation method
+        new_var_value <- switch(input$aggregation_method,
+                               "mean" = mean(selected_data, na.rm = TRUE),
+                               "median" = median(selected_data, na.rm = TRUE),
+                               "sum" = sum(selected_data, na.rm = TRUE),
+                               "count" = length(selected_data))
+        
+        # Create new variable for all rows (broadcast the aggregated value)
+        pdata_df[[input$new_var_name_create]] <- new_var_value
+        
+        showNotification(paste("New variable '", input$new_var_name_create, "' created using", 
+                             input$aggregation_method, "of", length(selected_rows), "selected pixels", 
+                             "from variable '", input$selected_var, "'"), 
+                        type = "message")
+      }
       
-      # Create new variable for all rows (broadcast the aggregated value)
-      pdata_df[[input$new_var_name_create]] <- new_var_value
       x3$pdata <- pdata_df
-      
-      showNotification(paste("New variable '", input$new_var_name_create, "' created using", 
-                           input$aggregation_method, "of", length(selected_rows), "selected pixels"), 
-                      type = "message")
     })
     
     
