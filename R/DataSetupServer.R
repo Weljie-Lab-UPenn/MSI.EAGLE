@@ -1,4 +1,5 @@
 ### R/DataSetupServer.R
+library(magrittr)
 DataSetupServer <- function(id, rawd, wd) {
   moduleServer(id, function(input, output, session) {
     
