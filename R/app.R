@@ -28,7 +28,7 @@
 #' @export 
 # @importFrom DT dataTableOutput renderDataTable
 MSI.EAGLE <- function(...) {
-  
+  library(magrittr)
   
   #check for directories and set to current wd if not set
   if(!exists("rawd")){
