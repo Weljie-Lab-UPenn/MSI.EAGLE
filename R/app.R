@@ -5,6 +5,7 @@
 #' @import shinydashboard
 #' @import shinythemes
 #' @import uwot
+#' @import magrittr
 
 # need to run devtools::document() to ensure imports are added to NAMESPACE
 
