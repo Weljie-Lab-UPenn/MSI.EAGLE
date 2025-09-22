@@ -68,7 +68,7 @@ ncores <- as.integer(parallel::detectCores()) - 2
 MSI.EAGLE()
 ```
 ## Documentation
-For detailed instructions, tutorials, and examples, see our Manuals and Vignettes.
+For detailed instructions, tutorials, and examples, see our [Manuals and Vignettes](https://github.com/Weljie-Lab-UPenn/MSI.EAGLE/tree/ed0654b7793bde229a47bfa7b5717bd3dcdc9517/Manuals%20and%20Vignettes).
 
 ## Requirements
 
