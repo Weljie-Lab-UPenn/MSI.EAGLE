@@ -167,6 +167,8 @@ MaskedAnalysisServer <- function(id,  setup_values) {
     observeEvent(input$action_seg, {
       x1 = setup_values()[["x1"]] # bring in raw_files list
       
+      
+      
       if(is.null(x1$raw_list)){
         message("raw files not selected, please choose from the Data Setup tab first!")
         showNotification("raw files not selected, please choose from the Data Setup tab first!", type="error")
@@ -184,6 +186,11 @@ MaskedAnalysisServer <- function(id,  setup_values) {
           "Please choose raw data in Data Setup Tab and input segmentation tempate first for peakpicking"
         )
         return(NULL)
+        
+      } else if (length(paste0(runNames(x4$seg_file), ".imzML")) ==1 &&  length(names(x1$raw_list)) == 1) {
+        message("only one run in segmented file and one in raw file list, will proceed")
+        message("Ensure correct datasets being used.")
+        
       } else if (sum(paste0(runNames(x4$seg_file), ".imzML") %in% names(x1$raw_list)) < 1) {
         
         print("no raw file compatible with dataset")
