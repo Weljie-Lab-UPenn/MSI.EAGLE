@@ -807,3 +807,94 @@ convert_card<-function(obj) {
   
   
 }
+
+# Pixel-level means test function
+# Performs t-test or ANOVA at pixel level when pixel coordinates are used as grouping
+pixel_level_means_test <- function(data, test_var, grouping_var = NULL) {
+  
+  # Extract spectra and metadata
+  spectra_mat <- as.matrix(spectra(data))
+  pdat <- as.data.frame(pData(data))
+  mz_vals <- mz(data)
+  feature_ids <- features(data)
+  
+  # Get test variable factor
+  test_groups <- factor(pdat[[test_var]])
+  
+  # Check if this is a pixel-level comparison (no grouping or grouping is pixel coords)
+  is_pixel_level <- is.null(grouping_var) || 
+    grouping_var %in% c("none", "1") ||
+    all(table(grouping_var) == 1)  # Each group has only 1 member (i.e., pixels)
+  
+  if (!is_pixel_level) {
+    stop("This function is for pixel-level comparisons only. Use regular meansTest for biological replicates.")
+  }
+  
+  message("Performing pixel-level means test - each pixel treated as independent replicate")
+  
+  # Perform t-test for each m/z
+  n_features <- nrow(spectra_mat)
+  results_list <- vector("list", n_features)
+  
+  for (i in 1:n_features) {
+    intensities <- spectra_mat[i, ]
+    
+    # Remove NA values
+    valid_idx <- !is.na(intensities)
+    y <- intensities[valid_idx]
+    groups <- test_groups[valid_idx]
+    
+    # Perform test based on number of groups
+    if (nlevels(droplevels(groups)) == 2) {
+      # Two-sample t-test
+      test_result <- t.test(y ~ groups)
+      statistic <- test_result$statistic
+      pvalue <- test_result$p.value
+      
+      # Calculate means for each group
+      means <- tapply(y, groups, mean, na.rm = TRUE)
+      
+    } else {
+      # ANOVA for >2 groups
+      test_result <- oneway.test(y ~ groups)
+      statistic <- test_result$statistic
+      pvalue <- test_result$p.value
+      
+      # Calculate means for each group
+      means <- tapply(y, groups, mean, na.rm = TRUE)
+    }
+    
+    # Store results
+    results_list[[i]] <- list(
+      i = i,
+      mz = mz_vals[i],
+      feature = feature_ids[i],
+      statistic = statistic,
+      pvalue = pvalue,
+      means = means
+    )
+  }
+  
+  # Convert to data frame matching topFeatures format
+  stats_df <- data.frame(
+    i = sapply(results_list, `[[`, "i"),
+    mz = sapply(results_list, `[[`, "mz"),
+    feature = sapply(results_list, `[[`, "feature"),
+    statistic = sapply(results_list, `[[`, "statistic"),
+    pvalue = sapply(results_list, `[[`, "pvalue"),
+    stringsAsFactors = FALSE
+  )
+  
+  # Add mean columns for each group
+  all_means <- t(sapply(results_list, function(x) x$means))
+  colnames(all_means) <- paste0("mean.", names(results_list[[1]]$means))
+  stats_df <- cbind(stats_df, all_means)
+  
+  # Calculate FDR
+  stats_df$fdr <- p.adjust(stats_df$pvalue, method = "BH")
+  
+  # Sort by p-value
+  stats_df <- stats_df[order(stats_df$pvalue), ]
+  
+  return(stats_df)
+}
