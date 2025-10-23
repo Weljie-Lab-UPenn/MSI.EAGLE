@@ -658,117 +658,99 @@ StatsPrepServer <- function(id,  setup_values) {
 
         if (input$stats_test == "meanstest") {
           
-          
           select_vec <-
             as.data.frame(pData(x5$data_file))[, input$phen_cols_stats] %in% input$test_membership
           
           x5$data_file_selected = x5$data_file[, select_vec]
           
-          
-          
           message("performing means test")
-          
           
           if (input$phen_cols_stats == "run") {
             pData(x5$data_file_selected)$run <- run(x5$data_file_selected)
           }
           
-          
-          #convert input$phen_cols_stats to factor in dataset
-          #check if numbers
-          tmp<-as.data.frame(pData(x5$data_file_selected)[,input$phen_cols_stats])
+          # Convert input$phen_cols_stats to factor in dataset
+          tmp <- as.data.frame(pData(x5$data_file_selected)[,input$phen_cols_stats])
           if(all(grepl("^[0-9]+$", tmp[,1]))) {
-            pData(x5$data_file_selected)[,input$phen_cols_stats]<-droplevels(factor(paste0("X.", tmp[,1])))
+            pData(x5$data_file_selected)[,input$phen_cols_stats] <- 
+              droplevels(factor(paste0("X.", tmp[,1])))
           } else {
-            pData(x5$data_file_selected)[,input$phen_cols_stats]<-droplevels(factor(as.data.frame(pData(x5$data_file_selected))[,input$phen_cols_stats]))
+            pData(x5$data_file_selected)[,input$phen_cols_stats] <- 
+              droplevels(factor(as.data.frame(pData(x5$data_file_selected))[,input$phen_cols_stats]))
           }
           
-          #browser()
+          # Check if this is pixel-level analysis
+          # Detect if grouping is by pixel coordinates (each group has only 1 member)
+          is_pixel_level <- FALSE
+          if (!is.null(x5$groupsx)) {
+            group_sizes <- table(x5$groupsx)
+            is_pixel_level <- all(group_sizes == 1) || 
+              sum(group_var %in% c("x.y", "x_y")) > 0
+          }
           
-
-            #check how many groupsx are NA; if any, remove them
-            na_vec<-is.na(x5$groupsx)
-            
+          # Remove NA values
+          na_vec <- is.na(x5$groupsx)
+          if (sum(na_vec) > 0) {
             message("removing pixels with NA sample values")
+            dat <- x5$data_file_selected[, !na_vec]
+            groupsx <- as.character(x5$groupsx[!na_vec])
+          } else {
+            dat <- x5$data_file_selected
+            groupsx <- as.character(x5$groupsx)
+          }
+          
+          x5$data_file_selected <- dat
+          x5$groupsx <- groupsx
+          
+          # Choose appropriate test
+          if (is_pixel_level) {
+            message("Detected pixel-level grouping - performing pixel-level means test")
+            message("Each pixel will be treated as an independent replicate")
             
-
-            dat<-x5$data_file_selected[,!na_vec]
-            groupsx<-(as.character(x5$groupsx[!na_vec]))
-            # 
-            # gc()
-            # nsel=length(groupsx)
-            # mt <- 
-            #   try(meansTest(dat[,1:nsel],
-            #                   as.formula(paste0("~", input$phen_cols_stats)),
-            #                 samples =
-            #                   groupsx[1:nsel]))
-            # topFeatures(mt)
-            # droplevels(interaction(groupsx, as.data.frame(pData(dat))[,input$phen_cols_stats]))
-            # 
-        
-          x5$data_file_selected<-dat
-          x5$groupsx<-groupsx
-          mt <- 
-            try(meansTest(x5$data_file_selected[, ],
-                      as.formula(paste0("~", input$phen_cols_stats)),
-                      samples =
-                        droplevels(as.factor(x5$groupsx))))
-          #mt2<-meansTest(x5$data_file_selected, as.formula(paste("~", input$phen_cols_stats)), groups=droplevels(x5$data_file_selected$Plate.Group))
-          
-          #on.exit(bpstop(par_mode()), add = TRUE)
-          
-          if(class(mt) %in% "try-error") {
-            print("meanstest failed. check data and data size")
-            showNotification("meanstest failed. check data and data size", type="error")
-            print(table(interaction(groupsx, as.data.frame(pData(x5$data_file_selected))[,input$phen_cols_stats])))
-            message("means test failed")
-            return()
+            stats_results <- pixel_level_means_test(
+              data = x5$data_file_selected,
+              test_var = input$phen_cols_stats,
+              grouping_var = x5$group_var
+            )
+            
+            x5$stats_results <- stats_results
+            x5$test_result <- NULL  # No Cardinal object for pixel-level test
+            
+          } else {
+            # Standard Cardinal meansTest with biological replicates
+            message("Performing standard means test with biological replicates")
+            
+            mt <- try(meansTest(x5$data_file_selected[, ],
+                                as.formula(paste0("~", input$phen_cols_stats)),
+                                samples = droplevels(as.factor(x5$groupsx))))
+            
+            if(class(mt) %in% "try-error") {
+              print("meanstest failed. check data and data size")
+              showNotification("meanstest failed. check data and data size", type="error")
+              print(table(interaction(groupsx, as.data.frame(pData(x5$data_file_selected))[,input$phen_cols_stats])))
+              message("means test failed")
+              return()
+            }
+            
+            if (class(mt@listData[[1]]$model) %in% "try-error") {
+              print("cannot create meanstest summary, check grouping variable(s)")
+              stop("means test failed")
+            }
+            
+            incProgress(amount = 0.5, message = "extracting top features... can take a while for large datasets")
+            print("extracting top features... can take a while for large datasets")
+            
+            stats_results <- as.data.frame(topFeatures(mt, n=length(mt), p.adjust="BH"))
+            x5$stats_results <- stats_results
+            x5$test_result <- mt
           }
-          
-          
-          if (class(mt@listData[[1]]$model) %in% "try-error") {
-            print("cannot create meanstest summary, check grouping variable(s)")
-            stop("means test failed")
-          }
-          
-          # check summary results are not NaN
-          
-          
-          ntests = max(round(length(mt@listData) / 100), 1)
-          
-          # if (sum(is.nan(summary(mt[1:ntests])$PValue)) == ntests) {
-          #   message("first 1% of PValues are NaN, checking median PValue")
-          #   
-          #   if (is.nan(summary(mt[median(1:length(resultData(mt)))])$PValue)) {
-          #     message("Median value Nan, check grouping variable!  ")
-          #     return(NULL)
-          #     
-          #   } else {
-          #     message("median value non NaN, continuing")
-          #   }
-          # }
-          incProgress(amount = 0.5, message = "extracting top features... can take a while for large datasets")
-          print("extracting top features... can take a while for large datasets")
-          
-          
-          stats_results <-
-            as.data.frame(topFeatures(mt, n=length(mt), p.adjust="BH"))
-          x5$stats_results <- stats_results
-          
-          #x5$stats_results<-Cardinal::subset(x5$stats_results, AdjP<as.numeric(input$FDR_val))
-          #check for nan issue
-          
-          x5$test_result <- mt
           
           x5$test_result_feature_test <- NULL
           bpstop(par_mode())
           
-          print(
-            "Means test complete, check Output table tab for table and check FDR cutoff if results not visible."
-          )
-          showNotification(
-            "Means test complete, check Output table tab for table and check FDR cutoff if results not visible."
-          )
+          print("Means test complete, check Output table tab for table and check FDR cutoff if results not visible.")
+          showNotification("Means test complete, check Output table tab for table and check FDR cutoff if results not visible.")
+        
           
           
           
@@ -2004,52 +1986,66 @@ StatsPrepServer <- function(id,  setup_values) {
       req(x5$stats_results)
       req(x5$stats_table_filtered)
       
-      #source("~/Box Sync/MSI.EAGLE_2024/MSI.EAGLE/R/plot_stats.R")
-      
       wd <- getwd()
       dir.create(file.path(wd, "plots"), showWarnings = FALSE)
-      #setwd(file.path(wd, "plots"))
       
-      
-       if (input$stats_test %in% c("meanstest", "spatialDGMM", "ssctest")) {
-         nplots<-dim(x5$stats_table_filtered)[1]
-         
-         
-         withProgress(
-          message = paste0( "Saving ", 
-            nplots,
-            " plots"),
-          detail = paste0(
-            "folder in ",
-            wd,
-            ". Can be slow. Only way to cancel is restarting!"
-          ),
+      if (input$stats_test %in% c("meanstest", "spatialDGMM", "ssctest")) {
+        nplots <- dim(x5$stats_table_filtered)[1]
+        
+        withProgress(
+          message = paste0("Saving ", nplots, " plots"),
+          detail = paste0("folder in ", wd, ". Can be slow. Only way to cancel is restarting!"),
           {
-            
-            
             for(i in (1:dim(x5$stats_table_filtered)[1])){
               
-              
-              
-              p1<- try(plot_stats_results(x5 = x5,
-                                          stats_table_rows_selected = i,
-                                          stats_test = input$stats_test,
-                                          phen_cols_stats = input$phen_cols_stats,
-                                          group_var = x5$group_var,
-                                          plot_choice = input$plot_choice,
+              p1 <- try(plot_stats_results(
+                x5 = x5,
+                stats_table_rows_selected = i,
+                stats_test = input$stats_test,
+                phen_cols_stats = input$phen_cols_stats,
+                group_var = x5$group_var,
+                plot_choice = input$plot_choice,
+                export_contrast = input$export_contrast,
+                export_colorscale = input$export_colorscale,
+                export_smooth = input$export_smooth,
+                export_scale = input$export_scale,
+                export_dark_bg = input$export_dark_bg
               ))
-              
               
               if (class(p1)[1] == "try-error") {
                 print("Error in plotting")
                 showNotification("Error in plotting, check variables and try again")
                 return()
               }
-            
               
               incProgress(amount = 1 / dim(x5$stats_table_filtered)[1])
-              pdf(
-                file = paste(
+              
+              # Build filename with ID if it exists
+              has_id <- "ID" %in% colnames(x5$stats_table_filtered) && 
+                !is.na(x5$stats_table_filtered$ID[i]) && 
+                x5$stats_table_filtered$ID[i] != ""
+              
+              if(has_id) {
+                # Clean ID for filename (remove special characters)
+                clean_id <- gsub("[^[:alnum:]_-]", "_", x5$stats_table_filtered$ID[i])
+                
+                filename <- paste(
+                  "plots/",
+                  input$plot_prefix,
+                  "_",
+                  input$plot_choice,
+                  "_",
+                  x5$stats_table_filtered$i[i],
+                  "_",
+                  round(x5$stats_table_filtered$mz[i], digits = 4),
+                  "_",
+                  clean_id,
+                  ".pdf",
+                  sep = ""
+                )
+              } else {
+                # Original filename format without ID
+                filename <- paste(
                   "plots/",
                   input$plot_prefix,
                   "_",
@@ -2060,27 +2056,24 @@ StatsPrepServer <- function(id,  setup_values) {
                   round(x5$stats_table_filtered$mz[i], digits = 4),
                   ".pdf",
                   sep = ""
-                ),
-                # The directory you want to save the file in
+                )
+              }
+              
+              pdf(
+                file = filename,
                 width = 6,
-                # The width of the plot in inches
                 height = 4
-              ) # The height of the plot in inches
+              )
               
               print(p1)
               
-              
-              
-              
-              #print(plot(x5$test_result, model=list(stats_results_trimmed$feature[m])))
-              #title(paste("mz= ",round(x5$stats_results$mz[m],4)," FDR= ", round(x5$stats_results$AdjP[m],2)))
-              # Step 3: Run dev.off() to create the file!
               dev.off()
-            }
+              
+            } # End of for loop
             
-          }
-        )
-      } else{
+          } # End of withProgress block
+        ) # End of withProgress call
+      } else {
         print("not yet")
         showNotification("Plots not available for this statistical test")
       }
