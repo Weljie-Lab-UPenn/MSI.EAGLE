@@ -105,19 +105,32 @@ StatsPrepUI <- function(id) {
                    DT::dataTableOutput(ns("stats_table")),
                    
                    wellPanel(
-                     # create an actionButton for the tabPanel
-                     actionButton(ns("mummichog"), "Output Mummichog file"),
-                     
-                     # create an actionButton for the tabPanel
-                     actionButton(ns("metaboanalyst"), "Output Metaboanalyst file"),
-                   ),
-                   wellPanel(
                      # create a textInput for the tabPanel
-                     textInput(ns("plot_prefix"), label = "Prefix for plotting / results output", value =
-                                 "output"),
+                     textInput(ns("plot_prefix"), label = "Prefix for plotting / results output", value = "output"),
                      
                      # create an actionButton for the tabPanel
-                     actionButton(ns("write_plots"), label = "save significant plots from testing to directory")
+                     actionButton(ns("write_plots"), label = "save significant plots from testing to directory"),
+                     
+                     # ADD THESE NEW CONTROLS BELOW:
+                     tags$hr(),
+                     tags$h5("MSI Image Export Settings:"),
+                     fluidRow(
+                       column(6, selectInput(ns("export_contrast"), "Contrast enhancement", 
+                                             c("none", "histogram", "adaptive"), selected = "histogram")),
+                       column(6, selectInput(ns("export_colorscale"), "Colorscale", 
+                                             c("Spectral", "Cividis", "Viridis", "Inferno", "Plasma", 
+                                               "Zissou 1", "Purple-Green", "Berlin", "PiYG", "Grays", 
+                                               "Batlow", "turku", "YlOrRd", "Terrain", 
+                                               "PrGn", "Green-Brown", "Hawaii", "Cork", "Rocket", "RdYlBu"),
+                                             selected = "Spectral"))
+                     ),
+                     fluidRow(
+                       column(6, selectInput(ns("export_smooth"), "Smoothing options", 
+                                             c("none", "mean", "gaussian", "bilateral", "adaptive", "diffusion", "guided"),
+                                             selected = "none")),
+                       column(6, checkboxInput(ns("export_scale"), "Scale multiple images?", value = TRUE))
+                     ),
+                     checkboxInput(ns("export_dark_bg"), "Dark background?", value = FALSE)
                    ),
                  ),
                  
