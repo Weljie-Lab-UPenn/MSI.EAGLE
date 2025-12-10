@@ -11,7 +11,7 @@ StatsPrepServer <- function(id,  setup_values) {
       setup_values()[["par_mode"]]
     })
     
-
+    
     
     has.new.files <- function() {
       unique(list.files(setup_values()[["wd"]], recursive = T))
@@ -58,7 +58,7 @@ StatsPrepServer <- function(id,  setup_values) {
           uiOutput(ns('ssc_factors')),
           #check if we need this??
           actionButton(ns("run_test"), label = "Run test")
-          ),
+        ),
         "meanstest" = list(
           uiOutput(ns('test_membership')),
           uiOutput(ns("phen_interaction_stats")),
@@ -68,7 +68,7 @@ StatsPrepServer <- function(id,  setup_values) {
           #actionButton(ns("save_stats_models"), label =
           #               "Save means test model"),
           #actionButton(ns("restore_stats_models"), "Restore means test model")
-          ),
+        ),
         "spatialDGMM" = list(
           uiOutput(ns('test_membership')),
           uiOutput(ns('ssc_params')),
@@ -83,7 +83,7 @@ StatsPrepServer <- function(id,  setup_values) {
                          "save significant plots directory 'plots'")
           #actionButton(ns("save_stats_models"), "Save DGMM model"),
           #actionButton(ns("restore_stats_models"), "Restore DGMM model")
-          ),
+        ),
         #https://www.datanovia.com/en/lessons/mixed-anova-in-r/ some ANOVA information
         #https://www.datanovia.com/en/lessons/repeated-measures-anova-in-r/
         #https://www.datanovia.com/en/lessons/anova-in-r/
@@ -110,7 +110,7 @@ StatsPrepServer <- function(id,  setup_values) {
           uiOutput(ns('test_membership')),
           actionButton(ns("run_test"), label = "Run test")
           #actionButton(ns("save_stats_models"), label =
-           #              "Save ANOVA test model"),
+          #              "Save ANOVA test model"),
           #actionButton(ns("restore_stats_models"), "Restore ANOVA test model")
         )
       )
@@ -118,7 +118,7 @@ StatsPrepServer <- function(id,  setup_values) {
       #
       #
       # ,
-     
+      
     })
     
     
@@ -165,18 +165,18 @@ StatsPrepServer <- function(id,  setup_values) {
     
     observeEvent(input$action_read_stats, {
       req(input$stats_input_file)
-        
       
       
-     
+      
+      
       
       if(length(grep("rds", input$stats_input_file)>0)) {
-      
+        
         x5$data_file <- readRDS(input$stats_input_file)
       } else {
         x5$data_file <- readMSIData(input$stats_input_file)
         #x5$data_file <- readImzML(input$stats_input_file)
-        }
+      }
       print(x5$data_file)
       
       if (!is.na(input$debug_n)) {
@@ -649,13 +649,13 @@ StatsPrepServer <- function(id,  setup_values) {
             # if(all(grepl("^[0-9]+$", (grouping[1,])))) {
             #   groupsx = droplevels(as.factor(paste0("X.", interaction(grouping))))
             # } else {
-              #groupsx = droplevels(as.factor(interaction(grouping)
+            #groupsx = droplevels(as.factor(interaction(grouping)
             groupsx = droplevels(as.factor(interaction(grouping)))
-           }
+          }
         }
         x5$groupsx <- groupsx
         print("groups done")
-
+        
         if (input$stats_test == "meanstest") {
           
           select_vec <-
@@ -688,6 +688,18 @@ StatsPrepServer <- function(id,  setup_values) {
               sum(group_var %in% c("x.y", "x_y")) > 0
           }
           
+          # NEW: Check if this is cell-level analysis
+          # Detect if grouping is by poly_name (each group has only 1 member)
+          is_cell_level <- FALSE
+          if (!is.null(x5$groupsx) && !is_pixel_level) {
+            # Check if poly_name exists in the data
+            if ("poly_name" %in% colnames(pData(x5$data_file_selected))) {
+              # Check if grouping variable is poly_name or if each group has only 1 member
+              is_cell_level <- sum(group_var %in% c("poly_name")) > 0 ||
+                (all(group_sizes == 1) && "poly_name" %in% group_var)
+            }
+          }
+          
           # Remove NA values
           na_vec <- is.na(x5$groupsx)
           if (sum(na_vec) > 0) {
@@ -715,6 +727,19 @@ StatsPrepServer <- function(id,  setup_values) {
             
             x5$stats_results <- stats_results
             x5$test_result <- NULL  # No Cardinal object for pixel-level test
+            
+          } else if (is_cell_level) {
+            message("Detected cell-level grouping - performing cell-level means test")
+            message("Each cell will be treated as an independent replicate")
+            
+            stats_results <- cell_level_means_test(
+              data = x5$data_file_selected,
+              test_var = input$phen_cols_stats,
+              grouping_var = x5$group_var
+            )
+            
+            x5$stats_results <- stats_results
+            x5$test_result <- NULL  # No Cardinal object for cell-level test
             
           } else {
             # Standard Cardinal meansTest with biological replicates
@@ -750,7 +775,7 @@ StatsPrepServer <- function(id,  setup_values) {
           
           print("Means test complete, check Output table tab for table and check FDR cutoff if results not visible.")
           showNotification("Means test complete, check Output table tab for table and check FDR cutoff if results not visible.")
-        
+          
           
           
           
@@ -771,7 +796,7 @@ StatsPrepServer <- function(id,  setup_values) {
           
           x5$data_file_selected = x5$data_file[, select_vec]
           
-         
+          
           sscr = as.numeric(unlist(strsplit(input$sscr, split = ",")))
           sscs = as.numeric(eval(parse(text=input$sscs)))
           ssck = as.numeric(unlist(strsplit(input$ssck, split = ",")))
@@ -828,21 +853,21 @@ StatsPrepServer <- function(id,  setup_values) {
               sd = round(sd, 2)
             )
             #res <- spatialShrunkenCentroids(x=x5$data_file_selected, groups=groupsx, r=sscr, s=sscs, k=ssck)
-                    
-          
-          #myfold=droplevels(run(x5$data_file_selected))
-          
-          # tf_list<-te %in% c("LF.PARAFILM", "UF.PARAFILM")
-          # dat_trim<-dat[, tf_list]
-          # aa <- droplevels(as.data.frame(pData(dat_trim)))
-          # pData(dat_trim)<-PositionDataFrame(coord(dat_trim), run = aa$run,  aa)
-          # myfold=run(dat_trim)
-          #
-          
-          #work on this....
-          #check for MIL
-          
-          
+            
+            
+            #myfold=droplevels(run(x5$data_file_selected))
+            
+            # tf_list<-te %in% c("LF.PARAFILM", "UF.PARAFILM")
+            # dat_trim<-dat[, tf_list]
+            # aa <- droplevels(as.data.frame(pData(dat_trim)))
+            # pData(dat_trim)<-PositionDataFrame(coord(dat_trim), run = aa$run,  aa)
+            # myfold=run(dat_trim)
+            #
+            
+            #work on this....
+            #check for MIL
+            
+            
           } else if (input$ssc_MIL) {
             
             
@@ -866,9 +891,9 @@ StatsPrepServer <- function(id,  setup_values) {
               # df2=aa
               # group_col=input$phen_cols_stats
               # run_col=input$ssc_fold_vars
-          
-            
-            
+              
+              
+              
               
               df2<-as.data.frame(df2)
               
@@ -883,7 +908,7 @@ StatsPrepServer <- function(id,  setup_values) {
               # Combine group_col and run_col, and remove duplicates
               #all_group_cols <- unique(c(group_col, run_col, x5$group_var))
               all_group_cols <- unique(c(run_col))
-  
+              
               
               # Group data by 'Group.time.point' and 'run'
               grouped_data <- df2 %>% dplyr::group_by(!!!dplyr::syms(all_group_cols))
@@ -966,7 +991,7 @@ StatsPrepServer <- function(id,  setup_values) {
               
               
               res <- spatialShrunkenCentroids(dat,
-                                                   y=y, r=r_value, s=s_value)
+                                              y=y, r=r_value, s=s_value)
               
               
               
