@@ -22,7 +22,7 @@ HTS_reproc<-function(data1, SN, res=10, align_tol=15, pix_include=NULL,mzrange=N
       #pixel=seq(1, ncol(data1), by=1), 
       method=method, SNR=SN) %>%
     process()
-
+  
   #peakAlign no longer available in Cardinal 3.6, but peakAlign adds info
   data3<- data2 %>% peakAlign(units="ppm", tolerance=align_tol) %>%
     process()
@@ -35,7 +35,7 @@ HTS_reproc<-function(data1, SN, res=10, align_tol=15, pix_include=NULL,mzrange=N
     message("No peaks meet filtering criteria, returning peak aligned data")
     data4 <- data3
   }
-
+  
   return(data4)
 }
 
@@ -64,8 +64,8 @@ ref_to_peaks_3_6 <- function(raw_data, mz_ref, tol=15, units_mz="ppm") {
     #normalize(method="tic") %>%
     peakPick(ref=mz_ref[1:3],
              type="area",
-            tolerance=tol,
-            units=units_mz) %>%
+             tolerance=tol,
+             units=units_mz) %>%
     process()
   coord(data_peaks)$z <-NULL
   return(data_peaks)
@@ -255,8 +255,8 @@ read_samples<-function(name, method=c('none', 'man', 'auto'), rownum=NULL, colnu
     
     id<-id %>%
       tidyr::separate(samples, 
-               into = c("row_id", "col_id"), 
-               sep = "(?<=[A-Za-z])(?=[0-9])"
+                      into = c("row_id", "col_id"), 
+                      sep = "(?<=[A-Za-z])(?=[0-9])"
       )
     
     #make sure length matches
@@ -272,8 +272,8 @@ read_samples<-function(name, method=c('none', 'man', 'auto'), rownum=NULL, colnu
     
     id<-id %>%
       tidyr::separate(samples, 
-               into = c("row_id", "col_id"), 
-               sep = "(?<=[A-Za-z])(?=[0-9])"
+                      into = c("row_id", "col_id"), 
+                      sep = "(?<=[A-Za-z])(?=[0-9])"
       )
     
     
@@ -305,7 +305,7 @@ pixDatFill_mult<-function(datas, sample_list, variables, method=c("spec_density"
   #establish plates to work with
   plates=unique(plate_dat$Plate)
   #make sure there is data there!
- 
+  
   
   pdat<-NULL
   for(p in plates) {
@@ -533,7 +533,7 @@ pixDatFill_mult<-function(datas, sample_list, variables, method=c("spec_density"
         idx<-range(d$x)
       }
       
-        
+      
     }else {
       print(" method not recognized, use 'breaks', 'period' or 'manual'")
     }
@@ -595,7 +595,7 @@ pixDatFill_mult<-function(datas, sample_list, variables, method=c("spec_density"
         browser()
         return()
       }
-        
+      
       
       
     }
@@ -616,7 +616,7 @@ pixDatFill_mult<-function(datas, sample_list, variables, method=c("spec_density"
           #print(paste("v = ", v))
           #print(paste("i = ", i))
           #print(paste("j = ", j))
-
+          
           #test of zero length and skip instead of failing
           if (length(as.character(
             dplyr::filter(
@@ -741,7 +741,7 @@ pixDatFill_manual<-function(datas, sample_list, variables) {
       dplyr::arrange(original_order) %>%
       dplyr::select(-original_order)  # Drop the original_order column if not needed
     
-
+    
     
     pixelData(data1_samples)<-PositionDataFrame(run=reordered_df$run, coord=coord(datas), reordered_df[,!colnames(reordered_df)%in%c("run", "x", "y")]) 
     
@@ -897,4 +897,160 @@ pixel_level_means_test <- function(data, test_var, grouping_var = NULL) {
   stats_df <- stats_df[order(stats_df$pvalue), ]
   
   return(stats_df)
+}
+
+# Cell-level means test function
+# Performs t-test or ANOVA at cell level when poly_name is used as grouping
+# Each cell (identified by poly_name) is treated as an independent replicate
+cell_level_means_test <- function(data, test_var, grouping_var) {
+  
+  message("Starting cell-level means test")
+  
+  # Extract necessary data
+  pdata <- as.data.frame(pData(data))
+  spectra_mat <- as.matrix(spectra(data))
+  mz_values <- mz(data)
+  
+  # Check that poly_name exists
+  if (!"poly_name" %in% colnames(pdata)) {
+    stop("poly_name column not found in phenotype data. Cannot perform cell-level analysis.")
+  }
+  
+  # Get test groups
+  test_groups <- pdata[[test_var]]
+  unique_groups <- unique(test_groups)
+  
+  if (length(unique_groups) < 2) {
+    stop("Need at least 2 groups for comparison")
+  }
+  
+  message(paste("Found", length(unique_groups), "groups:", paste(unique_groups, collapse = ", ")))
+  
+  # Create grouping identifier
+  if (is.null(grouping_var) || all(grouping_var == "none") || all(grouping_var == "1")) {
+    # No grouping, use only poly_name
+    cell_ids <- pdata$poly_name
+  } else {
+    # Create interaction of grouping variables with poly_name
+    # Handle multiple grouping variables properly
+    if (length(grouping_var) == 1) {
+      # Single grouping variable
+      cell_ids <- interaction(pdata$poly_name, pdata[[grouping_var]], drop = TRUE)
+    } else {
+      # Multiple grouping variables - build interaction step by step
+      grouping_list <- lapply(grouping_var, function(v) pdata[[v]])
+      grouping_list <- c(list(pdata$poly_name), grouping_list)
+      cell_ids <- do.call(interaction, c(grouping_list, drop = TRUE))
+    }
+  }
+  
+  # Average spectra within each cell
+  message("Averaging spectra within each cell...")
+  unique_cells <- unique(cell_ids)
+  n_cells <- length(unique_cells)
+  
+  message(paste("Found", n_cells, "unique cells"))
+  
+  # Initialize matrix for cell-averaged spectra
+  cell_avg_spectra <- matrix(0, nrow = length(mz_values), ncol = n_cells)
+  cell_groups <- character(n_cells)
+  
+  # Calculate average intensity for each cell
+  for (i in seq_along(unique_cells)) {
+    cell_mask <- cell_ids == unique_cells[i]
+    
+    # Average spectra for this cell
+    if (sum(cell_mask) == 1) {
+      cell_avg_spectra[, i] <- spectra_mat[, cell_mask]
+    } else {
+      cell_avg_spectra[, i] <- rowMeans(spectra_mat[, cell_mask, drop = FALSE])
+    }
+    
+    # Store the group for this cell
+    cell_groups[i] <- as.character(test_groups[cell_mask][1])
+  }
+  
+  # Convert groups to factor
+  cell_groups <- factor(cell_groups)
+  
+  message("Performing statistical tests for each m/z value...")
+  
+  # Perform t-test or ANOVA for each m/z
+  n_features <- length(mz_values)
+  results_list <- vector("list", n_features)
+  
+  for (i in seq_len(n_features)) {
+    intensities <- cell_avg_spectra[i, ]
+    
+    if (length(unique_groups) == 2) {
+      # Two-group comparison: use t-test
+      test_result <- try(t.test(intensities ~ cell_groups), silent = TRUE)
+      
+      if (!inherits(test_result, "try-error")) {
+        results_list[[i]] <- data.frame(
+          i = i,
+          mz = mz_values[i],
+          statistic = test_result$statistic,
+          pvalue = test_result$p.value,
+          stringsAsFactors = FALSE
+        )
+      } else {
+        # Test failed, return NA values
+        results_list[[i]] <- data.frame(
+          i = i,
+          mz = mz_values[i],
+          statistic = NA,
+          pvalue = NA,
+          stringsAsFactors = FALSE
+        )
+      }
+    } else {
+      # Multi-group comparison: use ANOVA
+      test_result <- try(summary(aov(intensities ~ cell_groups)), silent = TRUE)
+      
+      if (!inherits(test_result, "try-error") && length(test_result) > 0) {
+        # Extract F-statistic and p-value
+        f_stat <- test_result[[1]]$`F value`[1]
+        p_val <- test_result[[1]]$`Pr(>F)`[1]
+        
+        results_list[[i]] <- data.frame(
+          i = i,
+          mz = mz_values[i],
+          statistic = f_stat,
+          pvalue = p_val,
+          stringsAsFactors = FALSE
+        )
+      } else {
+        # Test failed, return NA values
+        results_list[[i]] <- data.frame(
+          i = i,
+          mz = mz_values[i],
+          statistic = NA,
+          pvalue = NA,
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+  }
+  
+  # Combine results
+  stats_results <- do.call(rbind, results_list)
+  
+  # Calculate FDR-adjusted p-values
+  stats_results$fdr <- p.adjust(stats_results$pvalue, method = "BH")
+  
+  # Add cell count per group for reference
+  group_counts <- table(cell_groups)
+  message("\nCell counts per group:")
+  print(group_counts)
+  
+  # Sort by p-value
+  stats_results <- stats_results[order(stats_results$pvalue), ]
+  rownames(stats_results) <- NULL
+  
+  message(paste("\nCell-level means test complete. Tested", n_features, "features across", 
+                n_cells, "cells"))
+  message(paste("Significant features (FDR < 0.05):", sum(stats_results$fdr < 0.05, na.rm = TRUE)))
+  
+  return(stats_results)
 }
