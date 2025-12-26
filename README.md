@@ -61,8 +61,8 @@ wd = 'path/to/workingdirectory'
 # Option 1: Use all but 2 processors (recommended for Mac)
 ncores = as.integer(parallel::detectCores()/2)
 
-# Option 2: Use 4-16 processors (recommended for PC)
-ncores = 8
+# Option 2: Use 1-2 workers (recommended for PC)
+ncores = 2
 
 # Launch the application
 MSI.EAGLE()
