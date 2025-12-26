@@ -58,11 +58,11 @@ rawd = 'path/to/rawfilesdirectory'
 wd = 'path/to/workingdirectory'
 
 # Configure number of CPU cores to use
-# Option 1: Use half of available processors
-ncores <- as.integer(parallel::detectCores()/2)
+# Option 1: Use all but 2 processors (recommended for Mac)
+ncores = as.integer(parallel::detectCores()/2)
 
-# Option 2: Use all but 2 processors (recommended)
-ncores <- as.integer(parallel::detectCores()) - 2
+# Option 2: Use 4-16 processors (recommended for PC)
+ncores = 8
 
 # Launch the application
 MSI.EAGLE()
