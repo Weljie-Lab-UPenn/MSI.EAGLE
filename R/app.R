@@ -29,6 +29,8 @@
 # @importFrom DT dataTableOutput renderDataTable
 MSI.EAGLE <- function(...) {
   library(magrittr)
+  # Allow larger uploads (histology images / polygon files) than Shiny default 5 MB.
+  options(shiny.maxRequestSize = 500 * 1024^2)
   
   #check for directories and set to current wd if not set
   if(!exists("rawd")){
@@ -61,6 +63,7 @@ MSI.EAGLE <- function(...) {
                    StatsPrepUI("tab6"),
                    HeatmapUI("tab7"),
                    CorrelationUI("tab8"),
+                   HistologyIntegrationUI("tab9"),
                    tabPanel("Help",
                             HTML("<p><b>MSI.EAGLE</b></p>
                                  <p>Please look at the github page for the latest manual,  updates, and contact info.</p>
@@ -86,6 +89,7 @@ MSI.EAGLE <- function(...) {
     proc_values<-StatsPrepServer("tab6", setup_values )
     HeatmapServer("tab7", proc_values)
     CorrelationServer("tab8", proc_values, setup_values)
+    HistologyIntegrationServer("tab9", setup_values, preproc_values)
     
     observeEvent(input$browser, {
       browser()

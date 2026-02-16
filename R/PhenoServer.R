@@ -10,6 +10,103 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       paste("working directory=", setup_vals$wd)
     })
     
+    # Integer-safe tiling from coord(msi)
+    # Modes:
+    #   - Fixed tile size:   w, h (pixels). nx, ny derived from data range.
+    #   - Fixed tile count:  nx, ny (number of tiles). Ignores w, h if both nx,ny given.
+    # Notes:
+    #   * Uses inclusive integer ranges [min, max]; last break is max+1 so findInterval catches the max.
+    #   * Distributes remainders (if any) to the first intervals so widths are all integers.
+    #   * Returns a factor like "t003_007". Also returns tile_x/tile_y if requested.
+    
+    .compute_tile_factor <- function(msi_obj,
+                                     w = NULL, h = NULL,
+                                     nx = NULL, ny = NULL,
+                                     add_indices = FALSE) {
+      coords <- as.data.frame(Cardinal::coord(msi_obj))
+      if (!all(c("x", "y") %in% names(coords))) {
+        stop("coord(msi) does not contain columns 'x' and 'y'.")
+      }
+      if (nrow(coords) == 0L) {
+        stop("No coordinates found.")
+      }
+      
+      # Inclusive integer span
+      x_min <- min(coords$x, na.rm = TRUE)
+      x_max <- max(coords$x, na.rm = TRUE)
+      y_min <- min(coords$y, na.rm = TRUE)
+      y_max <- max(coords$y, na.rm = TRUE)
+      
+      # Defensive: require integer-like coordinates
+      if (any(is.na(coords$x)) || any(is.na(coords$y))) {
+        stop("Missing values in coord(msi).")
+      }
+      if (!all(coords$x == as.integer(coords$x)) ||
+          !all(coords$y == as.integer(coords$y))) {
+        warning("Non-integer coords detected; coercing to integer via as.integer().")
+        coords$x <- as.integer(coords$x)
+        coords$y <- as.integer(coords$y)
+        # Recompute bounds just in case
+        x_min <- min(coords$x); x_max <- max(coords$x)
+        y_min <- min(coords$y); y_max <- max(coords$y)
+      }
+      
+      # Helper: inclusive integer breaks producing n_intervals tiles
+      # Returns a length (n_intervals + 1) vector of edges where edges[1]=start, edges[end]=end+1
+      integer_breaks_inclusive <- function(start, end, n_intervals) {
+        total <- (end - start + 1L)                    # inclusive width
+        base  <- total %/% n_intervals
+        extra <- total %%  n_intervals
+        widths <- rep.int(base, n_intervals)
+        if (extra > 0L) widths[seq_len(extra)] <- widths[seq_len(extra)] + 1L
+        c(start, start + cumsum(widths))               # last edge is end+1
+      }
+      
+      # Determine nx, ny if user supplied w/h (tile size)
+      if (!is.null(nx) && !is.null(ny)) {
+        # use fixed tile counts
+        stopifnot(nx >= 1L, ny >= 1L)
+      } else {
+        # fall back to fixed tile size; derive nx, ny from ranges
+        if (is.null(w) || is.null(h)) {
+          # sensible defaults if nothing provided
+          w <- 10L; h <- 10L
+        }
+        w <- as.integer(w); h <- as.integer(h)
+        if (w < 1L || h < 1L) stop("Tile sizes w and h must be >= 1.")
+        xrange <- (x_max - x_min + 1L)
+        yrange <- (y_max - y_min + 1L)
+        nx <- ceiling(xrange / w)
+        ny <- ceiling(yrange / h)
+      }
+      
+      # Build integer edges; remainders are distributed across the first tiles
+      x_edges <- integer_breaks_inclusive(x_min, x_max, nx)  # length nx+1, last is x_max+1
+      y_edges <- integer_breaks_inclusive(y_min, y_max, ny)  # length ny+1, last is y_max+1
+      
+      # Map coordinates to 1..nx and 1..ny with inclusive right edge
+      # findInterval returns indices in 1..length(edges)-1 when using our edges (last is end+1)
+      tx <- findInterval(coords$x, x_edges, rightmost.closed = TRUE)
+      ty <- findInterval(coords$y, y_edges, rightmost.closed = TRUE)
+      
+      # Safety: clamp any 0 (below first edge) or >n (above last) due to numeric quirks
+      tx[tx < 1L] <- 1L;      tx[tx > nx] <- nx
+      ty[ty < 1L] <- 1L;      ty[ty > ny] <- ny
+      
+      tile_lab <- sprintf("t%03d_%03d", tx, ty)
+      out <- factor(tile_lab)
+      
+      if (isTRUE(add_indices)) {
+        attr(out, "tile_x") <- tx
+        attr(out, "tile_y") <- ty
+        attr(out, "x_edges") <- x_edges
+        attr(out, "y_edges") <- y_edges
+      }
+      out
+    }
+    
+    
+    
     ####PHENOTYPING####
     #create new reactive object for phenotyping section since
     #this is largely independent now.
@@ -269,7 +366,43 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       x3$pdata[, paste0(input$int_cols_out, collapse = ".")]<-int
     })
     
-    
+    observeEvent(input$make_tiles, {
+      req(x3$img.dat)
+      
+      # safely pull user inputs with defaults
+      w <- input$tile_w; if (is.null(w) || is.na(w) || w < 1) w <- 10
+      h <- input$tile_h; if (is.null(h) || is.na(h) || h < 1) h <- 10
+      
+      # compute factor from coord(msi)
+      tile_fac <- try(.compute_tile_factor(x3$img.dat, w = w, h = h, add_indices = TRUE), silent = TRUE)
+      if (inherits(tile_fac, "try-error")) {
+        showNotification("Could not compute tiles from coord(msi).", type = "error")
+        return()
+      }
+      
+      # ensure pdata exists and is aligned; x3$pdata is set after read_phenotype
+      if (is.null(x3$pdata)) {
+        # initialize from current pData if needed
+        x3$pdata <- (Cardinal::pData(x3$img.dat))
+      }
+      
+      # length check
+      if (nrow(as.data.frame(x3$pdata)) != length(tile_fac)) {
+        showNotification("Length mismatch between pData and coord(msi).", type = "error")
+        return()
+      }
+      
+      # add/replace column 'tile' (factor)
+      tmp <- (x3$pdata)
+      tmp$tile <- tile_fac
+      tx <- attr(tile_fac, "tile_x")
+      ty <- attr(tile_fac, "tile_y")
+      if (!is.null(tx) && length(tx) == nrow(as.data.frame(tmp))) tmp$tile_x <- as.integer(tx)
+      if (!is.null(ty) && length(ty) == nrow(as.data.frame(tmp))) tmp$tile_y <- as.integer(ty)
+      x3$pdata <- tmp
+      
+      showNotification(sprintf("Added 'tile' to pData (%dx%d px, %d unique tiles).", w, h, length(unique(as.character(tile_fac)))), type = "message")
+    })
     
     observeEvent(input$save_imzml, {
       

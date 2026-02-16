@@ -677,23 +677,33 @@ StatsPrepServer <- function(id,  setup_values) {
           #convert input$phen_cols_stats to factor in dataset
           #check if numbers
           tmp<-as.data.frame(pData(x5$data_file_selected)[,input$phen_cols_stats])
-          if(all(grepl("^[0-9]+$", tmp[,1]))) {
-            pData(x5$data_file_selected)[,input$phen_cols_stats]<-droplevels(factor(paste0("X.", tmp[,1])))
+          tmp_chr <- as.character(tmp[, 1])
+          tmp_non_na <- tmp_chr[!is.na(tmp_chr)]
+          if(length(tmp_non_na) > 0 && all(grepl("^[0-9]+$", tmp_non_na))) {
+            pData(x5$data_file_selected)[,input$phen_cols_stats]<-droplevels(factor(paste0("X.", tmp_chr)))
           } else {
             pData(x5$data_file_selected)[,input$phen_cols_stats]<-droplevels(factor(as.data.frame(pData(x5$data_file_selected))[,input$phen_cols_stats]))
           }
           
           #browser()
-          
+
 
             #check how many groupsx are NA; if any, remove them
-            na_vec<-is.na(x5$groupsx)
+            group_vec <- x5$groupsx
+            if (length(group_vec) == ncol(x5$data_file)) {
+              group_vec <- group_vec[select_vec]
+            }
+            if (length(group_vec) != ncol(x5$data_file_selected)) {
+              showNotification("Grouping vector length does not match selected spectra.", type = "error", duration = 10)
+              return(NULL)
+            }
+            na_vec<-is.na(group_vec)
             
             message("removing pixels with NA sample values")
             
 
             dat<-x5$data_file_selected[,!na_vec]
-            groupsx<-(as.character(x5$groupsx[!na_vec]))
+            groupsx<-(as.character(group_vec[!na_vec]))
             # 
             # gc()
             # nsel=length(groupsx)
@@ -705,14 +715,48 @@ StatsPrepServer <- function(id,  setup_values) {
             # topFeatures(mt)
             # droplevels(interaction(groupsx, as.data.frame(pData(dat))[,input$phen_cols_stats]))
             # 
-        
           x5$data_file_selected<-dat
           x5$groupsx<-groupsx
+          
+          
+          # after you set x5$data_file_selected <- dat and x5$groupsx <- groupsx
+          
+          g <- droplevels(factor(x5$groupsx))           # <- drop empty levels
+          if (length(g) != ncol(x5$data_file_selected)) {
+            showNotification("Grouping vector length mismatch after NA filtering.", type = "error", duration = 10)
+            return(NULL)
+          }
+          
+          # sanity checks to catch problematic datasets early
+          if (anyNA(g) || length(unique(g)) < 2L || any(table(g) == 0L)) {
+            showNotification("Invalid grouping: NA or empty groups or <2 groups after droplevels()", type="error", duration=10)
+            return(NULL)
+          }
+          
+          ph <- input$phen_cols_stats
+          tmp <- pData(x5$data_file_selected)[, ph][,1]
+          tmp_chr <- as.character(tmp)
+          tmp_non_na <- tmp_chr[!is.na(tmp_chr)]
+          if (length(tmp_non_na) > 0 && all(grepl("^[0-9]+$", tmp_non_na))) {
+            pData(x5$data_file_selected)[, ph] <- droplevels(factor(paste0("X.", tmp_chr)))
+          } else {
+            pData(x5$data_file_selected)[, ph] <- droplevels(factor(tmp))
+          }
+          
+          
+          #pData(dat)<-PositionDataFrame(coord=coord(dat), pd[,ph])
+          
+          # mt <- 
+          #   try(meansTest(x5$data_file_selected[, ],
+          #             as.formula(paste0("~", input$phen_cols_stats)),
+          #             samples =
+          #               droplevels(as.factor(x5$groupsx))))
+          
           mt <- 
-            try(meansTest(x5$data_file_selected[, ],
-                      as.formula(paste0("~", input$phen_cols_stats)),
-                      samples =
-                        droplevels(as.factor(x5$groupsx))))
+            try(meansTest(x5$data_file_selected,
+                          as.formula(paste0("~", ph)),
+                          samples = g))
+          
           #mt2<-meansTest(x5$data_file_selected, as.formula(paste("~", input$phen_cols_stats)), groups=droplevels(x5$data_file_selected$Plate.Group))
           
           #on.exit(bpstop(par_mode()), add = TRUE)
@@ -721,6 +765,7 @@ StatsPrepServer <- function(id,  setup_values) {
             print("meanstest failed. check data and data size")
             showNotification("meanstest failed. check data and data size", type="error")
             print(table(interaction(groupsx, as.data.frame(pData(x5$data_file_selected))[,input$phen_cols_stats])))
+            print(table(as.data.frame(pData(x5$data_file_selected))[,input$phen_cols_stats]))
             message("means test failed")
             return()
           }
@@ -1764,7 +1809,6 @@ StatsPrepServer <- function(id,  setup_values) {
       
       input_image_dataset <- x5$data_file_selected
       parent_image_dataset <- x5$source_file
-      browser()
       
       if (input$stats_test == "spatialDGMM") {
         print("Saving model")
@@ -1871,7 +1915,6 @@ StatsPrepServer <- function(id,  setup_values) {
     
     observeEvent(input$restore_stats_models, {
       
-      browser()
       #req(x5$test_result)
       #req(x5$data_file_selected)
       #modeled from here: https://stackoverflow.com/questions/51191701/r-shiny-fileinput-large-files

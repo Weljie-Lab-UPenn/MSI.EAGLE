@@ -24,6 +24,14 @@ PhenoSetupUI <- function(id) {
                uiOutput(ns('plot_cols')),
                uiOutput(ns("phen_interaction")),
                actionButton(ns("interaction"), label="Add interaction data"),
+               
+               # --- Tile creation controls ---
+               tags$hr(),
+               h5("Create tiles from coord(msi)"),
+               numericInput(ns("tile_w"), "Tile width (pixels)", value = 10, min = 1, step = 1),
+               numericInput(ns("tile_h"), "Tile height (pixels)", value = 10, min = 1, step = 1),
+               actionButton(ns("make_tiles"), "Add 'tile' to pData"),
+               
                shinyFiles::shinySaveButton(ns("save_imzml"), "Save imzML File", "Save", filetype = list(""))
                
              ),
