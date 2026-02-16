@@ -1,4 +1,5 @@
-### UMAPEmbeddingUI.R
+### R/UMAPEmbeddingUI.R
+
 UMAPEmbeddingUI <- function(id) {
   ns <- NS(id)
   
@@ -6,9 +7,11 @@ UMAPEmbeddingUI <- function(id) {
            value = ns("tab3b"),
            sidebarLayout(
              sidebarPanel(
-               # Visualization controls
                uiOutput(ns("mz_selector")),
                uiOutput(ns("color_selector")),
+               
+               # Add color choices UI element
+               uiOutput(ns("color_choices")),
                
                sliderInput(
                  ns("point_size"), 
@@ -47,17 +50,13 @@ UMAPEmbeddingUI <- function(id) {
              ),
              
              mainPanel(
-               verbatimTextOutput(ns("variables")),
-               # Run selection table
                DT::dataTableOutput(ns("mytable")),
-               
-               # Visualization outputs
                imageOutput(ns("umapPlot"), 
                            width = "800px",
                            height = "600px"),
                imageOutput(ns("umapPlot2"),
                            width = "800px", 
-                           height = "600px"),
+                           height = "600px"), 
                imageOutput(ns("phenoplot"),
                            width = "800px",
                            height = "600px")
