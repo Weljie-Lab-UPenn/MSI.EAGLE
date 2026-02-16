@@ -585,7 +585,7 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                        ext <- tools::file_ext(file$datapath)
                        
                        req(file)
-                       validate(need(ext == "txt", "Please upload a tab delimited .txt file"))
+                       shiny::validate(shiny::need(ext == "txt", "Please upload a tab delimited .txt file"))
                        
                        neg_masses <-
                          readr::read_delim(file = file$datapath, delim = "\t")
