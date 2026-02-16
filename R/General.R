@@ -756,6 +756,9 @@ pixDatFill_manual<-function(datas, sample_list, variables) {
 
 combine_card <- function(x) {
   
+  # Drop empty entries to avoid method dispatch errors during combine.
+  x <- Filter(Negate(is.null), x)
+  
   if (length(x) == 1) {
     return(x[[1]])
   }
@@ -770,7 +773,9 @@ combine_card <- function(x) {
     #reorder list based on ncol
     x <- x[order(unlist(lapply(x, ncol)), decreasing = TRUE)]
     
-    tmp <- cbind(x[[1]])
+    # Avoid one-object cbind() since it can dispatch through dplyr::combine()
+    # for certain metadata payloads.
+    tmp <- x[[1]]
     for (i in 2:length(x)) {
       tmp <- cbind(tmp, x[[i]])
     }

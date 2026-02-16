@@ -14,6 +14,104 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
       setup_values()[["par_mode"]]
     })
     
+    sanitize_tf_mask <- function(tf, n_pixels) {
+      if (is.null(tf)) {
+        return(NULL)
+      }
+      tf <- as.logical(tf)
+      if (length(tf) != n_pixels) {
+        return(NULL)
+      }
+      tf[is.na(tf)] <- FALSE
+      tf
+    }
+    
+    safe_subset_pixels <- function(dat, idx, context = "selection", notify = TRUE) {
+      if (is.null(dat)) {
+        return(NULL)
+      }
+      n_pixels <- ncol(dat)
+      if (n_pixels == 0) {
+        return(dat)
+      }
+      if (is.null(idx)) {
+        return(dat)
+      }
+      
+      if (is.logical(idx)) {
+        idx <- sanitize_tf_mask(idx, n_pixels)
+        if (is.null(idx)) {
+          if (isTRUE(notify)) {
+            showNotification(
+              sprintf("%s mask length does not match number of pixels; skipping subsetting.", context),
+              type = "warning",
+              duration = 5
+            )
+          }
+          return(dat)
+        }
+        n_sel <- sum(idx)
+        if (!is.finite(n_sel) || n_sel <= 0) {
+          if (isTRUE(notify)) {
+            showNotification(sprintf("No pixels selected for %s.", context), type = "message", duration = 4)
+          }
+          return(NULL)
+        }
+        if (n_sel == n_pixels) {
+          return(dat)
+        }
+      } else {
+        idx <- suppressWarnings(as.integer(idx))
+        idx <- unique(idx[is.finite(idx) & idx >= 1 & idx <= n_pixels])
+        if (length(idx) == 0) {
+          if (isTRUE(notify)) {
+            showNotification(sprintf("No valid pixel indices for %s.", context), type = "message", duration = 4)
+          }
+          return(NULL)
+        }
+        if (length(idx) == n_pixels && identical(sort(idx), seq_len(n_pixels))) {
+          return(dat)
+        }
+      }
+      
+      out <- try(subsetPixels(dat, idx), silent = TRUE)
+      if (inherits(out, "try-error")) {
+        if (isTRUE(notify)) {
+          showNotification(
+            sprintf("Unable to subset pixels for %s. Please adjust the selected filters.", context),
+            type = "error",
+            duration = 8
+          )
+        }
+        return(NULL)
+      }
+      out
+    }
+    
+    get_active_pdata <- function(x2) {
+      if (is.null(x2$mytable_selected)) {
+        return(NULL)
+      }
+      n_pixels <- ncol(x2$mytable_selected)
+      if (!is.null(x2$pdat_anat) && nrow(x2$pdat_anat) == n_pixels) {
+        return(x2$pdat_anat)
+      }
+      pData(x2$mytable_selected)
+    }
+    
+    get_active_pdata_df <- function(x2) {
+      pdat <- get_active_pdata(x2)
+      if (is.null(pdat)) {
+        return(NULL)
+      }
+      as.data.frame(pdat)
+    }
+    
+    draw_empty_plot <- function(msg) {
+      graphics::plot.new()
+      graphics::text(0.5, 0.5, labels = msg, cex = 1.1)
+    }
+    
     
     
     
@@ -85,7 +183,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
           
           old_mytable_selected <- x2$mytable_selected
           x2$mytable_selected <-
-            combine(x2$list_proc_img[input$mytable_rows_selected])
+            combine_card(x2$list_proc_img[input$mytable_rows_selected])
           
           #update tf list to reflect new dataset. create list of all tf
           
@@ -176,11 +274,11 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
       if (input$seg_choice == "anat_seg") {
         #look for data in processed image area first
         if (!is.null(x2$list_proc_img)) {
-          img.dat <- combine(x2$list_proc_img[input$mytable_rows_selected])
+          img.dat <- combine_card(x2$list_proc_img[input$mytable_rows_selected])
         } else if (!is.null(x2$tf_list_umap) &&
                    !is.null(x2$umap_name)) {
           if (identical(x2$umap_name, runNames(x2$mytable_selected))) {
-            img.dat <- x2$mytable_selected %>% subsetPixels(x2$tf_list_umap)
+            img.dat <- safe_subset_pixels(x2$mytable_selected, x2$tf_list_umap, "UMAP subset", notify = FALSE)
           }
         } else {
           img.dat <- x2$mytable_selected #%>% subsetPixels(x2$tf_list)
@@ -192,7 +290,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
           img.dat <- x2$mytable_selected
         } else if (length(x2$tf_list) == ncol(x2$mytable_selected)) { 
           
-          img.dat <- x2$mytable_selected %>% subsetPixels(x2$tf_list)
+          img.dat <- safe_subset_pixels(x2$mytable_selected, x2$tf_list, "current segmentation mask", notify = FALSE)
         } else {
           
           message("tf_list is not the same size as the dataset, exiting")
@@ -203,6 +301,10 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
       }
       
       
+      
+      if (is.null(img.dat) || ncol(img.dat) == 0) {
+        return(NULL)
+      }
       
       if (sum(x2$tf_list) == 0) {
         print("nothing selected in tf_list, exiting")
@@ -305,7 +407,11 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
       
       withProgress(message = "Performing UMAP analysis and clustering", value = 0.2, {
         if (input$seg_choice == "anat_seg") {
-          img.dat <- x2$mytable_selected %>% subsetPixels(x2$tf_list)
+          img.dat <- safe_subset_pixels(x2$mytable_selected, x2$tf_list, "UMAP input", notify = TRUE)
+          if (is.null(img.dat) || ncol(img.dat) == 0) {
+            showNotification("No pixels selected for UMAP. Adjust filters and try again.", type = "warning", duration = 6)
+            return()
+          }
           x2$tf_list_anat <- rep(TRUE, ncol(img.dat))
           x2$tf_list_umap <- x2$tf_list  # Store T/F list to store UMAP pixels
           x2$umap_name <- runNames(img.dat)
@@ -942,10 +1048,24 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
         tf_list <- x2$tf_list
       }
       
-      if (length(tf_list) == 0)
-        return(NULL)
+      tf_list <- sanitize_tf_mask(tf_list, nrow(x2$data_list$umap_separation$umap_out))
+      if (is.null(tf_list) || sum(tf_list) == 0) {
+        draw_empty_plot("No pixels selected for UMAP display.")
+        dev.off()
+        return(list(
+          src = outfile,
+          contentType = 'image/png',
+          width = 800,
+          height = 600,
+          alt = "No pixels selected"
+        ))
+      }
       
-      cols <- x2$bkcols[tf_list]
+      if (!is.null(x2$bkcols) && length(x2$bkcols) == length(tf_list)) {
+        cols <- x2$bkcols[tf_list]
+      } else {
+        cols <- rep("grey70", sum(tf_list))
+      }
       cols[cols == 0] <- 100
       cols[cols %in% NA] <- 100
       
@@ -1016,12 +1136,22 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
       x2$rcol_plot <- input$seg_pdat_col
       
       req(x2$rcol_plot)
-      req(input$show_dat)
       
       print("plot7_tissue_umap_continuting")
       outfile <- tempfile(fileext = '.png')
       
       png(outfile, width = 800, height = 600)
+      if (is.null(input$show_dat) || length(input$show_dat) == 0) {
+        draw_empty_plot("No pData values selected to display.")
+        dev.off()
+        return(list(
+          src = outfile,
+          contentType = 'image/png',
+          width = 800,
+          height = 600,
+          alt = "No pData values selected"
+        ))
+      }
       
       
       
@@ -1029,13 +1159,16 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
       if (input$seg_choice == "anat_seg") {
         #test for existing proc data w/o umap, then test for umap to visualize
         if (!is.null(x2$list_proc_img) && is.null(x2$umap_name)) {
-          img.dat <- combine(x2$list_proc_img[input$mytable_rows_selected])
+          img.dat <- combine_card(x2$list_proc_img[input$mytable_rows_selected])
         } else if (!is.null(x2$tf_list_umap) &&
                    !is.null(x2$umap_name)) {
           if (identical(x2$umap_name, runNames(x2$mytable_selected))) {
-            img.dat <- x2$mytable_selected %>% subsetPixels(x2$tf_list_umap)
+            img.dat <- safe_subset_pixels(x2$mytable_selected, x2$tf_list_umap, "UMAP pData plot", notify = FALSE)
             if (!is.null(x2$pdat_anat)) {
-              pData(img.dat) <- x2$pdat_anat[x2$tf_list_umap,]
+              tf_umap <- sanitize_tf_mask(x2$tf_list_umap, nrow(x2$pdat_anat))
+              if (!is.null(tf_umap) && !is.null(img.dat) && ncol(img.dat) == sum(tf_umap)) {
+                pData(img.dat) <- x2$pdat_anat[tf_umap,]
+              }
             }
           }
         } else {
@@ -1048,7 +1181,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
           }
         }
       } else {
-        img.dat <- x2$mytable_selected #%>% subsetPixels(x2$tf_list)
+        img.dat <- safe_subset_pixels(x2$mytable_selected, x2$tf_list, "Segmentation image", notify = FALSE)
       }
       
       
@@ -1059,10 +1192,46 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
       #browser()
       
       #if(x2$rcol_plot=="Rcol_reduced"){
-      cols = as.data.frame(pData(img.dat))[, x2$rcol_plot]
-      tf_list <- cols %in% input$show_dat
+      if (is.null(img.dat) || ncol(img.dat) == 0) {
+        draw_empty_plot("No image data available for this selection.")
+        dev.off()
+        return(list(
+          src = outfile,
+          contentType = 'image/png',
+          width = 800,
+          height = 600,
+          alt = "No image data available"
+        ))
+      }
       
-      img.dat <- img.dat %>% subsetPixels(tf_list)
+      pdat_df <- as.data.frame(pData(img.dat))
+      if (!x2$rcol_plot %in% colnames(pdat_df)) {
+        draw_empty_plot(sprintf("Field '%s' not found in pData.", x2$rcol_plot))
+        dev.off()
+        return(list(
+          src = outfile,
+          contentType = 'image/png',
+          width = 800,
+          height = 600,
+          alt = "pData field not found"
+        ))
+      }
+      cols = pdat_df[, x2$rcol_plot]
+      tf_list <- cols %in% input$show_dat
+      tf_list[is.na(tf_list)] <- FALSE
+      
+      img.dat <- safe_subset_pixels(img.dat, tf_list, "pData display filter", notify = FALSE)
+      if (is.null(img.dat) || ncol(img.dat) == 0) {
+        draw_empty_plot("No pixels left after applying display filters.")
+        dev.off()
+        return(list(
+          src = outfile,
+          contentType = 'image/png',
+          width = 800,
+          height = 600,
+          alt = "No pixels left after filtering"
+        ))
+      }
       
       x <-
         coord(img.dat)[, 1]
@@ -1089,7 +1258,15 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
       
       
       if (dim(aa)[1] == 0) {
-        return(NULL)
+        draw_empty_plot("No pixels available to plot.")
+        dev.off()
+        return(list(
+          src = outfile,
+          contentType = 'image/png',
+          width = 800,
+          height = 600,
+          alt = "No pixels available"
+        ))
       }
       
       #test cols to make sure they will work. from here: https://stackoverflow.com/questions/13289009/check-if-character-string-is-a-valid-color-representation
@@ -1183,7 +1360,18 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
       
       
       img.dat <-
-        x2$data_list$clean_img.dat %>% subsetPixels(tf_list)
+        safe_subset_pixels(x2$data_list$clean_img.dat, tf_list, "segmentation map", notify = FALSE)
+      if (is.null(img.dat) || ncol(img.dat) == 0) {
+        draw_empty_plot("No image data left after filtering.")
+        dev.off()
+        return(list(
+          src = outfile,
+          contentType = 'image/png',
+          width = 800,
+          height = 600,
+          alt = "No image data"
+        ))
+      }
       #previous line will revert to original image after saving to x2$overview_peaks_sel
       #img.dat<-x2$mytable_selected %>% subsetPixels(x2$tf_list)
       
@@ -1193,7 +1381,11 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
       runs = Cardinal::run(img.dat)
       req(runs)
       a <- data.frame(x, y, runs)
-      cols <- x2$bkcols[tf_list]
+      if (!is.null(x2$bkcols) && length(x2$bkcols) == length(tf_list)) {
+        cols <- x2$bkcols[tf_list]
+      } else {
+        cols <- rep("grey70", nrow(a))
+      }
       
       cat(names(table(cols)))
       cols[cols == 0] <- 100 #for h/dbscan?
@@ -1522,46 +1714,53 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
     
     
     
-    #adjust t/f list when colors selected
+    # adjust T/F list from pData value filter (anat mode)
     observeEvent({
+      input$seg_choice
+      input$seg_pdat_col
       input$show_dat
+      1
+    }, {
+      x2 <- preproc_values()[["x2"]]
+      req(x2$mytable_selected)
+      if (!identical(input$seg_choice, "anat_seg")) {
+        return()
+      }
+      
+      dat <- get_active_pdata_df(x2)
+      if (is.null(dat) || nrow(dat) != ncol(x2$mytable_selected)) {
+        x2$tf_list <- rep(TRUE, ncol(x2$mytable_selected))
+        x2$tf_list_anat <- x2$tf_list
+        return()
+      }
+      
+      if (!is.null(input$show_dat) && input$seg_pdat_col %in% colnames(dat)) {
+        tf_tmp <- dat[, input$seg_pdat_col] %in% input$show_dat
+        tf_tmp[is.na(tf_tmp)] <- FALSE
+        x2$tf_list <- tf_tmp
+      } else {
+        x2$tf_list <- rep(TRUE, nrow(dat))
+      }
+      
+      # Keep anat mask aligned with displayed/editable pData subset.
+      x2$tf_list_anat <- x2$tf_list
+    }, ignoreInit = FALSE)
+    
+    # adjust T/F list from UMAP color filter (background mode)
+    observeEvent({
+      input$seg_choice
       input$cols
       1
     }, {
-      #print(input$cols)
       x2 <- preproc_values()[["x2"]]
-      req(x2$mytable_selected)
-      if (input$seg_choice == "anat_seg") {
-        
-        
-        if (!is.null(x2$pdat_anat)) {
-          dat <- as.data.frame(x2$pdat_anat)
-        } else {
-          dat <- as.data.frame(pData(x2$mytable_selected))
-        }
-        
-        
-        # if(is.null(x2$pdat_anat) || !identical(x2$umap_name, runNames(x2$mytable_selected))) {
-        #   dat<-as.data.frame(pData(x2$mytable_selected))
-        # }else {
-        #   dat<-as.data.frame(x2$pdat_anat)
-        # }
-        
-        if (!is.null(input$show_dat)) {
-          x2$tf_list <- dat[, input$seg_pdat_col] %in% input$show_dat
-          x2$tf_list_anat <- x2$bkcols %in% input$cols
-        }
-        
-      } else {
-        x2 <- preproc_values()[["x2"]]
-        req(x2$data_list)
-        x2$tf_list <- x2$bkcols %in% input$cols
+      if (!identical(input$seg_choice, "bk_seg")) {
+        return()
       }
-      #print(x2$tf_list)
-      #print(x2$bkcols)
-      #print(paste(length(x2$tf_list), " is length of tf_list"))
-      print(knitr::kable(table(x2$tf_list)))
-    })
+      req(x2$data_list)
+      tf_tmp <- x2$bkcols %in% input$cols
+      tf_tmp[is.na(tf_tmp)] <- FALSE
+      x2$tf_list <- tf_tmp
+    }, ignoreInit = FALSE)
     
     #save processed data in a list when save button pressed and plot results
     
@@ -1819,6 +2018,12 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
     observeEvent(input$store_proc, {
       x2 <- preproc_values()[["x2"]]
       req(x2$tf_list)  # This will tell us which pixels to use/store
+      req(x2$mytable_selected)
+      tf_valid <- sanitize_tf_mask(x2$tf_list, ncol(x2$mytable_selected))
+      if (is.null(tf_valid) || sum(tf_valid) == 0) {
+        showNotification("No pixels selected to store.", type = "warning", duration = 6)
+        return()
+      }
       print("")
       print("Storing processed data")
       showNotification("Storing processed Data")
@@ -1832,8 +2037,12 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
           print("Storing UMAP results as processed data")
           
           x2$tf_list <- x2$tf_list_anat
-          aa <- x2$tf_list_anat
           x2$tf_list_anat <- NULL
+          tf_valid <- sanitize_tf_mask(x2$tf_list, ncol(x2$mytable_selected))
+          if (is.null(tf_valid) || sum(tf_valid) == 0) {
+            showNotification("No pixels selected after applying anatomical filter.", type = "warning", duration = 6)
+            return()
+          }
           
           req(x2$data_list)
           
@@ -1873,41 +2082,47 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
             x2$overview_peaks_sel$col_skmeans <- "NA"
           }
           
-          tmp.img <- x2$mytable_selected[x2$tf_list]
-          x2$pdat_anat <- x2$pdata_anat[x2$tf_list, ]
+          tmp.img <- safe_subset_pixels(x2$mytable_selected, tf_valid, "store processed data", notify = FALSE)
+          if (is.null(tmp.img) || ncol(tmp.img) == 0) {
+            showNotification("No image data available to store after filtering.", type = "warning", duration = 6)
+            return()
+          }
+          if (!is.null(x2$pdat_anat) && nrow(x2$pdat_anat) == length(tf_valid)) {
+            x2$pdat_anat <- x2$pdat_anat[tf_valid, ]
+          }
           
           # Store UMAP embeddings
           # tmp.img$x_umaps <- x2$data_list$umap_separation$[x2$tf_list]
           
-          tmp.img$Rcol_reduced <- x2$data_list$umap_separation$col_reduced[x2$tf_list]
-          tmp.img$col_dbscan <- x2$data_list$dbscan_umap_separation$cluster[x2$tf_list]
-          tmp.img$col_hdbscan <- x2$data_list$hdbscan_umap_separation$cluster[x2$tf_list]
+          tmp.img$Rcol_reduced <- x2$data_list$umap_separation$col_reduced[tf_valid]
+          tmp.img$col_dbscan <- x2$data_list$dbscan_umap_separation$cluster[tf_valid]
+          tmp.img$col_hdbscan <- x2$data_list$hdbscan_umap_separation$cluster[tf_valid]
           
           # Add assignments for new clustering methods
           if ("kmeans" %in% input$clustering_methods) {
-            tmp.img$col_kmeans <- x2$data_list$kmeans_umap_separation$cluster[x2$tf_list]
+            tmp.img$col_kmeans <- x2$data_list$kmeans_umap_separation$cluster[tf_valid]
           }
           if ("hierarchical" %in% input$clustering_methods) {
-            tmp.img$col_hierarchical <- x2$data_list$hierarchical_umap_separation[x2$tf_list]
+            tmp.img$col_hierarchical <- x2$data_list$hierarchical_umap_separation[tf_valid]
           }
           if ("spectral" %in% input$clustering_methods) {
-            tmp.img$col_spectral <- x2$data_list$spectral_umap_separation$cluster[x2$tf_list]
+            tmp.img$col_spectral <- x2$data_list$spectral_umap_separation$cluster[tf_valid]
           }
           if ("kmedoids" %in% input$clustering_methods) {
-            tmp.img$col_kmedoids <- x2$data_list$kmedoids_umap_separation$clustering[x2$tf_list]
+            tmp.img$col_kmedoids <- x2$data_list$kmedoids_umap_separation$clustering[tf_valid]
           }
           if ("fuzzy" %in% input$clustering_methods) {
             # For fuzzy clustering, get the hard assignments
-            tmp.img$col_fuzzy <- apply(x2$data_list$fuzzy_umap_separation$membership[x2$tf_list, ], 1, which.max)
+            tmp.img$col_fuzzy <- apply(x2$data_list$fuzzy_umap_separation$membership[tf_valid, ], 1, which.max)
           }
           if ("mclust" %in% input$clustering_methods) {
-            tmp.img$col_mclust <- x2$data_list$mclust_umap_separation$classification[x2$tf_list]
+            tmp.img$col_mclust <- x2$data_list$mclust_umap_separation$classification[tf_valid]
           }
           if ("som" %in% input$clustering_methods) {
-            tmp.img$col_som <- x2$data_list$som_umap_separation$unit.classif[x2$tf_list]
+            tmp.img$col_som <- x2$data_list$som_umap_separation$unit.classif[tf_valid]
           }
           if ("skmeans" %in% input$clustering_methods) {
-            tmp.img$col_skmeans <- x2$data_list$skmeans_umap_separation$cluster[x2$tf_list]
+            tmp.img$col_skmeans <- x2$data_list$skmeans_umap_separation$cluster[tf_valid]
           }
           
           mytable_selected <- tmp.img
@@ -1938,7 +2153,11 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
           pData(mytable_selected)[, cols_selected] <- "NA"
         }
         
-        tmp.img <- mytable_selected %>% subsetPixels(x2$tf_list)
+        tmp.img <- safe_subset_pixels(mytable_selected, x2$tf_list, "store processed data", notify = FALSE)
+        if (is.null(tmp.img) || ncol(tmp.img) == 0) {
+          showNotification("No image data available to store after filtering.", type = "warning", duration = 6)
+          return()
+        }
         
       } else if (input$seg_choice == "fix_pix") {
         tmp.img <- x2$mytable_selected
@@ -2005,42 +2224,52 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
         
         # input$seg_field: add this column to the rest of the data!
         
-        tmp.img <- tmp_umap_dat()[x2$tf_list]
+        base_dat <- tmp_umap_dat()
+        tf_valid <- sanitize_tf_mask(x2$tf_list, ncol(base_dat))
+        if (is.null(tf_valid) || sum(tf_valid) == 0) {
+          showNotification("No pixels selected to store from UMAP results.", type = "warning", duration = 6)
+          return()
+        }
+        tmp.img <- safe_subset_pixels(base_dat, tf_valid, "store UMAP processed data", notify = FALSE)
+        if (is.null(tmp.img) || ncol(tmp.img) == 0) {
+          showNotification("No image data available after UMAP filtering.", type = "warning", duration = 6)
+          return()
+        }
         
-        tmp.img$Rcol_reduced <- x2$data_list$umap_separation$col_reduced[x2$tf_list]
-        tmp.img$col_dbscan <- x2$data_list$dbscan_umap_separation$cluster[x2$tf_list]
-        tmp.img$col_hdbscan <- x2$data_list$hdbscan_umap_separation$cluster[x2$tf_list]
+        tmp.img$Rcol_reduced <- x2$data_list$umap_separation$col_reduced[tf_valid]
+        tmp.img$col_dbscan <- x2$data_list$dbscan_umap_separation$cluster[tf_valid]
+        tmp.img$col_hdbscan <- x2$data_list$hdbscan_umap_separation$cluster[tf_valid]
         
         
         # Add assignments for new clustering methods
         if ("kmeans" %in% input$clustering_methods) {
-          tmp.img$col_kmeans <- x2$data_list$kmeans_umap_separation$cluster[x2$tf_list]
+          tmp.img$col_kmeans <- x2$data_list$kmeans_umap_separation$cluster[tf_valid]
         }
         if ("hierarchical" %in% input$clustering_methods) {
-          tmp.img$col_hierarchical <- x2$data_list$hierarchical_umap_separation[x2$tf_list]
+          tmp.img$col_hierarchical <- x2$data_list$hierarchical_umap_separation[tf_valid]
         }
         if ("spectral" %in% input$clustering_methods) {
-          tmp.img$col_spectral <- x2$data_list$spectral_umap_separation$cluster[x2$tf_list]
+          tmp.img$col_spectral <- x2$data_list$spectral_umap_separation$cluster[tf_valid]
         }
         if ("kmedoids" %in% input$clustering_methods) {
-          tmp.img$col_kmedoids <- x2$data_list$kmedoids_umap_separation$clustering[x2$tf_list]
+          tmp.img$col_kmedoids <- x2$data_list$kmedoids_umap_separation$clustering[tf_valid]
         }
         if ("fuzzy" %in% input$clustering_methods) {
           # For fuzzy clustering, get the hard assignments
-          tmp.img$col_fuzzy <- apply(x2$data_list$fuzzy_umap_separation$membership[x2$tf_list, ], 1, which.max)
+          tmp.img$col_fuzzy <- apply(x2$data_list$fuzzy_umap_separation$membership[tf_valid, ], 1, which.max)
         }
         if ("mclust" %in% input$clustering_methods) {
-          tmp.img$col_mclust <- x2$data_list$mclust_umap_separation$classification[x2$tf_list]
+          tmp.img$col_mclust <- x2$data_list$mclust_umap_separation$classification[tf_valid]
         }
         if ("som" %in% input$clustering_methods) {
-          tmp.img$col_som <- x2$data_list$som_umap_separation$unit.classif[x2$tf_list]
+          tmp.img$col_som <- x2$data_list$som_umap_separation$unit.classif[tf_valid]
         }
         if ("skmeans" %in% input$clustering_methods) {
-          tmp.img$col_skmeans <- x2$data_list$skmeans_umap_separation$cluster[x2$tf_list]
+          tmp.img$col_skmeans <- x2$data_list$skmeans_umap_separation$cluster[tf_valid]
         }
         
         # Save UMAP embeddings
-        embeddings <- x2$data_list$umap_separation$umap_out[x2$tf_list, ]
+        embeddings <- x2$data_list$umap_separation$umap_out[tf_valid, ]
         tmp.img$x_umap <- embeddings[, 1]
         tmp.img$y_umap <- embeddings[, 2]
         tmp.img$z_umap <- embeddings[, 3]
@@ -2236,78 +2465,77 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
       #extract pdata
       req(x2$mytable_selected)
       
-      if (is.null(x2$pdat_anat)) {
-        pdat <- as.data.frame(pData(x2$mytable_selected))
-      } else {
-        pdat <- as.data.frame(x2$pdat_anat)
+      pdat <- get_active_pdata_df(x2)
+      req(pdat)
+      pdat_cols <- colnames(pdat)
+      if (length(pdat_cols) == 0) {
+        return(tags$div("No pData fields available for editing."))
       }
+      default_col <- if ("Rcol_reduced" %in% pdat_cols) "Rcol_reduced" else pdat_cols[1]
       
-      v <-
-        list(
-          selectInput(
-            ns("seg_pdat_col"),
-            "Select pData field for visualization",
-            choices = colnames(pdat),
-            selected = "Rcol_reduced"
+      tagList(
+        selectInput(
+          ns("seg_pdat_col"),
+          "pData field for visualization/editing",
+          choices = pdat_cols,
+          selected = default_col
+        ),
+        uiOutput(ns("seg_pdat_show")),
+        radioButtons(
+          ns("seg_rename"),
+          "Edit action",
+          choices = c(
+            "Edit values in existing field" = "replace",
+            "Create new field from selected pixels" = "add",
+            "Rename pData field" = "rename_field"
           ),
-          uiOutput(ns("seg_pdat_show")),
-          #interface to change names...
-          radioButtons(
-            ns("seg_rename"),
-            "Choose pData field to annotate:",
-            choices = c("Replace" = "replace",
-                        "Add new field" = "add")
-          ),
-          uiOutput(ns("seg_field")),
-          actionButton(ns("apply_annotation"), "Apply annotation")
-          #selectInput("seg_pdat_col", "Select pData field to remove from visualization",
-          #             choices = colnames(pdat)),
-          #actionButton("remove_seg", "Remove from plot")
-          
-          
-        )
-      
-      
-      return(v)
+          selected = "replace"
+        ),
+        uiOutput(ns("seg_field")),
+        actionButton(ns("apply_annotation"), "Apply pData Edit")
+      )
       
     })
     
     output$seg_field <- renderUI ({
       x2 <- preproc_values()[["x2"]]
+      req(x2$mytable_selected)
+      pdat <- get_active_pdata_df(x2)
+      req(pdat)
       
-      
-      cnames <-
-        unique(c(colnames(as.data.frame(x2$pdat_anat)), colnames(as.data.frame(
-          pData(x2$mytable_selected)
-        ))))
-      choices <-
-        cnames[!cnames %in% c("Rcol_reduced",
-                              "run",
-                              "Plate",
-                              "col_dbscan",
-                              "col_hdbscan",
-                              "x",
-                              "y")]
-      
-      
-      
+      choices <- colnames(pdat)
+      if (length(choices) == 0) {
+        return(NULL)
+      }
+      editable_choices <- choices[!choices %in% c("x", "y", "run")]
+      if (length(editable_choices) == 0) {
+        editable_choices <- choices
+      }
+      selected_field <- if (!is.null(input$seg_pdat_col) && input$seg_pdat_col %in% editable_choices) {
+        input$seg_pdat_col
+      } else {
+        editable_choices[1]
+      }
       
       switch(
         req(input$seg_rename),
         "replace" = list(
           selectInput(
             ns("seg_field"),
-            "Choose field to annotate",
-            choices = choices,
-            selected = input$seg_pdat_col
+            "Field to edit",
+            choices = editable_choices,
+            selected = selected_field
           ),
           uiOutput(ns("current_seg_choices")),
-          p(HTML(paste("<b>OR</b>"))),
-          textInput(ns("new_seg_value"), "Input new annotation value")
+          textInput(ns("new_seg_value"), "New value for selected pixels")
         ),
         "add" = list(
-          textInput(ns("seg_field"), "Name of new field to populate"),
-          textInput(ns("new_seg_value"), "New annotation value")
+          textInput(ns("seg_field"), "Name of new field to create"),
+          textInput(ns("new_seg_value"), "Value for selected pixels")
+        ),
+        "rename_field" = list(
+          selectInput(ns("seg_field"), "Field to rename", choices = editable_choices, selected = selected_field),
+          textInput(ns("new_seg_value"), "New field name")
         )
       )
       
@@ -2315,34 +2543,22 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
     
     output$current_seg_choices <- renderUI ({
       x2 <- preproc_values()[["x2"]]
-      x0 <- preproc_values()[["x0"]]
-      
-      
-      #generate choices from all possible combinations of stored and existing information
-      choices1 <- NULL
-      choices2 <- NULL
-      choices3 <- NULL
-      if (!is.null(x2$pdat_anat) &&
-          input$seg_field %in% colnames(x2$pdat_anat)) {
-        choices1 = c("", unique(as.data.frame(x2$pdat_anat)[, (input$seg_field)]))
+      req(x2$mytable_selected, input$seg_field)
+      pdat <- get_active_pdata_df(x2)
+      req(pdat)
+      if (!input$seg_field %in% colnames(pdat)) {
+        return(NULL)
       }
-      
-      if (input$seg_field %in% colnames(as.data.frame(pData(x0$overview_peaks)))) {
-        choices2 = unique(as.data.frame(pData(x0$overview_peaks))[, (input$seg_field)])
-      }
-      
-      if (input$seg_field %in% colnames(as.data.frame(pData(x2$overview_peaks_sel)))) {
-        choices3 = unique(as.data.frame(pData(x2$overview_peaks_sel))[, (input$seg_field)])
-      }
-      
-      choices_combined <- unique(c(choices1, choices2, choices3))
-      
+      vals <- unique(pdat[, input$seg_field])
+      vals <- vals[!is.na(vals)]
+      vals <- unique(as.character(vals))
+      vals <- vals[order(vals)]
       
       selectInput(
         ns("current_seg_value"),
-        "Choose existing value",
-        choices = c("", choices_combined),
-        selected = ""
+        "Current value filter (optional)",
+        choices = c("[Any current value]" = "__ANY__", vals),
+        selected = "__ANY__"
       )
       
       
@@ -2352,27 +2568,32 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
       x2 <- preproc_values()[["x2"]]
       req(x2$mytable_selected)
       
-      
-      #TODO - get values from existing x pdat_anat?
-      
-      if (!is.null(x2$pdat_anat)) {
-        pdat <- as.data.frame(x2$pdat_anat)
-      } else {
-        pdat <- as.data.frame(pData(x2$mytable_selected))
+      pdat <- get_active_pdata_df(x2)
+      req(pdat, input$seg_pdat_col)
+      if (!input$seg_pdat_col %in% colnames(pdat)) {
+        return(selectizeInput(
+          ns("show_dat"),
+          "Values to display / edit",
+          choices = character(0),
+          selected = character(0),
+          multiple = TRUE
+        ))
       }
-      
-      # if(is.null(x2$pdat_anat) || !identical(runNames(x2$mytable_selected),(x2$umap_name))){
-      #   pdat<-as.data.frame(pData(x2$mytable_selected))
-      # } else {
-      #   pdat<-as.data.frame(x2$pdat_anat)
-      # }
+      vals <- unique(as.character(pdat[, input$seg_pdat_col]))
+      vals <- vals[!is.na(vals)]
+      vals <- vals[order(vals)]
+      current_sel <- isolate(input$show_dat)
+      selected_vals <- if (!is.null(current_sel)) intersect(as.character(current_sel), vals) else vals
+      if (length(selected_vals) == 0 && length(vals) > 0) {
+        selected_vals <- vals
+      }
       
       selectizeInput(
         ns("show_dat"),
-        "Values to show",
-        choices = unique(pdat[, input$seg_pdat_col]),
-        selected = unique(pdat[, input$seg_pdat_col]),
-        multiple = T
+        "Values to display / edit",
+        choices = vals,
+        selected = selected_vals,
+        multiple = TRUE
       )
     })
     
@@ -2391,116 +2612,114 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
     #Apply the results of annotations for specific tissue regions
     observeEvent(input$apply_annotation, {
       x2 <- preproc_values()[["x2"]]
-      #req(input$seg_field)
       req(x2$mytable_selected)
+      req(input$seg_rename, input$seg_field)
       
-      
-      
-      
-      if (is.null(x2$pdat_anat) ||
-          dim(x2$pdat_anat)[1] != dim(pData(x2$mytable_selected))[1]) {
-        pdat <- (pData(x2$mytable_selected))
-      } else {
-        pdat <- x2$pdat_anat
+      pdat <- get_active_pdata(x2)
+      if (is.null(pdat)) {
+        showNotification("No pData available to edit.", type = "error")
+        return()
+      }
+      pdat_df <- as.data.frame(pdat)
+      n_pixels <- nrow(pdat_df)
+      if (n_pixels != ncol(x2$mytable_selected)) {
+        showNotification("pData length does not match selected image. Reload data selection and retry.", type = "error", duration = 8)
+        return()
       }
       
-      if (input$seg_rename == "replace") {
-        
-        if (!input$seg_field %in% colnames(pdat)) {
-          print(paste0(
-            input$seg_field,
-            " not found in existing pData, please check"
-          ))
+      field_name <- trimws(input$seg_field)
+      new_value <- trimws(input$new_seg_value)
+      
+      selected_mask <- rep(TRUE, n_pixels)
+      if (!is.null(input$show_dat) && length(input$show_dat) > 0 && input$seg_pdat_col %in% colnames(pdat_df)) {
+        selected_mask <- pdat_df[, input$seg_pdat_col] %in% input$show_dat
+        selected_mask[is.na(selected_mask)] <- FALSE
+      }
+      tf_current <- sanitize_tf_mask(x2$tf_list, n_pixels)
+      if (!is.null(tf_current)) {
+        selected_mask <- selected_mask & tf_current
+      }
+      
+      if (identical(input$seg_rename, "rename_field")) {
+        if (!nzchar(field_name) || !field_name %in% colnames(pdat_df)) {
+          showNotification("Choose an existing pData field to rename.", type = "error")
+          return()
+        }
+        if (!nzchar(new_value)) {
+          showNotification("Enter a new field name.", type = "error")
+          return()
+        }
+        if (new_value %in% colnames(pdat_df) && !identical(new_value, field_name)) {
+          showNotification("That field name already exists. Choose a different name.", type = "error")
           return()
         }
         
-        # if(input$seg_field=="Rcol_reduced"){ #check if is valid color to go in color vector??
-        #   plotfuncions::
-        # }
-        
-        #find which pixels are common between original dataset selection and umap selection
-        #current dataset
-        
-        
-        
-        if (!is.null(x2$tf_list_umap) &&
-            length(x2$tf_list_anat) != 0) {
-          orig_idx <- which(x2$tf_list_umap)
-          new_idx <- orig_idx[x2$tf_list_anat]
-        } else {
-          new_idx <- which(x2$tf_list)
-        }
-        
-        
-        #x2$tf_list_anat<-rep(TRUE, ncol(x2$mytable_selected))
-        
-        aa <- as.data.frame(pdat)[, input$seg_field]
-        
-        
-        #a[1:20]<-"test1_doh"
-        
-        
-        #test for replacement or addition of annotations based on which field is occupied
-        
-        if (is.null(input$current_seg_value)) {
-          if (input$new_seg_value != "") {
-            aa[new_idx] <- input$new_seg_value
-          } else {
-            print("Cannot determine field to apply annotation, please check")
-            return(NULL)
-          }
-          
-        } else {
-          if (input$current_seg_value != "" && input$new_seg_value == "") {
-            aa[new_idx] <- input$current_seg_value
-            
-          } else if ((input$current_seg_value == "" ||
-                      is.null(input$current_seg_value)) &&
-                     input$new_seg_value != "") {
-            aa[new_idx] <- input$new_seg_value
-            
-          } else if (input$current_seg_value != "" &&
-                     input$new_seg_value != "") {
-            print(
-              "Cannot have both current and new replacement values to segmentation, choose one!"
-            )
-            return()
-          } else {
-            print("cannot deterimine replacement value, check variables.")
-            return()
-          }
-        }
-        
-        
-        
-        pdat[, input$seg_field] <- aa
-        
-        print("Storing annotation information")
+        colnames(pdat)[colnames(pdat) == field_name] <- new_value
         x2$pdat_anat <- pdat
-        print(input$seg_field)
-        print(table(as.data.frame(x2$pdat_anat)[, input$seg_field]))
         
-        #pData(x2$mytable_selected)[,input$seg_field]<-pdat[,input$seg_field]
-        
-        
-        
-        
-      } else if (input$seg_rename == "add") {
-        if (input$seg_field %in% colnames(pdat)) {
-          print(paste0(
-            input$seg_field,
-            " found in existing pData, please use new name"
-          ))
+        updated_cols <- colnames(as.data.frame(x2$pdat_anat))
+        updateSelectInput(session, "seg_pdat_col", choices = updated_cols, selected = new_value)
+        updateSelectInput(session, "seg_field", choices = updated_cols, selected = new_value)
+        showNotification(sprintf("Renamed pData field '%s' to '%s'.", field_name, new_value), type = "message", duration = 5)
+        return()
+      }
+      
+      selected_idx <- which(selected_mask)
+      if (length(selected_idx) == 0) {
+        showNotification("No pixels selected for editing. Adjust 'Values to display / edit' first.", type = "warning", duration = 6)
+        return()
+      }
+      
+      if (identical(input$seg_rename, "replace")) {
+        if (!nzchar(field_name) || !field_name %in% colnames(pdat_df)) {
+          showNotification("Choose an existing field to edit.", type = "error")
+          return()
+        }
+        if (!nzchar(new_value)) {
+          showNotification("Enter a new value to apply.", type = "error")
           return()
         }
         
-        pdat[x2$tf_list, input$seg_field] <- input$new_seg_value
-        #pdat[!x2$tf_list,input$seg_field]<-"NA"
+        current_filter <- if (is.null(input$current_seg_value)) "__ANY__" else input$current_seg_value
+        if (!identical(current_filter, "__ANY__")) {
+          existing_vals <- as.character(pdat_df[, field_name])
+          keep <- existing_vals[selected_idx] %in% as.character(current_filter)
+          selected_idx <- selected_idx[which(keep)]
+        }
         
-        print("Applying new annotation information")
+        if (length(selected_idx) == 0) {
+          showNotification("No pixels matched the selected current-value filter.", type = "warning", duration = 6)
+          return()
+        }
+        
+        updated_vals <- as.character(pdat_df[, field_name])
+        updated_vals[selected_idx] <- new_value
+        pdat[[field_name]] <- updated_vals
         x2$pdat_anat <- pdat
-        #pData(x2$mytable_selected)[,input$seg_field]<-pdat[,input$seg_field]
+        showNotification(sprintf("Updated %d pixels in '%s'.", length(selected_idx), field_name), type = "message", duration = 5)
         
+      } else if (identical(input$seg_rename, "add")) {
+        if (!nzchar(field_name)) {
+          showNotification("Enter a name for the new field.", type = "error")
+          return()
+        }
+        if (field_name %in% colnames(pdat_df)) {
+          showNotification("Field already exists. Use 'Edit values' to modify it.", type = "error")
+          return()
+        }
+        if (!nzchar(new_value)) {
+          showNotification("Enter a value to assign in the new field.", type = "error")
+          return()
+        }
+        
+        new_col <- rep(NA_character_, n_pixels)
+        new_col[selected_idx] <- new_value
+        pdat[[field_name]] <- new_col
+        x2$pdat_anat <- pdat
+        
+        updated_cols <- colnames(as.data.frame(x2$pdat_anat))
+        updateSelectInput(session, "seg_pdat_col", choices = updated_cols, selected = field_name)
+        showNotification(sprintf("Created field '%s' with %d annotated pixels.", field_name, length(selected_idx)), type = "message", duration = 5)
       }
       
     })

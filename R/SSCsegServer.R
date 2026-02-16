@@ -16,6 +16,66 @@ SSCsegServer <- function(id, setup_values, preproc_values) {
       setup_values()[["par_mode"]]
     })
     
+    sanitize_tf_mask <- function(tf, n_pixels) {
+      if (is.null(tf)) {
+        return(NULL)
+      }
+      tf <- as.logical(tf)
+      if (length(tf) != n_pixels) {
+        return(NULL)
+      }
+      tf[is.na(tf)] <- FALSE
+      tf
+    }
+    
+    safe_subset_pixels <- function(dat, tf, context = "selection", notify = TRUE) {
+      if (is.null(dat)) {
+        return(NULL)
+      }
+      n_pixels <- ncol(dat)
+      if (n_pixels == 0) {
+        return(dat)
+      }
+      tf <- sanitize_tf_mask(tf, n_pixels)
+      if (is.null(tf)) {
+        if (isTRUE(notify)) {
+          showNotification(
+            sprintf("%s mask length does not match number of pixels; skipping subsetting.", context),
+            type = "warning",
+            duration = 5
+          )
+        }
+        return(dat)
+      }
+      n_sel <- sum(tf)
+      if (!is.finite(n_sel) || n_sel <= 0) {
+        if (isTRUE(notify)) {
+          showNotification(sprintf("No pixels selected for %s.", context), type = "message", duration = 4)
+        }
+        return(NULL)
+      }
+      if (n_sel == n_pixels) {
+        return(dat)
+      }
+      out <- try(subsetPixels(dat, tf), silent = TRUE)
+      if (inherits(out, "try-error")) {
+        if (isTRUE(notify)) {
+          showNotification(
+            sprintf("Unable to subset pixels for %s. Please adjust filters.", context),
+            type = "error",
+            duration = 8
+          )
+        }
+        return(NULL)
+      }
+      out
+    }
+    
+    draw_empty_plot <- function(msg) {
+      graphics::plot.new()
+      graphics::text(0.5, 0.5, labels = msg, cex = 1.1)
+    }
+    
     
     #create table as reactive
     run_table<-reactive({
@@ -247,9 +307,9 @@ SSCsegServer <- function(id, setup_values, preproc_values) {
       
       if (dim(x2$mytable_selected)[2] > 0 &&
           dim(x2$mytable_selected)[2] == length(x2$tf_list)) {
-        img.dat <- x2$mytable_selected %>% subsetPixels(x2$tf_list)
+        img.dat <- safe_subset_pixels(x2$mytable_selected, x2$tf_list, "SSC preview", notify = FALSE)
         #browser()
-        if (dim(img.dat)[2] > 0) {
+        if (!is.null(img.dat) && dim(img.dat)[2] > 0) {
           plot_card_server("card_plot_ssc",
                            overview_peaks_sel = img.dat,
                            spatialOnly = TRUE)
@@ -282,7 +342,9 @@ SSCsegServer <- function(id, setup_values, preproc_values) {
       x2 <- preproc_values()[["x2"]]
       req(x2$ssc)
       
-      x2$tf_list <- x2$bkcols %in% input$cols2
+      tf_tmp <- x2$bkcols %in% input$cols2
+      tf_tmp[is.na(tf_tmp)] <- FALSE
+      x2$tf_list <- tf_tmp
       
     })
     
@@ -300,8 +362,24 @@ SSCsegServer <- function(id, setup_values, preproc_values) {
       
       png(outfile, width = 800, height = 600)
       
+      tf_valid <- sanitize_tf_mask(x2$tf_list, ncol(x2$mytable_selected))
+      if (is.null(tf_valid) || sum(tf_valid) == 0) {
+        draw_empty_plot("No pixels selected for SSC plotting.")
+        dev.off()
+        return(list(
+          src = outfile,
+          contentType = 'image/png',
+          width = 800,
+          height = 600,
+          alt = "No pixels selected"
+        ))
+      }
       
-      cols <- x2$bkcols[x2$tf_list]
+      if (!is.null(x2$bkcols) && length(x2$bkcols) == length(tf_valid)) {
+        cols <- x2$bkcols[tf_valid]
+      } else {
+        cols <- rep("grey70", sum(tf_valid))
+      }
       
       
       updateSelectizeInput(session,
@@ -311,7 +389,18 @@ SSCsegServer <- function(id, setup_values, preproc_values) {
       #updateSelectizeInput(session, 'cols2', choices = cols, server = TRUE)
       
       
-      img.dat <- x2$mytable_selected %>% subsetPixels(x2$tf_list)
+      img.dat <- safe_subset_pixels(x2$mytable_selected, tf_valid, "SSC plotting", notify = FALSE)
+      if (is.null(img.dat) || ncol(img.dat) == 0) {
+        draw_empty_plot("No image data left after filtering.")
+        dev.off()
+        return(list(
+          src = outfile,
+          contentType = 'image/png',
+          width = 800,
+          height = 600,
+          alt = "No image data"
+        ))
+      }
       
       
       if (input$ssc_cols == "alphabet") {
@@ -365,10 +454,19 @@ SSCsegServer <- function(id, setup_values, preproc_values) {
       
       #browser()
       
-      tmp.img <- x2$mytable_selected %>% subsetPixels(x2$tf_list)
+      tf_valid <- sanitize_tf_mask(x2$tf_list, ncol(x2$mytable_selected))
+      if (is.null(tf_valid) || sum(tf_valid) == 0) {
+        showNotification("No pixels selected to store from SSC output.", type = "warning", duration = 6)
+        return()
+      }
+      tmp.img <- safe_subset_pixels(x2$mytable_selected, tf_valid, "SSC store", notify = FALSE)
+      if (is.null(tmp.img) || ncol(tmp.img) == 0) {
+        showNotification("No image data available to store.", type = "warning", duration = 6)
+        return()
+      }
       
       #assign classes to trimmed data
-      tmp.img$ssc_cols <- x2$ssc[[input$ssc_model]]$class[x2$tf_list]
+      tmp.img$ssc_cols <- x2$ssc[[input$ssc_model]]$class[tf_valid]
       
       all_runs <-
         runNames(x2$overview_peaks_sel) #from the total set being analyzed
