@@ -2374,7 +2374,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
       switch(
         input$seg_choice,
         "bk_seg" = list(
-          numericInput(ns("min_dist"), "minimum distance for UMAP", 0.1),
+          numericInput(ns("min_dist"), "minimum distance for UMAP", 0.01),
           numericInput(ns("search_k"), "# of node to search", 50),
           
           numericInput(
@@ -2382,7 +2382,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
             "UMAP nearest neighbors",
             min = 2,
             max = 100,
-            value = 5
+            value = 3
           ),
           numericInput(ns("n_trees"), "Number of trees for UMAP", 50),
           numericInput(
@@ -2390,7 +2390,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
             "set_op_mix_ratio",
             min = 0,
             max = 1,
-            value = 1
+            value = 0.25
           ),
           textInput(
             ns("pca_umap"),
@@ -2431,13 +2431,13 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
           actionButton(ns("action_dbscan"), label = "Re-run color clustering")
         ),
         "anat_seg" = list(
-          numericInput(ns("min_dist"), "minimum distance for UMAP", 0.01),
+          numericInput(ns("min_dist"), "minimum distance for UMAP", 0),
           numericInput(
             ns("nn"),
             "UMAP nearest neighbors",
             min = 2,
             max = 100,
-            value = 5
+            value = 3
           ),
           numericInput(ns("n_trees"), "Number of trees for UMAP", 50),
           numericInput(
@@ -2445,7 +2445,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
             "set_op_mix_ratio",
             min = 0,
             max = 1,
-            value = 1
+            value = 0.25
           ),
           textInput(
             ns("pca_umap"),

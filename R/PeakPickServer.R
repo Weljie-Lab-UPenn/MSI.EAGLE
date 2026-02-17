@@ -54,6 +54,63 @@ PeakPickServer <- function(id, setup_values) {
       if (grepl("^(/|[A-Za-z]:[\\\\/])", path)) return(path)
       file.path(setup_values()[["wd"]], path)
     }
+    log_file_load <- function(context, selected_name, resolved_path, obj = NULL) {
+      message(sprintf(
+        "[PeakPick] Loaded %s | selected='%s' | path='%s'",
+        context,
+        as.character(selected_name),
+        as.character(resolved_path)
+      ))
+      if (!is.null(obj) && !inherits(obj, "try-error")) {
+        n_feat <- try(nrow(obj), silent = TRUE)
+        n_pix <- try(ncol(obj), silent = TRUE)
+        if (!inherits(n_feat, "try-error") && !inherits(n_pix, "try-error")) {
+          message(sprintf("[PeakPick] Summary %s: features=%s, pixels=%s", context, as.character(n_feat), as.character(n_pix)))
+        }
+      }
+    }
+    
+    # Detect common Cardinal/matter serialization mismatches early so we can fail gracefully.
+    validate_msi_object <- function(obj, context = "dataset", notify = TRUE) {
+      if (is.null(obj)) {
+        if (notify) {
+          showNotification(sprintf("Could not load %s: object is NULL.", context), type = "error", duration = 10)
+        }
+        return(FALSE)
+      }
+      npx <- try(ncol(obj), silent = TRUE)
+      if (inherits(npx, "try-error") || is.null(npx) || length(npx) != 1 || !is.finite(npx) || npx < 1) {
+        if (notify) {
+          showNotification(
+            sprintf("Could not use %s: object does not look like a valid MSI imaging dataset.", context),
+            type = "error",
+            duration = 10
+          )
+        }
+        return(FALSE)
+      }
+      test_idx <- rep(FALSE, npx)
+      test_idx[1] <- TRUE
+      test_subset <- try(Cardinal::subsetPixels(obj, test_idx), silent = TRUE)
+      if (inherits(test_subset, "try-error")) {
+        err_txt <- as.character(test_subset)
+        hint <- if (grepl("slot of name \"refs\"|class \"atoms\"", err_txt, ignore.case = TRUE)) {
+          "This file appears incompatible with the installed Cardinal/matter versions. Try loading the source .imzML or re-saving the .rds in this environment."
+        } else {
+          "Please try the source .imzML file or regenerate the .rds."
+        }
+        if (notify) {
+          showNotification(
+            sprintf("Failed to load %s for pixel operations. %s", context, hint),
+            type = "error",
+            duration = 12
+          )
+        }
+        message("Validation failure in PeakPickServer for ", context, ": ", err_txt)
+        return(FALSE)
+      }
+      TRUE
+    }
     
     # any time the reactive changes, update the selectInput
     observeEvent(my_files(),
@@ -326,16 +383,26 @@ PeakPickServer <- function(id, setup_values) {
                        pick_path <- resolve_wd_path(input$peakPickfile)
                        #check filetype and open accordingly
                        if (is_rds_file(input$peakPickfile)) {
-                         overview_peaks <- readRDS(pick_path)
+                         message(sprintf("[PeakPick] Loading main dataset from .rds | selected='%s' | path='%s'", input$peakPickfile, pick_path))
+                         overview_peaks <- try(readRDS(pick_path), silent = TRUE)
                          print(overview_peaks)
                        } else if (is_imzml_file(input$peakPickfile)) {
-                         overview_peaks <- readImzML(pick_path)
+                         message(sprintf("[PeakPick] Loading main dataset from .imzML | selected='%s' | path='%s'", input$peakPickfile, pick_path))
+                         overview_peaks <- try(readImzML(pick_path), silent = TRUE)
                          print(overview_peaks)
                        } else {
                          print("file type not recognized")
                          showNotification("Input file type not recognized. Use .imzML or .rds/.RData.", type = "error", duration = 8)
                          return()
                        }
+                       if (inherits(overview_peaks, "try-error")) {
+                         showNotification("Failed to read selected file. Try the source .imzML file if this is an .rds compatibility issue.", type = "error", duration = 10)
+                         return()
+                       }
+                       if (!validate_msi_object(overview_peaks, context = basename(input$peakPickfile), notify = TRUE)) {
+                         return()
+                       }
+                       log_file_load("main dataset", input$peakPickfile, pick_path, overview_peaks)
                        
                        # overview_peaks <- readImzML(input$peakPickfile)
                        # print(overview_peaks)
@@ -351,8 +418,22 @@ PeakPickServer <- function(id, setup_values) {
                          
                        }
                        
-                       old_dat <- readRDS(resolve_wd_path(input$peakPickfile))
-                       overview_peaks <- convert_card(old_dat)
+                       pick_path <- resolve_wd_path(input$peakPickfile)
+                       message(sprintf("[PeakPick] Loading legacy dataset from .rds | selected='%s' | path='%s'", input$peakPickfile, pick_path))
+                       old_dat <- try(readRDS(pick_path), silent = TRUE)
+                       if (inherits(old_dat, "try-error")) {
+                         showNotification("Failed to read legacy .rds file. Please verify the file or use .imzML input.", type = "error", duration = 10)
+                         return()
+                       }
+                       overview_peaks <- try(convert_card(old_dat), silent = TRUE)
+                       if (inherits(overview_peaks, "try-error")) {
+                         showNotification("Failed to convert legacy .rds file. Try loading from .imzML instead.", type = "error", duration = 10)
+                         return()
+                       }
+                       if (!validate_msi_object(overview_peaks, context = basename(input$peakPickfile), notify = TRUE)) {
+                         return()
+                       }
+                       log_file_load("legacy converted dataset", input$peakPickfile, pick_path, overview_peaks)
                        print(overview_peaks)
                        
                      } else if (input$peak_pick_status == "pp_no") {
@@ -492,14 +573,17 @@ PeakPickServer <- function(id, setup_values) {
                        #check for rds or imzml and open accordingly
                        pick_path <- resolve_wd_path(input$peakPickfile)
                        if (is_rds_file(input$peakPickfile)) {
+                         message(sprintf("[PeakPick] Loading reference peak list from .rds | selected='%s' | path='%s'", input$peakPickfile, pick_path))
                          test_mz_reduced <- readRDS(pick_path)
                        } else if (is_imzml_file(input$peakPickfile)) {
+                         message(sprintf("[PeakPick] Loading reference peak list from .imzML | selected='%s' | path='%s'", input$peakPickfile, pick_path))
                          test_mz_reduced <- readImzML(pick_path)
                        } else {
                          print("file type not recognized")
                          showNotification("Reference file type not recognized. Use .imzML or .rds/.RData.", type = "error", duration = 8)
                          return()
                        }
+                       log_file_load("reference peak list", input$peakPickfile, pick_path, test_mz_reduced)
                        
                        print(test_mz_reduced)
                        setCardinalBPPARAM(par_mode())
@@ -644,16 +728,26 @@ PeakPickServer <- function(id, setup_values) {
       #check for .rds or .imzML and open accordingly
       add_path <- resolve_wd_path(input$peakAddfile)
       if (is_rds_file(input$peakAddfile)) {
-        add_peaks <- readRDS(add_path)
+        message(sprintf("[PeakPick] Loading file-to-add from .rds | selected='%s' | path='%s'", input$peakAddfile, add_path))
+        add_peaks <- try(readRDS(add_path), silent = TRUE)
         print(add_peaks)
       } else if (is_imzml_file(input$peakAddfile)) {
-        add_peaks <- readImzML(add_path)
+        message(sprintf("[PeakPick] Loading file-to-add from .imzML | selected='%s' | path='%s'", input$peakAddfile, add_path))
+        add_peaks <- try(readImzML(add_path), silent = TRUE)
         print(add_peaks)
       } else {
         print("file type not recognized")
         showNotification("Input file type not recognized. Use .imzML or .rds/.RData.", type = "error", duration = 8)
         return()
       }
+      if (inherits(add_peaks, "try-error")) {
+        showNotification("Could not read file to add. Try .imzML if this .rds is not compatible.", type = "error", duration = 10)
+        return()
+      }
+      if (!validate_msi_object(add_peaks, context = basename(input$peakAddfile), notify = TRUE)) {
+        return()
+      }
+      log_file_load("file-to-add", input$peakAddfile, add_path, add_peaks)
       # add_peaks <- readImzML(input$peakAddfile)
       # print(add_peaks)
       # 
@@ -731,16 +825,26 @@ PeakPickServer <- function(id, setup_values) {
       #check filename and open accordinlgy
       add_path <- resolve_wd_path(input$peakAddfile)
       if (is_rds_file(input$peakAddfile)) {
-        add_peaks <- readRDS(add_path)
+        message(sprintf("[PeakPick] Loading file-to-add (same peaklist) from .rds | selected='%s' | path='%s'", input$peakAddfile, add_path))
+        add_peaks <- try(readRDS(add_path), silent = TRUE)
         print(add_peaks)
       } else if (is_imzml_file(input$peakAddfile)) {
-        add_peaks <- readImzML(add_path)
+        message(sprintf("[PeakPick] Loading file-to-add (same peaklist) from .imzML | selected='%s' | path='%s'", input$peakAddfile, add_path))
+        add_peaks <- try(readImzML(add_path), silent = TRUE)
         print(add_peaks)
       } else {
         print("file type not recognized")
         showNotification("Input file type not recognized. Use .imzML or .rds/.RData.", type = "error", duration = 8)
         return()
       }
+      if (inherits(add_peaks, "try-error")) {
+        showNotification("Could not read file to add. Try .imzML if this .rds is not compatible.", type = "error", duration = 10)
+        return()
+      }
+      if (!validate_msi_object(add_peaks, context = basename(input$peakAddfile), notify = TRUE)) {
+        return()
+      }
+      log_file_load("file-to-add same-peaklist", input$peakAddfile, add_path, add_peaks)
       
       #browser()
       # add_peaks <- readImzML(input$peakAddfile)
@@ -814,15 +918,32 @@ PeakPickServer <- function(id, setup_values) {
     )       #variable to record plot status for UMAP colors
     observe({
       req(x0$overview_peaks)
-      #browser()
       a <- runNames(isolate(x0$overview_peaks))
-      xmax = NULL
-      ymax = NULL
-      for (i in 1:length(a)) {
-        img.dat <-
-          x0$overview_peaks %>% subsetPixels(Cardinal::run(x0$overview_peaks) %in% a[i])
-        xmax[i] = max(coord(img.dat)$x)
-        ymax[i] = max(coord(img.dat)$y)
+      cd <- try(as.data.frame(coord(x0$overview_peaks)), silent = TRUE)
+      runs_px <- try(as.character(Cardinal::run(x0$overview_peaks)), silent = TRUE)
+      if (inherits(cd, "try-error") || inherits(runs_px, "try-error") || is.null(cd$x) || is.null(cd$y)) {
+        showNotification("Could not parse coordinates from loaded dataset. Try loading the source .imzML file.", type = "error", duration = 10)
+        x2$run_table <- NULL
+        return()
+      }
+      if (length(runs_px) != nrow(cd)) {
+        showNotification("Loaded dataset has mismatched run/coordinate lengths. Try loading the source .imzML file.", type = "error", duration = 10)
+        x2$run_table <- NULL
+        return()
+      }
+      xmax <- numeric(length(a))
+      ymax <- numeric(length(a))
+      for (i in seq_along(a)) {
+        idx <- runs_px %in% a[i]
+        if (!any(idx)) {
+          xmax[i] <- 0
+          ymax[i] <- 0
+        } else {
+          xmax[i] <- suppressWarnings(max(cd$x[idx], na.rm = TRUE))
+          ymax[i] <- suppressWarnings(max(cd$y[idx], na.rm = TRUE))
+          if (!is.finite(xmax[i])) xmax[i] <- 0
+          if (!is.finite(ymax[i])) ymax[i] <- 0
+        }
       }
       
       run_table <-
@@ -873,19 +994,47 @@ PeakPickServer <- function(id, setup_values) {
     
     observe({
       req(x0$overview_peaks)
-      #browser()
+      req(x2$run_table)
       a <- runNames((x0$overview_peaks))
-      b <- list()
-      for (i in 1:length(a)) {
-        tmp <- subsetPixels(x0$overview_peaks,
-                            Cardinal::run(x0$overview_peaks) %in% a[i])
-        b[[i]] <- subsetPixels(
-          tmp,
-          x > x2$run_table$xmin[i] ,
-          x < (x2$run_table$xmax[i] + 1) ,
-          y > x2$run_table$ymin[i],
-          y < (x2$run_table$ymax[i] + 1)
+      cd <- try(as.data.frame(coord(x0$overview_peaks)), silent = TRUE)
+      runs_px <- try(as.character(Cardinal::run(x0$overview_peaks)), silent = TRUE)
+      if (inherits(cd, "try-error") || inherits(runs_px, "try-error") || is.null(cd$x) || is.null(cd$y)) {
+        showNotification("Could not subset loaded dataset for plotting. Try loading the source .imzML file.", type = "error", duration = 10)
+        x2$overview_peaks_sel <- NULL
+        return()
+      }
+      keep <- rep(FALSE, nrow(cd))
+      for (i in seq_along(a)) {
+        rt_i <- match(a[i], x2$run_table$runs)
+        if (is.na(rt_i)) next
+        x_min <- suppressWarnings(as.numeric(x2$run_table$xmin[rt_i]))
+        x_max <- suppressWarnings(as.numeric(x2$run_table$xmax[rt_i]))
+        y_min <- suppressWarnings(as.numeric(x2$run_table$ymin[rt_i]))
+        y_max <- suppressWarnings(as.numeric(x2$run_table$ymax[rt_i]))
+        if (!is.finite(x_min)) x_min <- 0
+        if (!is.finite(x_max)) x_max <- max(cd$x[runs_px %in% a[i]], na.rm = TRUE)
+        if (!is.finite(y_min)) y_min <- 0
+        if (!is.finite(y_max)) y_max <- max(cd$y[runs_px %in% a[i]], na.rm = TRUE)
+        keep <- keep | (
+          runs_px %in% a[i] &
+            cd$x > x_min &
+            cd$x < (x_max + 1) &
+            cd$y > y_min &
+            cd$y < (y_max + 1)
         )
+      }
+      if (!any(keep)) {
+        showNotification("No pixels remain after current run-boundary filters.", type = "warning", duration = 8)
+        x2$overview_peaks_sel <- NULL
+        return()
+      }
+      selected_img <- try(Cardinal::subsetPixels(x0$overview_peaks, keep), silent = TRUE)
+      if (inherits(selected_img, "try-error")) {
+        err_txt <- as.character(selected_img)
+        showNotification("Failed to subset loaded dataset for plotting. Try loading the source .imzML file.", type = "error", duration = 10)
+        message("PeakPick subset failure while building overview selection: ", err_txt)
+        x2$overview_peaks_sel <- NULL
+        return()
       }
       
       #check if freq data is getting lost here
@@ -894,7 +1043,7 @@ PeakPickServer <- function(id, setup_values) {
       #do.call doesn't always work, so lets use the loop to recombine the data
       
       
-      x2$overview_peaks_sel <- combine_card(b)
+      x2$overview_peaks_sel <- selected_img
       
 
       plot_card_server("card_plot", overview_peaks_sel = x2$overview_peaks_sel)
@@ -964,8 +1113,20 @@ PeakPickServer <- function(id, setup_values) {
           #pk_img <- x0$overview_peaks
           #browser()
           #save subset of data
-          pk_img <- x2$overview_peaks_sel[features_sel, ] %>%
-            subsetPixels(Cardinal::run(x2$overview_peaks_sel) %in% runNames(x2$overview_peaks_sel)[input$peak_pick_selection_rows_selected])
+          run_keep <- runNames(x2$overview_peaks_sel)[input$peak_pick_selection_rows_selected]
+          if (is.null(run_keep) || length(run_keep) == 0) {
+            showNotification("No runs selected to save.", type = "warning", duration = 8)
+            return(NULL)
+          }
+          pk_img <- try({
+            x2$overview_peaks_sel[features_sel, ] %>%
+              subsetPixels(Cardinal::run(x2$overview_peaks_sel) %in% run_keep)
+          }, silent = TRUE)
+          if (inherits(pk_img, "try-error")) {
+            showNotification("Could not subset dataset for save. This file may be incompatible; try exporting from .imzML source.", type = "error", duration = 10)
+            message("PeakPick save subset failure: ", as.character(pk_img))
+            return(NULL)
+          }
           #print(pk_img)
           print("saving selected subset of image file")
           print(pk_img)

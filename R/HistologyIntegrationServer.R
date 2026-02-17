@@ -1320,7 +1320,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       if (nrow(save_path) == 0) return(NULL)
 
       filen <- as.character(save_path$datapath)
-      if (!grepl("\\.imzML$", filen, ignore.case = TRUE)) filen <- paste0(filen, ".imzML")
+      # Keep legacy Cardinal folder naming format (no .imzML suffix in folder name).
+      filen <- sub("\\.imzML$", "", filen, ignore.case = TRUE)
 
       obj <- xh$mapped_obj
       writeImzML(obj, filen)

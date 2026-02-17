@@ -91,7 +91,7 @@ HistologyIntegrationUI <- function(id) {
             ),
             uiOutput(ns("mapping_source_ui")),
             actionButton(ns("map_to_pdata"), "Map selected source to pData"),
-            shinyFiles::shinySaveButton(ns("save_mapped_imzml"), "Save mapped imzML", "Save", filetype = list("imzML" = "imzML")),
+            shinyFiles::shinySaveButton(ns("save_mapped_imzml"), "Save mapped imzML", "Save", filetype = list("")),
             tags$hr(),
             uiOutput(ns("pdata_field_ui"))
           )
