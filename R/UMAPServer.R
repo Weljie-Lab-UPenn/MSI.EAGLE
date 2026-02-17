@@ -541,6 +541,8 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
         # K-medoids Clustering
         if ("kmedoids" %in% input$clustering_methods) {
           print("Starting K-medoids clustering")
+          showNotification("Running K-medoids clustering. This method can be slow on large datasets.", type = "message", duration = 8)
+          incProgress(amount = 0, detail = "Running K-medoids (can be slow)")
           tryCatch({
             data_list$kmedoids_umap_separation <- cluster::pam(embeddings, k = n_clusters)
           }, error = function(e) {
@@ -562,29 +564,34 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
         # Model-based Clustering (Mclust)
         if ("mclust" %in% input$clustering_methods) {
           print("Starting model-based clustering (Mclust)")
-          
-          library(mclust)
-          
-          tryCatch({
-            data_list$mclust_umap_separation <- mclust::Mclust(embeddings, G = 1:n_clusters)
-          }, error = function(e) {
-            print(paste("Error in Mclust clustering:", e))
-          })
+          if (!requireNamespace("mclust", quietly = TRUE)) {
+            showNotification("Skipping Mclust clustering: package 'mclust' is not installed.", type = "warning", duration = 8)
+          } else {
+            tryCatch({
+              data_list$mclust_umap_separation <- mclust::Mclust(embeddings, G = 1:n_clusters)
+            }, error = function(e) {
+              print(paste("Error in Mclust clustering:", e))
+            })
+          }
         }
         
         # Self-Organizing Map (SOM) Clustering
         if ("som" %in% input$clustering_methods) {
           print("Starting self-organizing map clustering")
-          tryCatch({
-            scaled_embeddings <- scale(embeddings)
-            som_grid <- kohonen::somgrid(xdim = max(2, round(input$k_clustering/2)), 
-                                         ydim = max(2, round(input$k_clustering/2)), 
-                                         topo = "hexagonal")
-            som_model <- kohonen::som(scaled_embeddings, grid = som_grid, rlen = 100)
-            data_list$som_umap_separation <- som_model
-          }, error = function(e) {
-            print(paste("Error in SOM clustering:", e))
-          })
+          if (!requireNamespace("kohonen", quietly = TRUE)) {
+            showNotification("Skipping SOM clustering: package 'kohonen' is not installed.", type = "warning", duration = 8)
+          } else {
+            tryCatch({
+              scaled_embeddings <- scale(embeddings)
+              som_grid <- kohonen::somgrid(xdim = max(2, round(input$k_clustering/2)), 
+                                           ydim = max(2, round(input$k_clustering/2)), 
+                                           topo = "hexagonal")
+              som_model <- kohonen::som(scaled_embeddings, grid = som_grid, rlen = 100)
+              data_list$som_umap_separation <- som_model
+            }, error = function(e) {
+              print(paste("Error in SOM clustering:", e))
+            })
+          }
         }
         
         # Spherical K-means Clustering
@@ -676,51 +683,54 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
         
         # Assign colors to clustering results
         assign_colors <- function(clusters) {
+          if (is.null(clusters) || length(clusters) == 0) {
+            return(NULL)
+          }
           cols <- max_col(clusters, pc_color_name)
           colored_clusters <- cols[as.character(clusters)]
           return(colored_clusters)
         }
         
         # For each clustering method, assign colors
-        if ("kmeans" %in% input$clustering_methods) {
+        if ("kmeans" %in% input$clustering_methods && !is.null(data_list$kmeans_umap_separation$cluster)) {
           data_list$kmeans_umap_separation$cluster <- assign_colors(data_list$kmeans_umap_separation$cluster)
         }
         
-        if ("hierarchical" %in% input$clustering_methods) {
+        if ("hierarchical" %in% input$clustering_methods && !is.null(data_list$hierarchical_umap_separation)) {
           data_list$hierarchical_umap_separation <- assign_colors(data_list$hierarchical_umap_separation)
         }
         
-        if ("dbscan" %in% input$clustering_methods) {
+        if ("dbscan" %in% input$clustering_methods && !is.null(data_list$dbscan_umap_separation$cluster)) {
           data_list$dbscan_umap_separation$cluster <- assign_colors(data_list$dbscan_umap_separation$cluster)
         }
         
-        if ("hdbscan" %in% input$clustering_methods) {
+        if ("hdbscan" %in% input$clustering_methods && !is.null(data_list$hdbscan_umap_separation$cluster)) {
           data_list$hdbscan_umap_separation$cluster <- assign_colors(data_list$hdbscan_umap_separation$cluster)
         }
         
-        if ("spectral" %in% input$clustering_methods) {
+        if ("spectral" %in% input$clustering_methods && !is.null(data_list$spectral_umap_separation$cluster)) {
           data_list$spectral_umap_separation$cluster <- assign_colors(data_list$spectral_umap_separation$cluster)
         }
         
-        if ("kmedoids" %in% input$clustering_methods) {
+        if ("kmedoids" %in% input$clustering_methods && !is.null(data_list$kmedoids_umap_separation$clustering)) {
           data_list$kmedoids_umap_separation$clustering <- assign_colors(data_list$kmedoids_umap_separation$clustering)
         }
         
-        if ("fuzzy" %in% input$clustering_methods) {
+        if ("fuzzy" %in% input$clustering_methods && !is.null(data_list$fuzzy_umap_separation$membership)) {
           # For fuzzy clustering, get hard assignments
           fuzzy_clusters <- apply(data_list$fuzzy_umap_separation$membership, 1, which.max)
           data_list$fuzzy_umap_separation$cluster <- assign_colors(fuzzy_clusters)
         }
         
-        if ("mclust" %in% input$clustering_methods) {
+        if ("mclust" %in% input$clustering_methods && !is.null(data_list$mclust_umap_separation$classification)) {
           data_list$mclust_umap_separation$classification <- assign_colors(data_list$mclust_umap_separation$classification)
         }
         
-        if ("som" %in% input$clustering_methods) {
+        if ("som" %in% input$clustering_methods && !is.null(data_list$som_umap_separation$unit.classif)) {
           data_list$som_umap_separation$unit.classif <- assign_colors(data_list$som_umap_separation$unit.classif)
         }
         
-        if ("skmeans" %in% input$clustering_methods) {
+        if ("skmeans" %in% input$clustering_methods && !is.null(data_list$skmeans_umap_separation$cluster)) {
           data_list$skmeans_umap_separation$cluster <- assign_colors(data_list$skmeans_umap_separation$cluster)
         }
         
@@ -835,6 +845,8 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
         # K-medoids Clustering
         if ("kmedoids" %in% input$clustering_methods) {
           print("Re-running K-medoids clustering")
+          showNotification("Re-running K-medoids clustering. This method can be slow on large datasets.", type = "message", duration = 8)
+          incProgress(amount = 0, detail = "Running K-medoids (can be slow)")
           tryCatch({
             data_list$kmedoids_umap_separation <- cluster::pam(embeddings, k = input$k_clustering)
           }, error = function(e) {
@@ -855,29 +867,34 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
         # Model-based Clustering (Mclust)
         if ("mclust" %in% input$clustering_methods) {
           print("Re-running model-based clustering (Mclust)")
-          
-          library(mclust)
-          
-          tryCatch({
-            data_list$mclust_umap_separation <- mclust::Mclust(embeddings, G = 1:input$k_clustering)
-          }, error = function(e) {
-            print(paste("Error in Mclust clustering:", e))
-          })
+          if (!requireNamespace("mclust", quietly = TRUE)) {
+            showNotification("Skipping Mclust clustering: package 'mclust' is not installed.", type = "warning", duration = 8)
+          } else {
+            tryCatch({
+              data_list$mclust_umap_separation <- mclust::Mclust(embeddings, G = 1:input$k_clustering)
+            }, error = function(e) {
+              print(paste("Error in Mclust clustering:", e))
+            })
+          }
         }
         
         # Self-Organizing Map (SOM) Clustering
         if ("som" %in% input$clustering_methods) {
           print("Re-running self-organizing map clustering")
-          tryCatch({
-            scaled_embeddings <- scale(embeddings)
-            som_grid <- kohonen::somgrid(xdim = max(2, round(input$k_clustering/2)), 
-                                         ydim = max(2, round(input$k_clustering/2)), 
-                                         topo = "hexagonal")
-            som_model <- kohonen::som(scaled_embeddings, grid = som_grid, rlen = 100)
-            data_list$som_umap_separation <- som_model
-          }, error = function(e) {
-            print(paste("Error in SOM clustering:", e))
-          })
+          if (!requireNamespace("kohonen", quietly = TRUE)) {
+            showNotification("Skipping SOM clustering: package 'kohonen' is not installed.", type = "warning", duration = 8)
+          } else {
+            tryCatch({
+              scaled_embeddings <- scale(embeddings)
+              som_grid <- kohonen::somgrid(xdim = max(2, round(input$k_clustering/2)), 
+                                           ydim = max(2, round(input$k_clustering/2)), 
+                                           topo = "hexagonal")
+              som_model <- kohonen::som(scaled_embeddings, grid = som_grid, rlen = 100)
+              data_list$som_umap_separation <- som_model
+            }, error = function(e) {
+              print(paste("Error in SOM clustering:", e))
+            })
+          }
         }
         
         # Spherical K-means Clustering
@@ -948,51 +965,54 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
         
         # Assign colors to clustering results
         assign_colors <- function(clusters) {
+          if (is.null(clusters) || length(clusters) == 0) {
+            return(NULL)
+          }
           cols <- max_col(clusters, pc_color_name)
           colored_clusters <- cols[as.character(clusters)]
           return(colored_clusters)
         }
         
         # For each clustering method, assign colors
-        if ("kmeans" %in% input$clustering_methods) {
+        if ("kmeans" %in% input$clustering_methods && !is.null(data_list$kmeans_umap_separation$cluster)) {
           data_list$kmeans_umap_separation$cluster <- assign_colors(data_list$kmeans_umap_separation$cluster)
         }
         
-        if ("hierarchical" %in% input$clustering_methods) {
+        if ("hierarchical" %in% input$clustering_methods && !is.null(data_list$hierarchical_umap_separation)) {
           data_list$hierarchical_umap_separation <- assign_colors(data_list$hierarchical_umap_separation)
         }
         
-        if ("dbscan" %in% input$clustering_methods) {
+        if ("dbscan" %in% input$clustering_methods && !is.null(data_list$dbscan_umap_separation$cluster)) {
           data_list$dbscan_umap_separation$cluster <- assign_colors(data_list$dbscan_umap_separation$cluster)
         }
         
-        if ("hdbscan" %in% input$clustering_methods) {
+        if ("hdbscan" %in% input$clustering_methods && !is.null(data_list$hdbscan_umap_separation$cluster)) {
           data_list$hdbscan_umap_separation$cluster <- assign_colors(data_list$hdbscan_umap_separation$cluster)
         }
         
-        if ("spectral" %in% input$clustering_methods) {
+        if ("spectral" %in% input$clustering_methods && !is.null(data_list$spectral_umap_separation$cluster)) {
           data_list$spectral_umap_separation$cluster <- assign_colors(data_list$spectral_umap_separation$cluster)
         }
         
-        if ("kmedoids" %in% input$clustering_methods) {
+        if ("kmedoids" %in% input$clustering_methods && !is.null(data_list$kmedoids_umap_separation$clustering)) {
           data_list$kmedoids_umap_separation$clustering <- assign_colors(data_list$kmedoids_umap_separation$clustering)
         }
         
-        if ("fuzzy" %in% input$clustering_methods) {
+        if ("fuzzy" %in% input$clustering_methods && !is.null(data_list$fuzzy_umap_separation$membership)) {
           # For fuzzy clustering, get hard assignments
           fuzzy_clusters <- apply(data_list$fuzzy_umap_separation$membership, 1, which.max)
           data_list$fuzzy_umap_separation$cluster <- assign_colors(fuzzy_clusters)
         }
         
-        if ("mclust" %in% input$clustering_methods) {
+        if ("mclust" %in% input$clustering_methods && !is.null(data_list$mclust_umap_separation$classification)) {
           data_list$mclust_umap_separation$classification <- assign_colors(data_list$mclust_umap_separation$classification)
         }
         
-        if ("som" %in% input$clustering_methods) {
+        if ("som" %in% input$clustering_methods && !is.null(data_list$som_umap_separation$unit.classif)) {
           data_list$som_umap_separation$unit.classif <- assign_colors(data_list$som_umap_separation$unit.classif)
         }
         
-        if ("skmeans" %in% input$clustering_methods) {
+        if ("skmeans" %in% input$clustering_methods && !is.null(data_list$skmeans_umap_separation$cluster)) {
           data_list$skmeans_umap_separation$cluster <- assign_colors(data_list$skmeans_umap_separation$cluster)
         }
         
@@ -1024,8 +1044,15 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
         "spectral" = x2$data_list$spectral_umap_separation$cluster,
         "kmedoids" = x2$data_list$kmedoids_umap_separation$clustering,
         "fuzzy" = {
-          # For fuzzy c-means clustering, extract hard cluster assignments
-          apply(x2$data_list$fuzzy_umap_separation$membership, 1, which.max)
+          if (!is.null(x2$data_list$fuzzy_umap_separation$cluster) &&
+              length(x2$data_list$fuzzy_umap_separation$cluster) > 0) {
+            x2$data_list$fuzzy_umap_separation$cluster
+          } else if (!is.null(x2$data_list$fuzzy_umap_separation$membership)) {
+            # Fallback to hard assignments if colorized labels are not present.
+            apply(x2$data_list$fuzzy_umap_separation$membership, 1, which.max)
+          } else {
+            rep("grey70", nrow(x2$data_list$umap_separation$umap_out))
+          }
         },
         "mclust" = x2$data_list$mclust_umap_separation$classification,
         "som" = x2$data_list$som_umap_separation$unit.classif,
@@ -1584,13 +1611,24 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
         # #New plottign code:
         #Helper function to generate color map plots; 'a' is the color vector
         plot_col_map <- function(a, titles = "plot") {
-          if (is.null(a) || length(unique(a)) == 1) {
-            # If 'a' is NULL or has only one unique value, skip this plot
+          if (is.null(a)) {
+            return(NULL)
+          }
+          if (is.matrix(a) || is.data.frame(a)) a <- as.vector(a)
+          if (is.list(a)) a <- unlist(a, use.names = FALSE)
+          a <- as.character(a)
+          a <- a[!is.na(a) & nzchar(a)]
+          if (length(a) < 2 || length(unique(a)) < 2) {
+            # If 'a' is empty or has only one unique value, skip this plot.
             return(NULL)
           }
           
-          b <- data.frame(table(a))
-          colnames(b) <- c("color", "Freq")
+          freq_tab <- sort(table(a), decreasing = TRUE)
+          b <- data.frame(
+            color = names(freq_tab),
+            Freq = as.numeric(freq_tab),
+            stringsAsFactors = FALSE
+          )
           
           p1 <- ggplot2::ggplot(b, ggplot2::aes(x = color, y = log(Freq))) +
             ggplot2::geom_col(fill = b$color) +
@@ -1616,7 +1654,9 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
         # First, add the Reduced R colors plot
         col_red <- x2$data_list$umap_separation$col_reduced
         p_red <- plot_col_map(col_red, titles = "Reduced R colors")
-        plot_list <- c(plot_list, list(p_red))
+        if (!is.null(p_red)) {
+          plot_list <- c(plot_list, list(p_red))
+        }
         
         # Define a list of clustering methods and their corresponding data paths and titles
         clustering_methods <- list(
@@ -1645,7 +1685,11 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
             title = "K-medoids Clusters"
           ),
           "fuzzy" = list(
-            data = if (!is.null(x2$data_list$fuzzy_umap_separation)) x2$data_list$fuzzy_umap_separation$membership else NULL,
+            data = if (!is.null(x2$data_list$fuzzy_umap_separation$cluster)) {
+              x2$data_list$fuzzy_umap_separation$cluster
+            } else if (!is.null(x2$data_list$fuzzy_umap_separation$membership)) {
+              apply(x2$data_list$fuzzy_umap_separation$membership, 1, which.max)
+            } else NULL,
             title = "Fuzzy C-means Clusters"
           ),
           "mclust" = list(
@@ -1667,12 +1711,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
         for (method_name in names(clustering_methods)) {
           method <- clustering_methods[[method_name]]
           col_cluster <- method$data
-          if (!is.null(col_cluster)) {
-            # Special handling for Fuzzy C-means clustering to get hard assignments
-            if (method_name == "fuzzy" && !is.null(col_cluster)) {
-              col_cluster <- apply(col_cluster, 1, which.max)
-            }
-            
+          if (!is.null(col_cluster) && length(col_cluster) > 0) {
             # Create the plot only if the result is valid (not NULL)
             p <- plot_col_map(col_cluster, titles = method$title)
             
@@ -1684,10 +1723,12 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
         
         # Arrange the plots in a grid
         n_plots <- length(plot_list)
-        n_cols <- 3  # Number of columns in the grid
-        n_rows <- ceiling(n_plots / n_cols)
-        
-        print(do.call(gridExtra::grid.arrange, c(plot_list, ncol = n_cols)))
+        if (n_plots == 0) {
+          draw_empty_plot("No clustering color maps are available yet.")
+        } else {
+          n_cols <- 3  # Number of columns in the grid
+          print(do.call(gridExtra::grid.arrange, c(plot_list, ncol = n_cols)))
+        }
       }
       
       dev.off()
