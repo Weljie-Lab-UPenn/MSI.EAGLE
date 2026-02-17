@@ -32,6 +32,17 @@ MaskedAnalysisServer <- function(id,  setup_values) {
     # store as a reactive instead of output
     my_files <-
       reactivePoll(10, session, checkFunc = has.new.files, valueFunc = get.files)
+
+    segmentation_file_choices <- reactive({
+      files <- my_files()
+      files <- files[!is.na(files) & nzchar(files)]
+      files[grepl("\\.(imzML|rds)$", basename(files), ignore.case = TRUE)]
+    })
+    resolve_wd_path <- function(path) {
+      if (is.null(path) || !nzchar(path)) return(path)
+      if (grepl("^(/|[A-Za-z]:[\\\\/])", path)) return(path)
+      file.path(setup_values()[["wd"]], path)
+    }
     
     # any time the reactive changes, update the selectInput
 
@@ -48,13 +59,8 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                    # ))
                    updateSelectInput(
                      session,
-                     ns('peakPickfile'),
-                     choices = grep(
-                       ".imzML",
-                       my_files(),
-                       ignore.case = T,
-                       value = T
-                     )
+                     ns("segmentation_file"),
+                     choices = segmentation_file_choices()
                    )
                  })
     
@@ -72,12 +78,7 @@ MaskedAnalysisServer <- function(id,  setup_values) {
       selectInput(
         ns("segmentation_file"),
         "Imageset with masked coordinates",
-        grep(
-          "imzML",
-          my_files(),
-          ignore.case = T,
-          value = T
-        )
+        segmentation_file_choices()
       )
     })
     
@@ -175,7 +176,22 @@ MaskedAnalysisServer <- function(id,  setup_values) {
         return()
       }
       
-      x4$seg_file <- readImzML(input$segmentation_file)
+      seg_path <- resolve_wd_path(input$segmentation_file)
+      if (grepl("\\.rds$", basename(input$segmentation_file), ignore.case = TRUE)) {
+        x4$seg_file <- readRDS(seg_path)
+      } else if (grepl("\\.imzML$", basename(input$segmentation_file), ignore.case = TRUE)) {
+        x4$seg_file <- readImzML(seg_path)
+      } else {
+        showNotification("Please select a valid .imzML or .rds file.", type = "error", duration = 8)
+        return()
+      }
+      if (inherits(x4$seg_file, "MSImagingArrays")) {
+        x4$seg_file <- convertMSImagingArrays2Experiment(x4$seg_file)
+      }
+      if (!inherits(x4$seg_file, "MSImagingExperiment")) {
+        showNotification("Selected file does not contain a valid MSI imaging object.", type = "error", duration = 8)
+        return()
+      }
       print(x4$seg_file)
       x4$seg_filename = input$segmentation_file
       
@@ -249,7 +265,7 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                      
                      #extract only runs available in raw list
                      
-                     names(x1$raw_list) <- gsub(".imzML", "", names(x1$raw_list))
+                     names(x1$raw_list) <- gsub("\\.imzML$", "", names(x1$raw_list), ignore.case = TRUE)
                      
                      #check to make sure names in x4$seg_file are in names of x1$raw_list
                      if (sum(runNames(x4$seg_file) %in% names(x1$raw_list)) < 1) {

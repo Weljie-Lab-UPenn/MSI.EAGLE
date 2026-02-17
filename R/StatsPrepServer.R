@@ -24,21 +24,26 @@ StatsPrepServer <- function(id,  setup_values) {
     my_files <-
       reactivePoll(10, session, checkFunc = has.new.files, valueFunc = get.files)
     
+    stats_file_choices <- reactive({
+      files <- my_files()
+      files <- files[!is.na(files) & nzchar(files)]
+      files[grepl("\\.(imzML|rds)$", basename(files), ignore.case = TRUE)]
+    })
+    resolve_wd_path <- function(path) {
+      if (is.null(path) || !nzchar(path)) return(path)
+      if (grepl("^(/|[A-Za-z]:[\\\\/])", path)) return(path)
+      file.path(setup_values()[["wd"]], path)
+    }
+
     # any time the reactive changes, update the selectInput
     observeEvent(my_files(),
                  ignoreInit = T,
                  ignoreNULL = T,
                  {
-                   #print(grep("rds|RData", my_files(), ignore.case =T, value=T  ))
                    updateSelectInput(
                      session,
-                     ns('peakPickfile'),
-                     choices = grep(
-                       "rds|RData|imzML$",
-                       my_files(),
-                       ignore.case = T,
-                       value = T
-                     )
+                     ns("stats_input_file"),
+                     choices = stats_file_choices()
                    )
                  })
     
@@ -154,12 +159,7 @@ StatsPrepServer <- function(id,  setup_values) {
       selectInput(
         ns("stats_input_file"),
         "Imageset for analysis",
-        grep(
-          "imzML$|rds|RData",
-          my_files(),
-          ignore.case = T,
-          value = T
-        )
+        stats_file_choices()
       )
     })
     
@@ -170,13 +170,16 @@ StatsPrepServer <- function(id,  setup_values) {
       
      
       
-      if(length(grep("rds", input$stats_input_file)>0)) {
-      
-        x5$data_file <- readRDS(input$stats_input_file)
+      input_path <- resolve_wd_path(input$stats_input_file)
+      if (grepl("\\.rds$", basename(input$stats_input_file), ignore.case = TRUE)) {
+        x5$data_file <- readRDS(input_path)
+      } else if (grepl("\\.imzML$", basename(input$stats_input_file), ignore.case = TRUE)) {
+        x5$data_file <- readMSIData(input_path)
+        #x5$data_file <- readImzML(input_path)
       } else {
-        x5$data_file <- readMSIData(input$stats_input_file)
-        #x5$data_file <- readImzML(input$stats_input_file)
-        }
+        showNotification("Please select a valid .imzML or .rds file.", type = "error", duration = 8)
+        return(NULL)
+      }
       print(x5$data_file)
       
       if (!is.na(input$debug_n)) {
@@ -355,11 +358,18 @@ StatsPrepServer <- function(id,  setup_values) {
         
         # Get the data set with the appropriate name
         # Create the checkboxes and select them all by default
-        
+        choices <- c("none", 1, x5$phen_options)
+        selected_vals <- isolate(input$phen_interaction_stats)
+        if (is.null(selected_vals) || length(selected_vals) == 0) {
+          selected_vals <- if ("run" %in% choices) "run" else NULL
+        }
+        selected_vals <- intersect(as.character(selected_vals), as.character(choices))
+
         selectInput(
           ns("phen_interaction_stats"),
           "Choose sample definition variable(s)",
-          choices  = c("none", 1, x5$phen_options),
+          choices  = choices,
+          selected = selected_vals,
           multiple = T
         )
       })
@@ -606,6 +616,8 @@ StatsPrepServer <- function(id,  setup_values) {
         } else {
           group_var = input$phen_interaction_stats
         }
+        group_var <- as.character(group_var)
+        group_var <- group_var[!is.na(group_var) & nzchar(group_var)]
         
         # if(!is.null(group_var) && group_var=='none'){
         #   group_var=input$phen_cols_stats
@@ -617,9 +629,10 @@ StatsPrepServer <- function(id,  setup_values) {
         #   print("Test variable in Grouping variable(s), exiting")
         #   return()
         # }else
-        if (sum(group_var %in% "1") == 1) {
+        if (length(group_var) == 1 && sum(group_var %in% "1") == 1) {
           groupsx = 1
         } else if (input$stats_test == "anova" &&
+                   length(group_var) == 1 &&
                    sum(group_var %in% "none") > 0) {
           groupsx = "none"
         } else if (input$stats_test != "anova" &&
@@ -627,31 +640,26 @@ StatsPrepServer <- function(id,  setup_values) {
           message("must have grouping for this test. Exiting.")
           return(NULL)
         } else{
-          grouping = as.data.frame(pData(x5$data_file_selected))[, group_var]
-          if (is.factor(grouping)) {
-            groupsx = droplevels(as.data.frame(pData(x5$data_file_selected))[, group_var])
-          } else {
-            message(
-              "grouping variable is not a factor-- do you need to create an interaction term?"
+          grouping <- as.data.frame(pData(x5$data_file_selected))[, group_var, drop = FALSE]
+          if (ncol(grouping) == 0) {
+            message("must have value for grouping, or 'none' (for ANOVA)")
+            showNotification(
+              "must have value for grouping, or can have 'none' (for ANOVA)",
+              type = "error",
+              duration = 10
             )
-            
-            if (length(grouping) == 0) {
-              message("must have value for grouping, or 'none' (for ANOVA)")
-              showNotification(
-                "must have value for grouping, or can have 'none' (for ANOVA)",
-                type = "error",
-                duration = 10
-              )
-              return(NULL)
-            }
-            message("continuing by creating a factor. Check the output carefully!")
-            #if interaction(grouping is numeric, create factor)
-            # if(all(grepl("^[0-9]+$", (grouping[1,])))) {
-            #   groupsx = droplevels(as.factor(paste0("X.", interaction(grouping))))
-            # } else {
-              #groupsx = droplevels(as.factor(interaction(grouping)
-            groupsx = droplevels(as.factor(interaction(grouping)))
-           }
+            return(NULL)
+          }
+          if (ncol(grouping) == 1) {
+            groupsx <- grouping[[1]]
+          } else {
+            groupsx <- interaction(grouping, drop = TRUE)
+          }
+          groupsx <- droplevels(as.factor(groupsx))
+          if (all(is.na(groupsx))) {
+            showNotification("All sample-definition values are NA after filtering.", type = "error", duration = 10)
+            return(NULL)
+          }
         }
         x5$groupsx <- groupsx
         print("groups done")
@@ -669,16 +677,17 @@ StatsPrepServer <- function(id,  setup_values) {
             pData(x5$data_file_selected)$run <- run(x5$data_file_selected)
           }
           
-          # Convert input$phen_cols_stats to factor in dataset
-          tmp <- as.data.frame(pData(x5$data_file_selected)[, input$phen_cols_stats])
-          tmp_chr <- as.character(tmp[, 1])
-          tmp_non_na <- tmp_chr[!is.na(tmp_chr)]
-          if (length(tmp_non_na) > 0 && all(grepl("^[0-9]+$", tmp_non_na))) {
-            pData(x5$data_file_selected)[, input$phen_cols_stats] <-
-              droplevels(factor(paste0("X.", tmp_chr)))
+          ph <- input$phen_cols_stats
+          ph_vec <- as.character(as.data.frame(pData(x5$data_file_selected))[[ph]])
+          ph_non_na <- ph_vec[!is.na(ph_vec)]
+          if (length(ph_non_na) == 0) {
+            showNotification("Test variable has only NA values after filtering.", type = "error", duration = 10)
+            return(NULL)
+          }
+          if (all(grepl("^[0-9]+$", ph_non_na))) {
+            pData(x5$data_file_selected)[, ph] <- droplevels(factor(paste0("X.", ph_vec)))
           } else {
-            pData(x5$data_file_selected)[, input$phen_cols_stats] <-
-              droplevels(factor(as.data.frame(pData(x5$data_file_selected))[, input$phen_cols_stats]))
+            pData(x5$data_file_selected)[, ph] <- droplevels(factor(ph_vec))
           }
           
           # Detect pixel-level grouping (single pixel per group / coordinate grouping).
@@ -737,42 +746,294 @@ StatsPrepServer <- function(id,  setup_values) {
               return(NULL)
             }
             
-            ph <- input$phen_cols_stats
-            tmp <- pData(x5$data_file_selected)[, ph][, 1]
-            tmp_chr <- as.character(tmp)
-            tmp_non_na <- tmp_chr[!is.na(tmp_chr)]
-            if (length(tmp_non_na) > 0 && all(grepl("^[0-9]+$", tmp_non_na))) {
-              pData(x5$data_file_selected)[, ph] <- droplevels(factor(paste0("X.", tmp_chr)))
-            } else {
-              pData(x5$data_file_selected)[, ph] <- droplevels(factor(tmp))
+            # Ensure each sample has a non-missing phenotype label at sample-level.
+            ph_by_pixel <- as.character(pData(x5$data_file_selected)[, ph][, 1])
+            sample_ph <- tapply(ph_by_pixel, g, function(z) {
+              z <- z[!is.na(z)]
+              if (length(z) == 0) {
+                return(NA_character_)
+              }
+              names(sort(table(z), decreasing = TRUE))[1]
+            })
+            bad_samples <- names(sample_ph)[is.na(sample_ph)]
+            if (length(bad_samples) > 0) {
+              keep_mask <- !(as.character(g) %in% bad_samples)
+              x5$data_file_selected <- x5$data_file_selected[, keep_mask]
+              g <- droplevels(factor(as.character(g[keep_mask])))
+              x5$groupsx <- as.character(g)
+              showNotification(
+                sprintf("Dropped %d samples with missing phenotype labels.", length(bad_samples)),
+                type = "warning",
+                duration = 8
+              )
+            }
+            if (ncol(x5$data_file_selected) == 0 || length(g) == 0 || nlevels(g) < 2) {
+              showNotification("No valid sample groups remain for means test after filtering.", type = "error", duration = 10)
+              return(NULL)
             }
             
-            mt <- try(meansTest(
-              x5$data_file_selected,
-              as.formula(paste0("~", ph)),
-              samples = g
-            ))
+            sample_ph <- sample_ph[!is.na(sample_ph)]
+            if (length(unique(sample_ph)) < 2) {
+              showNotification("Need at least two phenotype groups at sample-level for means test.", type = "error", duration = 10)
+              return(NULL)
+            }
+            sample_counts <- table(sample_ph)
+            if (any(sample_counts < 2)) {
+              showNotification("One or more phenotype groups have <2 samples; results may be unstable.", type = "warning", duration = 8)
+            }
             
-            if (class(mt) %in% "try-error") {
+            # Build minimal test inputs to avoid unexpected metadata coercion.
+            dat_for_mt <- x5$data_file_selected
+            pData(dat_for_mt) <- PositionDataFrame(
+              coord(dat_for_mt),
+              run = run(dat_for_mt),
+              .test_group = factor(ph_by_pixel)
+            )
+            intensity_mat <- spectra(dat_for_mt, "intensity")
+            feature_map <- as.data.frame(fData(dat_for_mt))
+            feature_map$.feature_idx <- seq_len(nrow(feature_map))
+            feature_map$.feature_label <- paste0("f", feature_map$.feature_idx)
+            rownames(intensity_mat) <- feature_map$.feature_label
+            test_data <- data.frame(.test_group = factor(ph_by_pixel))
+            
+            # Probe sample-level aggregation for each pData field; useful when meansTest fails.
+            avg_fun <- get("avg", envir = asNamespace("matter"))
+            probe_pdata <- as.data.frame(pData(dat_for_mt))
+            agg_probe <- lapply(names(probe_pdata), function(nm) {
+              v <- probe_pdata[[nm]]
+              agg <- try(unlist(unname(tapply(v, g, avg_fun, simplify = FALSE))), silent = TRUE)
+              data.frame(
+                variable = nm,
+                class = paste(class(v), collapse = "/"),
+                n_input = length(v),
+                n_agg = if (inherits(agg, "try-error")) NA_integer_ else length(agg),
+                n_na_input = sum(is.na(v)),
+                error = if (inherits(agg, "try-error")) as.character(agg)[1] else NA_character_,
+                stringsAsFactors = FALSE
+              )
+            })
+            agg_probe <- do.call(rbind, agg_probe)
+            
+            run_means_fallback <- function(reason = "fallback") {
+              # Robustly aggregate pixels to sample-level means by explicit group index.
+              # This avoids method-dispatch issues seen with rowStats(group=...).
+              idx_split <- split(seq_along(g), g, drop = TRUE)
+              if (length(idx_split) == 0) {
+                return(list(ok = FALSE, error = "No sample groups available for aggregation"))
+              }
+              
+              y_by_sample <- try({
+                out <- matrix(
+                  NA_real_,
+                  nrow = nrow(intensity_mat),
+                  ncol = length(idx_split),
+                  dimnames = list(rownames(intensity_mat), names(idx_split))
+                )
+                for (jj in seq_along(idx_split)) {
+                  idx <- idx_split[[jj]]
+                  block <- intensity_mat[, idx, drop = FALSE]
+                  vals <- try(rowMeans(block, na.rm = TRUE), silent = TRUE)
+                  if (inherits(vals, "try-error")) {
+                    vals <- rowMeans(as.matrix(block), na.rm = TRUE)
+                  }
+                  out[, jj] <- as.numeric(vals)
+                }
+                out
+              }, silent = TRUE)
+              if (inherits(y_by_sample, "try-error")) {
+                return(list(ok = FALSE, error = paste("group aggregation failed:", as.character(y_by_sample))))
+              }
+              
+              if (ncol(y_by_sample) != length(idx_split)) {
+                return(list(
+                  ok = FALSE,
+                  error = sprintf("Unexpected sample matrix shape: %d x %d (expected ncol=%d)", nrow(y_by_sample), ncol(y_by_sample), length(idx_split))
+                ))
+              }
+              
+              sample_levels <- colnames(y_by_sample)
+              ph_by_sample <- as.character(sample_ph[sample_levels])
+              keep_samples <- !is.na(ph_by_sample)
+              y_by_sample <- y_by_sample[, keep_samples, drop = FALSE]
+              grp <- droplevels(factor(ph_by_sample[keep_samples]))
+              if (nlevels(grp) < 2 || ncol(y_by_sample) <= nlevels(grp)) {
+                return(list(ok = FALSE, error = "Insufficient sample-level replication after aggregation"))
+              }
+              
+              fit_one_feature <- function(yv) {
+                ok <- is.finite(yv) & !is.na(grp)
+                grp_ok <- droplevels(grp[ok])
+                y_ok <- yv[ok]
+                if (length(y_ok) <= nlevels(grp_ok) || nlevels(grp_ok) < 2) {
+                  return(c(statistic = NA_real_, pvalue = NA_real_))
+                }
+                aov_tab <- try(anova(lm(y_ok ~ grp_ok)), silent = TRUE)
+                if (inherits(aov_tab, "try-error") || nrow(aov_tab) < 1) {
+                  return(c(statistic = NA_real_, pvalue = NA_real_))
+                }
+                c(
+                  statistic = as.numeric(aov_tab[1, "F value"]),
+                  pvalue = as.numeric(aov_tab[1, "Pr(>F)"])
+                )
+              }
+              
+              stat_mat <- t(apply(y_by_sample, 1, fit_one_feature))
+              stats_results <- as.data.frame(stat_mat, stringsAsFactors = FALSE)
+              stats_results$pvalue <- as.numeric(stats_results$pvalue)
+              stats_results$statistic <- as.numeric(stats_results$statistic)
+              stats_results$fdr <- p.adjust(stats_results$pvalue, method = "BH")
+              stats_results$i <- feature_map$.feature_idx
+              if ("mz" %in% colnames(feature_map)) {
+                stats_results$mz <- feature_map$mz
+              } else {
+                stats_results$mz <- NA_real_
+              }
+              if ("ID" %in% colnames(feature_map)) {
+                stats_results$ID <- feature_map$ID
+              }
+              if ("ID" %in% colnames(stats_results)) {
+                stats_results <- stats_results %>% dplyr::select(i, mz, ID, statistic, pvalue, fdr)
+              } else {
+                stats_results <- stats_results %>% dplyr::select(i, mz, statistic, pvalue, fdr)
+              }
+              stats_results <- stats_results %>% dplyr::arrange(pvalue)
+              
+              list(
+                ok = TRUE,
+                stats_results = stats_results,
+                model = list(
+                  method = "lm_fallback",
+                  reason = reason,
+                  n_sample_levels = nlevels(grp),
+                  group_levels = levels(grp)
+                )
+              )
+            }
+            
+            mt <- NULL
+            stats_results <- NULL
+            fallback_used <- FALSE
+            
+            # Cardinal meansTest can become unstable with very large sample-level groups.
+            if (nlevels(g) > 500) {
+              fb_pre <- run_means_fallback(reason = "high_sample_count_preemptive")
+              if (isTRUE(fb_pre$ok)) {
+                fallback_used <- TRUE
+                stats_results <- fb_pre$stats_results
+                x5$test_result <- fb_pre$model
+                showNotification(
+                  sprintf("Using robust fallback means test for %d sample groups.", nlevels(g)),
+                  type = "warning",
+                  duration = 10
+                )
+              } else {
+                message("Preemptive fallback failed: ", fb_pre$error)
+              }
+            }
+            
+            if (!fallback_used) {
+              mt <- try(meansTest(
+                intensity_mat,
+                data = test_data,
+                fixed = ~ .test_group,
+                byrow = TRUE,
+                samples = g
+              ), silent = TRUE)
+            }
+            
+            if (!fallback_used && inherits(mt, "try-error")) {
+              err_text <- gsub("\\s+$", "", gsub("^Error\\s*:?\\s*", "", as.character(mt)))
               print("meanstest failed. check data and data size")
-              showNotification("meanstest failed. check data and data size", type = "error")
-              print(table(interaction(groupsx, as.data.frame(pData(x5$data_file_selected))[, input$phen_cols_stats])))
-              print(table(as.data.frame(pData(x5$data_file_selected))[, input$phen_cols_stats]))
-              message("means test failed")
-              return()
+              showNotification(paste0("meanstest failed: ", err_text), type = "error", duration = 12)
+              print("sample counts (top 20):")
+              print(utils::head(sort(table(g), decreasing = TRUE), 20))
+              print("phenotype counts:")
+              print(sort(table(as.character(pData(x5$data_file_selected)[, ph][, 1]), useNA = "ifany"), decreasing = TRUE))
+              print("aggregation probe:")
+              print(agg_probe)
+              
+              debug_dir <- tryCatch(setup_values()[["wd"]], error = function(e) NULL)
+              if (is.null(debug_dir) || !dir.exists(debug_dir)) {
+                debug_dir <- tempdir()
+              }
+              debug_path <- file.path(
+                debug_dir,
+                sprintf("meanstest_debug_%s.rds", format(Sys.time(), "%Y%m%d_%H%M%S"))
+              )
+              debug_obj <- list(
+                error = err_text,
+                stats_test = input$stats_test,
+                phenotype_var = ph,
+                sample_definition = group_var,
+                n_pixels = ncol(x5$data_file_selected),
+                n_features = nrow(x5$data_file_selected),
+                n_samples = length(g),
+                n_sample_levels = nlevels(g),
+                sample_counts = sort(table(g), decreasing = TRUE),
+                phenotype_counts = sort(table(as.character(pData(x5$data_file_selected)[, ph][, 1]), useNA = "ifany"), decreasing = TRUE),
+                agg_probe = agg_probe,
+                pData_names = names(probe_pdata),
+                pData_classes = sapply(probe_pdata, function(v) paste(class(v), collapse = "/")),
+                timestamp = as.character(Sys.time())
+              )
+              save_ok <- try(saveRDS(debug_obj, debug_path), silent = TRUE)
+              if (!inherits(save_ok, "try-error")) {
+                showNotification(paste0("Means-test debug saved: ", debug_path), type = "message", duration = 12)
+                message("Means-test debug saved to: ", debug_path)
+              } else {
+                message("Failed to write means-test debug file: ", as.character(save_ok))
+              }
+              
+              fb_recover <- run_means_fallback(reason = "recover_from_cardinal_error")
+              if (isTRUE(fb_recover$ok)) {
+                fallback_used <- TRUE
+                stats_results <- fb_recover$stats_results
+                x5$test_result <- fb_recover$model
+                showNotification("Cardinal meansTest failed; used robust fallback test.", type = "warning", duration = 12)
+              } else {
+                message("Fallback means test also failed: ", fb_recover$error)
+                message("means test failed")
+                return()
+              }
             }
             
-            if (class(mt@listData[[1]]$model) %in% "try-error") {
-              print("cannot create meanstest summary, check grouping variable(s)")
-              stop("means test failed")
+            if (!fallback_used) {
+              if (class(mt@listData[[1]]$model) %in% "try-error") {
+                print("cannot create meanstest summary, check grouping variable(s)")
+                stop("means test failed")
+              }
+              
+              incProgress(amount = 0.5, message = "extracting top features... can take a while for large datasets")
+              print("extracting top features... can take a while for large datasets")
+              
+              stats_results <- as.data.frame(topFeatures(mt, n = length(mt), p.adjust = "BH"))
+              if (!("i" %in% colnames(stats_results)) || !("mz" %in% colnames(stats_results))) {
+                stats_results$.feature_label <- rownames(stats_results)
+                map_cols <- intersect(c(".feature_label", ".feature_idx", "mz", "ID"), colnames(feature_map))
+                stats_results <- dplyr::left_join(
+                  stats_results,
+                  feature_map[, map_cols, drop = FALSE],
+                  by = ".feature_label"
+                )
+                if (".feature_idx" %in% colnames(stats_results)) {
+                  colnames(stats_results)[colnames(stats_results) == ".feature_idx"] <- "i"
+                }
+                if (!("i" %in% colnames(stats_results))) {
+                  stats_results$i <- as.integer(NA)
+                }
+                stats_results <- dplyr::relocate(stats_results, i, .before = 1)
+                if ("mz" %in% colnames(stats_results)) {
+                  stats_results <- dplyr::relocate(stats_results, mz, .after = i)
+                }
+                if ("ID" %in% colnames(stats_results)) {
+                  stats_results <- dplyr::relocate(stats_results, ID, .after = mz)
+                }
+                stats_results <- dplyr::select(stats_results, -dplyr::any_of(".feature_label"))
+              }
+              x5$test_result <- mt
             }
             
-            incProgress(amount = 0.5, message = "extracting top features... can take a while for large datasets")
-            print("extracting top features... can take a while for large datasets")
-            
-            stats_results <- as.data.frame(topFeatures(mt, n = length(mt), p.adjust = "BH"))
             x5$stats_results <- stats_results
-            x5$test_result <- mt
           }
           
           x5$test_result_feature_test <- NULL
@@ -2223,7 +2484,8 @@ StatsPrepServer <- function(id,  setup_values) {
               pvalue = signif(pvalue, digits = 3),
               fdr = signif(fdr,  digits = 3),
               statistic = signif(statistic,  digits = 4)
-            )
+            ) %>%
+            dplyr::relocate(fdr, .after = pvalue)
         
         
         
@@ -2307,7 +2569,7 @@ StatsPrepServer <- function(id,  setup_values) {
             lab <- paste0("log2FC(", labels[2], "/", labels[1], ")")
             dat <- cbind(dat, log2FC)
             names(dat)[names(dat) == "log2FC"] <- lab
-            dat <- cbind(dat, round(mean_spectra[, vars], 4))
+            dat <- cbind(dat, apply(mean_spectra[, vars, drop = FALSE], 2, function(v) signif(as.numeric(v), 3)))
             dat <-
               cbind(dat, max_mean_group = colnames(mean_spectra[, vars])[max.col(mean_spectra[, vars])])
             dat$mz <- round(dat$mz, 4)
@@ -2323,7 +2585,7 @@ StatsPrepServer <- function(id,  setup_values) {
             
             #check for mean column in mean_spectr and append it to dat
             if(!"mean" %in% colnames(dat)){
-              dat <- cbind(dat, mean=round(mean_spectra$mean, 4))
+              dat <- cbind(dat, mean = signif(as.numeric(mean_spectra$mean), 3))
             }
             
             
@@ -2376,7 +2638,7 @@ StatsPrepServer <- function(id,  setup_values) {
           
           temp_means <-
             cbind( 
-                  round(df_filtered[], 4),
+                  as.data.frame(lapply(df_filtered, function(v) signif(as.numeric(v), 3))),
                   max_mean_group = colnames(df_filtered)[max.col(df_filtered)]
                   )
           if(!is.null(mean_spectra$ID)){
@@ -2411,6 +2673,20 @@ StatsPrepServer <- function(id,  setup_values) {
       
       
       #store filtered table for later use
+      dat <- as.data.frame(dat, stringsAsFactors = FALSE)
+      if ("pvalue" %in% colnames(dat)) {
+        dat$pvalue <- signif(as.numeric(dat$pvalue), 3)
+      }
+      if ("fdr" %in% colnames(dat)) {
+        dat$fdr <- signif(as.numeric(dat$fdr), 3)
+      }
+      if (all(c("pvalue", "fdr") %in% colnames(dat))) {
+        dat <- dat %>% dplyr::relocate(fdr, .after = pvalue)
+      }
+      mean_cols <- grep("(^mean$|^mean\\.|\\.mean$)", colnames(dat), value = TRUE)
+      if (length(mean_cols) > 0) {
+        dat[mean_cols] <- lapply(dat[mean_cols], function(v) signif(as.numeric(v), 3))
+      }
       x5$stats_table_filtered <- dat
       
       DT::datatable(

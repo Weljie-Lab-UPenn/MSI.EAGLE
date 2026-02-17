@@ -826,10 +826,18 @@ pixel_level_means_test <- function(data, test_var, grouping_var = NULL) {
   # Get test variable factor
   test_groups <- factor(pdat[[test_var]])
   
-  # Check if this is a pixel-level comparison (no grouping or grouping is pixel coords)
-  is_pixel_level <- is.null(grouping_var) || 
-    grouping_var %in% c("none", "1") ||
-    all(table(grouping_var) == 1)  # Each group has only 1 member (i.e., pixels)
+  # Check if this is a pixel-level comparison.
+  # `grouping_var` can be a vector of field names (e.g. c("histo_cluster","x","y")).
+  grouping_chr <- as.character(grouping_var)
+  grouping_chr <- grouping_chr[!is.na(grouping_chr) & nzchar(grouping_chr)]
+  is_pixel_level <- FALSE
+  if (length(grouping_chr) == 0) {
+    is_pixel_level <- TRUE
+  } else if (length(grouping_chr) == 1 && grouping_chr %in% c("none", "1")) {
+    is_pixel_level <- TRUE
+  } else {
+    is_pixel_level <- all(c("x", "y") %in% grouping_chr) || any(grouping_chr %in% c("x.y", "x_y"))
+  }
   
   if (!is_pixel_level) {
     stop("This function is for pixel-level comparisons only. Use regular meansTest for biological replicates.")
@@ -856,17 +864,11 @@ pixel_level_means_test <- function(data, test_var, grouping_var = NULL) {
       statistic <- test_result$statistic
       pvalue <- test_result$p.value
       
-      # Calculate means for each group
-      means <- tapply(y, groups, mean, na.rm = TRUE)
-      
     } else {
       # ANOVA for >2 groups
       test_result <- oneway.test(y ~ groups)
       statistic <- test_result$statistic
       pvalue <- test_result$p.value
-      
-      # Calculate means for each group
-      means <- tapply(y, groups, mean, na.rm = TRUE)
     }
     
     # Store results
@@ -875,8 +877,7 @@ pixel_level_means_test <- function(data, test_var, grouping_var = NULL) {
       mz = mz_vals[i],
       feature = feature_ids[i],
       statistic = statistic,
-      pvalue = pvalue,
-      means = means
+      pvalue = pvalue
     )
   }
   
@@ -890,13 +891,9 @@ pixel_level_means_test <- function(data, test_var, grouping_var = NULL) {
     stringsAsFactors = FALSE
   )
   
-  # Add mean columns for each group
-  all_means <- t(sapply(results_list, function(x) x$means))
-  colnames(all_means) <- paste0("mean.", names(results_list[[1]]$means))
-  stats_df <- cbind(stats_df, all_means)
-  
   # Calculate FDR
   stats_df$fdr <- p.adjust(stats_df$pvalue, method = "BH")
+  stats_df <- stats_df[, c("i", "mz", "feature", "statistic", "pvalue", "fdr")]
   
   # Sort by p-value
   stats_df <- stats_df[order(stats_df$pvalue), ]

@@ -30,27 +30,40 @@ PeakPickServer <- function(id, setup_values) {
     # store as a reactive instead of output
     my_files <-
       reactivePoll(10, session, checkFunc = has.new.files, valueFunc = get.files)
+
+    listed_files <- reactive({
+      files <- my_files()
+      files[!is.na(files) & nzchar(files)]
+    })
+    is_rds_file <- function(path) {
+      grepl("\\.(rds|RData)$", basename(path), ignore.case = TRUE)
+    }
+    is_imzml_file <- function(path) {
+      grepl("\\.imzML$", basename(path), ignore.case = TRUE)
+    }
+    rds_files <- reactive({
+      files <- listed_files()
+      files[is_rds_file(files)]
+    })
+    imzml_or_rds_files <- reactive({
+      files <- listed_files()
+      files[is_rds_file(files) | is_imzml_file(files)]
+    })
+    resolve_wd_path <- function(path) {
+      if (is.null(path) || !nzchar(path)) return(path)
+      if (grepl("^(/|[A-Za-z]:[\\\\/])", path)) return(path)
+      file.path(setup_values()[["wd"]], path)
+    }
     
     # any time the reactive changes, update the selectInput
     observeEvent(my_files(),
                  ignoreInit = T,
                  ignoreNULL = T,
                  {
-                   print(grep(
-                     ".imzML",
-                     my_files(),
-                     ignore.case = T,
-                     value = T
-                   ))
                    updateSelectInput(
                      session,
                      ns('peakPickfile'),
-                     choices = grep(
-                       ".imzML",
-                       my_files(),
-                       ignore.case = T,
-                       value = T
-                     )
+                     choices = imzml_or_rds_files()
                    )
                  })
     
@@ -61,9 +74,9 @@ PeakPickServer <- function(id, setup_values) {
       # Determine the list of files based on the value of input$peak_pick_status
       file_choices <- switch(
         input$peak_pick_status,
-        "pp_old" = grep(".rds", my_files(), ignore.case = TRUE, value = TRUE),
-        "pp_y" = grep(".imzML|.rds", my_files(), ignore.case = TRUE, value = TRUE),
-        "pp_ref" = grep(".imzML|.rds", my_files(), ignore.case = TRUE, value = TRUE),
+        "pp_old" = rds_files(),
+        "pp_y" = imzml_or_rds_files(),
+        "pp_ref" = imzml_or_rds_files(),
         # Add default or other cases if needed
         character(0) # Return an empty character vector if no match
         )
@@ -79,12 +92,7 @@ PeakPickServer <- function(id, setup_values) {
       selectInput(
         ns("peakAddfile"),
         "Imageset to add to peak file",
-        grep(
-          ".rds|.imzML",
-          my_files(),
-          ignore.case = T,
-          value = T
-        )
+        imzml_or_rds_files()
       )
     })
     
@@ -307,12 +315,13 @@ PeakPickServer <- function(id, setup_values) {
                        }
                        
                        
+                       pick_path <- resolve_wd_path(input$peakPickfile)
                        #check filetype and open accordingly
-                       if (length(grep(".rds", input$peakPickfile, ignore.case = T)) > 0) {
-                         overview_peaks <- readRDS(input$peakPickfile)
+                       if (is_rds_file(input$peakPickfile)) {
+                         overview_peaks <- readRDS(pick_path)
                          print(overview_peaks)
-                       } else if (length(grep(".imzML", input$peakPickfile, ignore.case = T) >0)) {
-                         overview_peaks <- readImzML(input$peakPickfile)
+                       } else if (is_imzml_file(input$peakPickfile)) {
+                         overview_peaks <- readImzML(pick_path)
                          print(overview_peaks)
                        } else {
                          print("file type not recognized")
@@ -332,7 +341,7 @@ PeakPickServer <- function(id, setup_values) {
                          
                        }
                        
-                       old_dat<-readRDS(input$peakPickfile)
+                       old_dat <- readRDS(resolve_wd_path(input$peakPickfile))
                        overview_peaks <- convert_card(old_dat)
                        print(overview_peaks)
                        
@@ -470,10 +479,11 @@ PeakPickServer <- function(id, setup_values) {
                        #browser()
                        print("binning raw files from reference")
                        #check for rds or imzml and open accordingly
-                       if(length(grep(".rds", input$peakPickfile, ignore.case = T, value = T) == 1)) {
-                         test_mz_reduced <- readRDS(input$peakPickfile)
-                       } else if (length(grep(".imzML", input$peakPickfile, ignore.case = T, value = T) == 1)) {
-                         test_mz_reduced <- readImzML(input$peakPickfile)
+                       pick_path <- resolve_wd_path(input$peakPickfile)
+                       if (is_rds_file(input$peakPickfile)) {
+                         test_mz_reduced <- readRDS(pick_path)
+                       } else if (is_imzml_file(input$peakPickfile)) {
+                         test_mz_reduced <- readImzML(pick_path)
                        } else {
                          print("file type not recognized")
                          return()
@@ -612,11 +622,12 @@ PeakPickServer <- function(id, setup_values) {
     # create subset from peaks within original dataset
     observeEvent(input$action_add_file, {
       #check for .rds or .imzML and open accordingly
-      if(length(grep(".rds", input$peakAddfile, ignore.case = T, value = T) == 1)) {
-        add_peaks <- readRDS(input$peakAddfile)
+      add_path <- resolve_wd_path(input$peakAddfile)
+      if (is_rds_file(input$peakAddfile)) {
+        add_peaks <- readRDS(add_path)
         print(add_peaks)
-      } else if (length(grep(".imzML", input$peakAddfile, ignore.case = T, value = T) == 1)) {
-        add_peaks <- readImzML(input$peakAddfile)
+      } else if (is_imzml_file(input$peakAddfile)) {
+        add_peaks <- readImzML(add_path)
         print(add_peaks)
       } else {
         print("file type not recognized")
@@ -691,11 +702,12 @@ PeakPickServer <- function(id, setup_values) {
         
       }
       #check filename and open accordinlgy
-      if(length(grep(".rds", input$peakAddfile, ignore.case = T, value = T) == 1)) {
-        add_peaks <- readRDS(input$peakAddfile)
+      add_path <- resolve_wd_path(input$peakAddfile)
+      if (is_rds_file(input$peakAddfile)) {
+        add_peaks <- readRDS(add_path)
         print(add_peaks)
-      } else if (length(grep(".imzML", input$peakAddfile, ignore.case = T, value = T) == 1)) {
-        add_peaks <- readImzML(input$peakAddfile)
+      } else if (is_imzml_file(input$peakAddfile)) {
+        add_peaks <- readImzML(add_path)
         print(add_peaks)
       } else {
         print("file type not recognized")

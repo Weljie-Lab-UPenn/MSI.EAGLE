@@ -20,11 +20,15 @@ CorrelationServer <- function(id, proc_values, setup_values) {
     
     # Reactive polling to detect new files every 10 seconds (10000 ms)
     my_files <- reactivePoll(10000, session, checkFunc = has_new_files, valueFunc = get_files)
+    valid_file_choices <- reactive({
+      files <- my_files()
+      files <- files[!is.na(files) & nzchar(files)]
+      files[grepl("\\.(imzML|rds)$", basename(files), ignore.case = TRUE)]
+    })
     
     # Update the 'correlation_file' selectInput when new files are detected
     observeEvent(my_files(), ignoreInit = TRUE, ignoreNULL = TRUE, {
-      file_choices <- grep("\\.imzML$|\\.rds$", my_files(), ignore.case = TRUE, value = TRUE)
-      updateSelectInput(session, ns('correlation_file'), choices = file_choices)
+      updateSelectInput(session, ns('correlation_file'), choices = valid_file_choices())
     })
     
     # ReactiveValues to store data_file and hmap_choices
@@ -40,7 +44,7 @@ CorrelationServer <- function(id, proc_values, setup_values) {
           selectInput(
             ns("correlation_file"),
             "Select File for Correlation Analysis",
-            choices = grep("\\.imzML$|\\.rds$", my_files(), ignore.case = TRUE, value = TRUE),
+            choices = valid_file_choices(),
             selected = NULL
           ),
           actionButton(ns("action_seg"), label = HTML("Read Selected File"))
@@ -60,14 +64,14 @@ CorrelationServer <- function(id, proc_values, setup_values) {
       
       # Read the selected file based on its extension
       data_file <- NULL
-      if (grepl("\\.rds$", input$correlation_file, ignore.case = TRUE)) {
+      if (grepl("\\.rds$", basename(input$correlation_file), ignore.case = TRUE)) {
         data_file <- tryCatch({
           readRDS(file_path)
         }, error = function(e) {
           showNotification(paste("Error reading .rds file:", e$message), type = "error")
           NULL
         })
-      } else if (grepl("\\.imzML$", input$correlation_file, ignore.case = TRUE)) {
+      } else if (grepl("\\.imzML$", basename(input$correlation_file), ignore.case = TRUE)) {
         data_file <- tryCatch({
           readMSIData(file_path)
         }, error = function(e) {
