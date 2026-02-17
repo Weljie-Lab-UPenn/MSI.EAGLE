@@ -160,7 +160,10 @@ SSCsegServer <- function(id, setup_values, preproc_values) {
       
       
       x2 <- preproc_values()[["x2"]]
-      req(x2$mytable_selected)
+      if (is.null(x2$mytable_selected)) {
+        showNotification("No dataset selected. Choose runs from the table before removing isolated pixels.", type = "warning", duration = 6)
+        return()
+      }
       tmp_dat <- fix_pix(
         dat=x2$mytable_selected,
         remove = input$fix_pix_t_f,
@@ -450,7 +453,14 @@ SSCsegServer <- function(id, setup_values, preproc_values) {
     
     observeEvent(input$store_proc2, {
       x2 <- preproc_values()[["x2"]]
-      req(x2$tf_list)
+      if (is.null(x2$mytable_selected)) {
+        showNotification("No SSC dataset selected to store.", type = "warning", duration = 6)
+        return()
+      }
+      if (is.null(x2$tf_list)) {
+        showNotification("No SSC selection mask available. Run SSC and select clusters first.", type = "warning", duration = 6)
+        return()
+      }
       
       #browser()
       

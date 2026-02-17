@@ -339,7 +339,10 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
     #run fix_pix to remove isolated pixels
     observeEvent(input$fix_pix, {
       x2 <- preproc_values()[["x2"]]
-      req(x2$mytable_selected)
+      if (is.null(x2$mytable_selected)) {
+        showNotification("No dataset selected. Choose runs from the table before removing isolated pixels.", type = "warning", duration = 6)
+        return()
+      }
       tmp_dat <- fix_pix(
         x2$mytable_selected,
         remove = input$fix_pix_t_f,
@@ -737,7 +740,14 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
     #run clustering only
     observeEvent(input$action_dbscan, {
       x2 <- preproc_values()[["x2"]]
-      req(x2$data_list)
+      if (is.null(x2$data_list)) {
+        showNotification("No UMAP embedding found. Run 'Start UMAP clustering' first, then re-run clustering.", type = "warning", duration = 7)
+        return()
+      }
+      if (is.null(x2$data_list$umap_separation) || is.null(x2$data_list$umap_separation$umap_out)) {
+        showNotification("UMAP embedding is missing from current session. Re-run UMAP first.", type = "warning", duration = 7)
+        return()
+      }
       
       data_list <- x2$data_list
       
@@ -2017,8 +2027,14 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
     
     observeEvent(input$store_proc, {
       x2 <- preproc_values()[["x2"]]
-      req(x2$tf_list)  # This will tell us which pixels to use/store
-      req(x2$mytable_selected)
+      if (is.null(x2$mytable_selected)) {
+        showNotification("No active dataset to store. Select runs and run UMAP/filters first.", type = "warning", duration = 6)
+        return()
+      }
+      if (is.null(x2$tf_list)) {
+        showNotification("No pixel-selection mask available to store. Run clustering or filtering first.", type = "warning", duration = 6)
+        return()
+      }
       tf_valid <- sanitize_tf_mask(x2$tf_list, ncol(x2$mytable_selected))
       if (is.null(tf_valid) || sum(tf_valid) == 0) {
         showNotification("No pixels selected to store.", type = "warning", duration = 6)
@@ -2612,8 +2628,14 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
     #Apply the results of annotations for specific tissue regions
     observeEvent(input$apply_annotation, {
       x2 <- preproc_values()[["x2"]]
-      req(x2$mytable_selected)
-      req(input$seg_rename, input$seg_field)
+      if (is.null(x2$mytable_selected)) {
+        showNotification("No dataset selected for annotation. Choose runs first.", type = "warning", duration = 7)
+        return()
+      }
+      if (is.null(input$seg_rename) || !nzchar(input$seg_rename)) {
+        showNotification("Choose an annotation edit mode before applying changes.", type = "warning", duration = 7)
+        return()
+      }
       
       pdat <- get_active_pdata(x2)
       if (is.null(pdat)) {
@@ -2727,6 +2749,11 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
     observeEvent(input$save_imzml, {
       
       req(input$save_imzml)
+      x2 <- preproc_values()[["x2"]]
+      if (is.null(x2$list_proc_img) || length(x2$list_proc_img) == 0) {
+        showNotification("No processed data to save. Click 'Store processed data' first.", type = "error", duration = 8)
+        return()
+      }
       #create variables required for saving
       volumes <- c(wd = setup_values()[["wd"]], home = fs::path_home())
       shinyFiles::shinyFileSave(input, "save_imzml", roots = volumes, session = session)
@@ -2752,8 +2779,6 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
       #   },
       #   content = function(file) {
       #pk_img <- x0$overview_peaks
-      x2 <- preproc_values()[["x2"]]
-      
       #pk_img <- Cardinal::combine(x2$list_proc_img)
       
       #issue with combining data, need to reorder with largest first

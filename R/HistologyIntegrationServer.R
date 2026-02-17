@@ -801,11 +801,20 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
     }
 
     observeEvent(input$map_to_pdata, {
-      req(msi_data())
-      req(input$mapping_source)
+      if (is.null(msi_data())) {
+        showNotification("Load an MSI dataset first before mapping overlays to pData.", type = "warning", duration = 7)
+        return()
+      }
+      if (is.null(input$mapping_source) || !nzchar(input$mapping_source)) {
+        showNotification("Choose a mapping source (polygon or cluster image) first.", type = "warning", duration = 7)
+        return()
+      }
 
       if (identical(input$mapping_source, "cluster")) {
-        req(input$cluster_overlay_upload)
+        if (is.null(input$cluster_overlay_upload)) {
+          showNotification("Upload a cluster-color image first or switch mapping source to polygon.", type = "warning", duration = 8)
+          return()
+        }
 
         col_name <- trimws(input$cluster_pdata_col)
         validate(need(nchar(col_name) > 0, "Please enter a pData column name."))
@@ -862,8 +871,14 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         return()
       }
 
-      req(input$polygon_file)
-      req(polygon_data())
+      if (is.null(input$polygon_file) || !nzchar(input$polygon_file)) {
+        showNotification("Choose a polygon file first or switch mapping source to cluster image.", type = "warning", duration = 8)
+        return()
+      }
+      if (is.null(polygon_data())) {
+        showNotification("Polygon file could not be read. Check file format and retry.", type = "error", duration = 8)
+        return()
+      }
 
       col_name <- trimws(input$polygon_pdata_col)
       validate(need(nchar(col_name) > 0, "Please enter a pData column name."))
@@ -1294,7 +1309,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
     observeEvent(input$save_mapped_imzml, {
       req(input$save_mapped_imzml)
-      req(xh$mapped_obj)
+      if (is.null(xh$mapped_obj)) {
+        showNotification("No mapped MSI object available. Run 'Map selected source to pData' first.", type = "warning", duration = 7)
+        return()
+      }
 
       volumes <- c(wd = setup_values()[["wd"]], home = fs::path_home())
       shinyFiles::shinyFileSave(input, "save_mapped_imzml", roots = volumes, session = session)

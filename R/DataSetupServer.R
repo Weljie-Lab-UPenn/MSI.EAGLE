@@ -252,8 +252,10 @@ DataSetupServer <- function(id, rawd, wd) {
     
     img.dat <- eventReactive(input$action2, {
       
-      if (is.null(x1$raw_list))
-        return()
+      if (is.null(x1$raw_list) || length(x1$raw_list) == 0) {
+        showNotification("No raw data loaded yet. Click 'Read selected files' first.", type = "warning", duration = 7)
+        return(NULL)
+      }
        setCardinalBPPARAM(par_mode())
        setCardinalNChunks(input$chunks)
      

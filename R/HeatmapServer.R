@@ -80,6 +80,7 @@ HeatmapServer <- function(id,  proc_values) {
     observeEvent(input$action_hmap, {
       if (is.null(proc_values()$x5$data_file_selected)) {
         message("No stats data, please run a stats analysis first")
+        showNotification("No stats dataset available. Run a stats analysis first, then generate heatmap.", type = "warning", duration = 7)
         return()
       }
       withProgress(message = "Generating heatmap...", detail = "summarizing data", {

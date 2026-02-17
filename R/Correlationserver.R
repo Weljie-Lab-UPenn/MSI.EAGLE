@@ -57,7 +57,10 @@ CorrelationServer <- function(id, proc_values, setup_values) {
     
     ### Observe Event for Reading File ###
     observeEvent(input$action_seg, {
-      req(input$correlation_file) # Ensure a file is selected
+      if (is.null(input$correlation_file) || !nzchar(input$correlation_file)) {
+        showNotification("Choose a .imzML or .rds file before clicking 'Read Selected File'.", type = "warning", duration = 7)
+        return(NULL)
+      }
       
       # Construct full file path
       file_path <- file.path(setup_values()[["wd"]], input$correlation_file)
@@ -91,7 +94,18 @@ CorrelationServer <- function(id, proc_values, setup_values) {
     ### Observe Event for Source Selection ###
     observeEvent(input$corr_source, {
       if (input$corr_source == "from_stats") {
-        req(x5()$data_file_selected)
+        if (is.null(x5()$data_file_selected)) {
+          x6$data_file <- NULL
+          x6$hmap_choices <- NULL
+          showNotification("No stats dataset available. Run a stats test first, then switch source to 'From stats'.", type = "warning", duration = 8)
+          return(NULL)
+        }
+        if (is.null(x5()$stats_results)) {
+          x6$data_file <- NULL
+          x6$hmap_choices <- NULL
+          showNotification("No stats results found. Run a stats test first.", type = "warning", duration = 8)
+          return(NULL)
+        }
         x6$data_file <- x5()$data_file_selected
         
         # Extract hmap_choices from stats_results, excluding 'mz' and 'feature'
@@ -176,9 +190,23 @@ CorrelationServer <- function(id, proc_values, setup_values) {
     observeEvent(input$action_corr, {
       # Validate inputs based on source
       if (input$corr_source == "from_stats") {
-        req(input$corr_mz)
+        if (is.null(x6$data_file)) {
+          showNotification("No stats-backed dataset available. Run/read stats data first.", type = "warning", duration = 7)
+          return(NULL)
+        }
+        if (is.null(input$corr_mz) || !nzchar(input$corr_mz)) {
+          showNotification("Choose an m/z value from the stats-filtered list before generating colocalization.", type = "warning", duration = 7)
+          return(NULL)
+        }
       } else if (input$corr_source == "from_file") {
-        req(input$corr_mz)
+        if (is.null(x6$data_file)) {
+          showNotification("No file loaded. Click 'Read Selected File' first.", type = "warning", duration = 7)
+          return(NULL)
+        }
+        if (is.null(input$corr_mz) || !nzchar(input$corr_mz)) {
+          showNotification("Choose an m/z value before generating colocalization.", type = "warning", duration = 7)
+          return(NULL)
+        }
       } else {
         showNotification("Invalid data source selected.", type = "error")
         return(NULL)

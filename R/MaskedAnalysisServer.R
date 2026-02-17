@@ -168,6 +168,10 @@ MaskedAnalysisServer <- function(id,  setup_values) {
     observeEvent(input$action_seg, {
       x1 = setup_values()[["x1"]] # bring in raw_files list
       
+      if (is.null(input$segmentation_file) || !nzchar(input$segmentation_file)) {
+        showNotification("Choose a coordinate template file (.imzML or .rds) first.", type = "warning", duration = 7)
+        return()
+      }
       
       
       if(is.null(x1$raw_list)){
@@ -780,6 +784,10 @@ MaskedAnalysisServer <- function(id,  setup_values) {
     observeEvent(input$save_imzml, {
       
       req(input$save_imzml)
+      if (is.null(x4$seg_pp_file)) {
+        showNotification("No segmented/peak-picked dataset to save. Run 'Peak pick or bin segmented data' first.", type = "error", duration = 8)
+        return()
+      }
       volumes <- c(wd = setup_values()[["wd"]], home = fs::path_home())
       shinyFiles::shinyFileSave(input, "save_imzml", roots = volumes, session = session)
       

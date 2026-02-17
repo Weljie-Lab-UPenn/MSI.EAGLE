@@ -164,7 +164,10 @@ StatsPrepServer <- function(id,  setup_values) {
     })
     
     observeEvent(input$action_read_stats, {
-      req(input$stats_input_file)
+      if (is.null(input$stats_input_file) || !nzchar(input$stats_input_file)) {
+        showNotification("Choose a .imzML or .rds file first.", type = "warning", duration = 7)
+        return(NULL)
+      }
         
       
       
@@ -549,9 +552,17 @@ StatsPrepServer <- function(id,  setup_values) {
         print(
           "Select dataset to analyze and then press 'Read file for stats' button in the left panel"
         )
+        showNotification("No dataset loaded. Click 'Read file for stats' first.", type = "warning", duration = 8)
         return()
       }
-      req(input$phen_cols_stats)
+      if (is.null(input$phen_cols_stats) || length(input$phen_cols_stats) == 0 || !nzchar(input$phen_cols_stats[1])) {
+        showNotification("Choose a variable to test before clicking 'Run test'.", type = "warning", duration = 8)
+        return()
+      }
+      if (is.null(input$test_membership) || length(input$test_membership) == 0) {
+        showNotification("Choose at least one member to include before running the test.", type = "warning", duration = 8)
+        return()
+      }
       
       # Setup to ensure proper cleanup
       # on.exit({
@@ -638,6 +649,7 @@ StatsPrepServer <- function(id,  setup_values) {
         } else if (input$stats_test != "anova" &&
                    sum(group_var %in% "none") > 0) {
           message("must have grouping for this test. Exiting.")
+          showNotification("Sample definition cannot be 'none' for this test. Choose one or more grouping variables.", type = "error", duration = 8)
           return(NULL)
         } else{
           grouping <- as.data.frame(pData(x5$data_file_selected))[, group_var, drop = FALSE]
@@ -1907,8 +1919,14 @@ StatsPrepServer <- function(id,  setup_values) {
     })
     
     observeEvent(input$data_export, {
-      #req(input$output_factors)
-      req(input$grouping_variables_export)
+      if (is.null(x5$data_file)) {
+        showNotification("No dataset loaded for export. Read a stats input file first.", type = "warning", duration = 8)
+        return()
+      }
+      if (is.null(input$grouping_variables_export) || length(input$grouping_variables_export) == 0) {
+        showNotification("Choose at least one grouping variable before export.", type = "warning", duration = 8)
+        return()
+      }
       
       showNotification("Starting data export.")
       
@@ -1938,7 +1956,10 @@ StatsPrepServer <- function(id,  setup_values) {
     
     
     observeEvent(input$mummichog, {
-      req(x5$stats_results)
+      if (is.null(x5$stats_results)) {
+        showNotification("No stats results available. Run a statistical test first.", type = "warning", duration = 8)
+        return()
+      }
       
      
       if (input$stats_test %in% c("meanstest", "spatialDGMM")) {
@@ -1954,6 +1975,10 @@ StatsPrepServer <- function(id,  setup_values) {
         showNotification("Not yet implemented for this test")
         return()
         #dat<-x5$stats_results
+      }
+      if (is.null(dat) || nrow(dat) == 0) {
+        showNotification("No features pass current filters. Increase FDR threshold and retry.", type = "warning", duration = 8)
+        return()
       }
       print("Writing Mummichog import file.")
       mchog_all <-
@@ -1980,7 +2005,10 @@ StatsPrepServer <- function(id,  setup_values) {
     })
     
     observeEvent(input$metaboanalyst, {
-      req(x5$stats_results)
+      if (is.null(x5$stats_results)) {
+        showNotification("No stats results available. Run a statistical test first.", type = "warning", duration = 8)
+        return()
+      }
       
       
       
@@ -1991,7 +2019,12 @@ StatsPrepServer <- function(id,  setup_values) {
       } else {
         print("not yet")
         showNotification("Not yet implemented for this test")
+        return()
         #dat<-x5$stats_results
+      }
+      if (is.null(dat) || nrow(dat) == 0) {
+        showNotification("No features pass current filters. Increase FDR threshold and retry.", type = "warning", duration = 8)
+        return()
       }
       
       print("Writing Metaboanalyst input file.")
@@ -2026,8 +2059,10 @@ StatsPrepServer <- function(id,  setup_values) {
     
     
     observeEvent(input$save_stats_models, {
-      req(x5$test_result)
-      req(x5$data_file_selected)
+      if (is.null(x5$test_result) || is.null(x5$data_file_selected)) {
+        showNotification("No fitted model found. Run a statistical test first.", type = "warning", duration = 8)
+        return()
+      }
       
       # if(is.null(x5$dat_long_tech_avg)){
       #   print("need to generate meansplots first")
@@ -2166,6 +2201,7 @@ StatsPrepServer <- function(id,  setup_values) {
         load(x5$model_restore_path)
       } else {
         print("Path not valid, choose a valid model file")
+        showNotification("No model file selected. Choose a valid saved model file.", type = "warning", duration = 8)
         return()
       }
       
@@ -2272,8 +2308,14 @@ StatsPrepServer <- function(id,  setup_values) {
     })
     
     observeEvent(input$write_plots, {
-      req(x5$stats_results)
-      req(x5$stats_table_filtered)
+      if (is.null(x5$stats_results) || is.null(x5$stats_table_filtered)) {
+        showNotification("No stats table available to plot. Run a test and open the output table first.", type = "warning", duration = 8)
+        return()
+      }
+      if (nrow(x5$stats_table_filtered) == 0) {
+        showNotification("No rows to plot under current filters. Adjust FDR threshold and retry.", type = "warning", duration = 8)
+        return()
+      }
       
       wd <- getwd()
       dir.create(file.path(wd, "plots"), showWarnings = FALSE)

@@ -251,7 +251,14 @@ PeakPickServer <- function(id, setup_values) {
     
 
     observeEvent(input$action_demo, {
-      req(input$cardworkdat)
+      if (is.null(input$cardworkdat) || !nzchar(input$cardworkdat)) {
+        showNotification("Choose a demo dataset before loading demo data.", type = "warning", duration = 7)
+        return()
+      }
+      if (!requireNamespace("CardinalWorkflows", quietly = TRUE)) {
+        showNotification("CardinalWorkflows package is required to load demo data.", type = "error", duration = 8)
+        return()
+      }
       
       withProgress(message = "Loading demo data",
                    value = 0.5,
@@ -310,6 +317,7 @@ PeakPickServer <- function(id, setup_values) {
                          input$peak_pick_status == "pp_y") {
                        if (length(input$peakPickfile) < 1) {
                          print("need file to open")
+                         showNotification("Choose an input file first.", type = "warning", duration = 6)
                          return()
                          
                        }
@@ -325,6 +333,7 @@ PeakPickServer <- function(id, setup_values) {
                          print(overview_peaks)
                        } else {
                          print("file type not recognized")
+                         showNotification("Input file type not recognized. Use .imzML or .rds/.RData.", type = "error", duration = 8)
                          return()
                        }
                        
@@ -337,6 +346,7 @@ PeakPickServer <- function(id, setup_values) {
                      }else if (input$peak_pick_status == "pp_old") {
                        if (length(input$peakPickfile) < 1) {
                          print("need file to open")
+                         showNotification("Choose an .rds file first.", type = "warning", duration = 6)
                          return()
                          
                        }
@@ -474,6 +484,7 @@ PeakPickServer <- function(id, setup_values) {
                        
                        if (input$peakPickfile == '') {
                          print("need file to open")
+                         showNotification("Choose a reference file before starting peak binning.", type = "warning", duration = 6)
                          return()
                        }
                        #browser()
@@ -486,6 +497,7 @@ PeakPickServer <- function(id, setup_values) {
                          test_mz_reduced <- readImzML(pick_path)
                        } else {
                          print("file type not recognized")
+                         showNotification("Reference file type not recognized. Use .imzML or .rds/.RData.", type = "error", duration = 8)
                          return()
                        }
                        
@@ -621,6 +633,14 @@ PeakPickServer <- function(id, setup_values) {
     
     # create subset from peaks within original dataset
     observeEvent(input$action_add_file, {
+      if (is.null(input$peakAddfile) || !nzchar(input$peakAddfile)) {
+        showNotification("Choose a file to add first.", type = "warning", duration = 6)
+        return()
+      }
+      if (is.null(x0$overview_peaks)) {
+        showNotification("No base dataset loaded. Restore or create a peak-picked dataset first.", type = "warning", duration = 7)
+        return()
+      }
       #check for .rds or .imzML and open accordingly
       add_path <- resolve_wd_path(input$peakAddfile)
       if (is_rds_file(input$peakAddfile)) {
@@ -631,6 +651,7 @@ PeakPickServer <- function(id, setup_values) {
         print(add_peaks)
       } else {
         print("file type not recognized")
+        showNotification("Input file type not recognized. Use .imzML or .rds/.RData.", type = "error", duration = 8)
         return()
       }
       # add_peaks <- readImzML(input$peakAddfile)
@@ -641,6 +662,7 @@ PeakPickServer <- function(id, setup_values) {
       
       if (dim(x0$overview_peaks)[2] != dim(add_peaks)[2]) {
         print("inconistent pixel sizes, make sure same coordinate set being used")
+        showNotification("Pixel dimensions do not match. Use files with the same coordinate set.", type = "error", duration = 8)
         return()
       }
       
@@ -696,8 +718,13 @@ PeakPickServer <- function(id, setup_values) {
     })
     
     observeEvent(input$action_add_file_same, {
+      if (is.null(x0$overview_peaks)) {
+        showNotification("No base dataset loaded. Restore or create a peak-picked dataset first.", type = "warning", duration = 7)
+        return()
+      }
       if (input$peakAddfile == '') {
         print("need file to open")
+        showNotification("Choose a file to add first.", type = "warning", duration = 6)
         return()
         
       }
@@ -711,6 +738,7 @@ PeakPickServer <- function(id, setup_values) {
         print(add_peaks)
       } else {
         print("file type not recognized")
+        showNotification("Input file type not recognized. Use .imzML or .rds/.RData.", type = "error", duration = 8)
         return()
       }
       
@@ -723,6 +751,7 @@ PeakPickServer <- function(id, setup_values) {
       
       if (!identical(mz(x0$overview_peaks), mz(add_peaks))) {
         print("inconistent mass lists, make sure same peak lists being used")
+        showNotification("Mass lists differ between files. Use datasets with the same peak list for this option.", type = "error", duration = 8)
         return()
       }
       
@@ -880,6 +909,14 @@ PeakPickServer <- function(id, setup_values) {
     observeEvent(input$save_imzml, {
       
       req(input$save_imzml)
+      if (is.null(x2$overview_peaks_sel) || is.null(x0$overview_peaks)) {
+        showNotification("No peak-picked dataset available to save. Load or create a dataset first.", type = "warning", duration = 8)
+        return(NULL)
+      }
+      if (is.null(input$peak_pick_selection_rows_selected) || length(input$peak_pick_selection_rows_selected) == 0) {
+        showNotification("Select at least one run in the peak-pick table before saving.", type = "warning", duration = 8)
+        return(NULL)
+      }
       
       
       volumes <- c(wd = setup_values()[["wd"]], home = fs::path_home())

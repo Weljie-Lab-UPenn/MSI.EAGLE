@@ -195,6 +195,7 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       if(is.character(x3$img.dat) && x3$img.dat=="proc") {
         if(is.null(x2$list_proc_img)) {
           print("No processed data, be sure to store data first.")
+          showNotification("No processed data found. Store processed data first, then click 'Read dataset to be phenotyped'.", type = "warning", duration = 8)
           return()
         } else {
           x3$img.dat<-combine_card(x2$list_proc_img)
@@ -238,8 +239,10 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
     observeEvent(input$start_phenotype, {
       
       #browser()
-      if(is.null(x3$img.dat) | is.null(x3$txt_data))
+      if(is.null(x3$img.dat) | is.null(x3$txt_data)) {
+        showNotification("Load both MSI data and phenotype table first, then click 'Start phenotyping'.", type = "warning", duration = 8)
         return()
+      }
       #try(if(x3$img.dat=="proc") #no processed data available
       #  return())
     
@@ -249,6 +252,7 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       
       if(is.null(x3$txt_data$Plate)){
         print("No 'Plate' column detected in sample list, please check!")
+        showNotification("No 'Plate' column detected in phenotype table.", type = "error", duration = 8)
         return()
       }
       
@@ -355,11 +359,15 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
     }) 
     
     observeEvent(input$interaction, {
-      if(is.null(input$int_cols_out))
+      if(is.null(input$int_cols_out)) {
+        showNotification("Select two pData fields to build an interaction term.", type = "warning", duration = 7)
         return()
+      }
       
       if(length(input$int_cols_out)!=2) {
         print("Need exactly 2 fields selected for interaction mapping")
+        showNotification("Need exactly 2 fields selected for interaction mapping.", type = "warning", duration = 7)
+        return()
       }
       
       int=interaction(as.data.frame(x3$pdata)[,input$int_cols_out[1]], as.data.frame(x3$pdata)[,input$int_cols_out[2]], drop=T)
@@ -367,7 +375,10 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
     })
     
     observeEvent(input$make_tiles, {
-      req(x3$img.dat)
+      if (is.null(x3$img.dat)) {
+        showNotification("No dataset loaded for tiling. Read and phenotype data first.", type = "warning", duration = 8)
+        return()
+      }
       
       # safely pull user inputs with defaults
       w <- input$tile_w; if (is.null(w) || is.na(w) || w < 1) w <- 10
@@ -407,6 +418,10 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
     observeEvent(input$save_imzml, {
       
       req(input$save_imzml)
+      if (is.null(x3$img.dat) || is.null(x3$pdata)) {
+        showNotification("No phenotyped dataset to save. Read and phenotype data first.", type = "error", duration = 8)
+        return()
+      }
       
       
       volumes <- c(wd = setup_values()[["wd"]], home = fs::path_home())
