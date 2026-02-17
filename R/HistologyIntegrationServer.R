@@ -871,7 +871,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         return()
       }
 
-      if (is.null(input$polygon_file) || !nzchar(input$polygon_file)) {
+      if (is.null(input$polygon_file) || !nzchar(input$polygon_file$name)) {
         showNotification("Choose a polygon file first or switch mapping source to cluster image.", type = "warning", duration = 8)
         return()
       }
