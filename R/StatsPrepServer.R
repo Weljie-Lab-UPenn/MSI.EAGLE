@@ -2451,8 +2451,41 @@ StatsPrepServer <- function(id,  setup_values) {
       req(x5$mytable_stats_plate_selected)
       req(x5$tf_list)
       
-      img.dat <-
-        x5$mytable_stats_plate_selected %>% subsetPixels(x5$tf_list)
+      img.dat <- x5$mytable_stats_plate_selected %>% subsetPixels(x5$tf_list)
+
+      if (isTRUE(input$overview_use_stats_ions)) {
+        sel_rows <- input$stats_table_rows_selected
+        if (is.null(sel_rows) || length(sel_rows) == 0) {
+          showNotification(
+            "No rows selected in stats table. Select rows in 'Output Table and Ion Plots' or uncheck the ion filter.",
+            type = "message",
+            duration = 6
+          )
+        } else if (!is.null(x5$stats_table_filtered) && nrow(x5$stats_table_filtered) > 0) {
+          valid_rows <- sel_rows[sel_rows >= 1 & sel_rows <= nrow(x5$stats_table_filtered)]
+          mz_keep <- suppressWarnings(as.numeric(x5$stats_table_filtered$mz[valid_rows]))
+          mz_keep <- unique(mz_keep[is.finite(mz_keep)])
+
+          if (length(mz_keep) > 0) {
+            img.dat_sub <- try(subsetFeatures(img.dat, mz %in% mz_keep), silent = TRUE)
+            if (!inherits(img.dat_sub, "try-error") && nrow(img.dat_sub) > 0) {
+              img.dat <- img.dat_sub
+            } else {
+              showNotification(
+                "Selected stats ions are not available in the current overview dataset. Showing full feature set.",
+                type = "warning",
+                duration = 6
+              )
+            }
+          } else {
+            showNotification(
+              "Selected stats rows have no valid m/z values. Showing full feature set.",
+              type = "warning",
+              duration = 6
+            )
+          }
+        }
+      }
       
       plot_card_server("plot_card_stats",
                        overview_peaks_sel = img.dat,
@@ -2767,19 +2800,82 @@ StatsPrepServer <- function(id,  setup_values) {
         x5$mytable_stats_plate_selected[,x5$tf_list]
       
       nplots = length(runNames(plate_sel)) + 1
-      
-      p2 <-
-        image(
-          plate_sel,
-           input$phen_cols_stats,
-          key = T,
-          col = ggsci::pal_npg()(10)
+
+      normalize_labels <- function(x) {
+        x <- as.character(x)
+        x <- iconv(x, from = "", to = "UTF-8", sub = "")
+        x <- gsub("[[:cntrl:]\u200B\u200C\u200D\uFEFF]", "", x, perl = TRUE)
+        x <- gsub("\\s+", " ", x, perl = TRUE)
+        x <- trimws(x)
+        x[is.na(x) | !nzchar(x)] <- "NA"
+        x
+      }
+
+      are_valid_colors <- function(x) {
+        x <- as.character(x)
+        ok <- rep(FALSE, length(x))
+        keep <- !is.na(x) & nzchar(x)
+        if (any(keep)) {
+          ok[keep] <- vapply(
+            x[keep],
+            function(val) {
+              tryCatch({
+                grDevices::col2rgb(val)
+                TRUE
+              }, error = function(e) FALSE)
+            },
+            logical(1)
+          )
+        }
+        ok
+      }
+
+      pdat <- as.data.frame(pData(plate_sel))
+      if (!input$phen_cols_stats %in% colnames(pdat)) {
+        graphics::plot.new()
+        graphics::text(0.5, 0.5, paste0("Field not found: ", input$phen_cols_stats))
+      } else {
+        labels <- normalize_labels(pdat[[input$phen_cols_stats]])
+        lvls <- unique(labels)
+        col_map <- stats::setNames(rep("grey70", length(lvls)), lvls)
+        valid_col <- are_valid_colors(lvls)
+        if (any(valid_col)) {
+          col_map[valid_col] <- lvls[valid_col]
+        }
+        if (any(!valid_col)) {
+          fallback_cols <- grDevices::hcl.colors(sum(!valid_col), palette = "Dark 3")
+          col_map[!valid_col] <- fallback_cols
+        }
+
+        coords_df <- as.data.frame(Cardinal::coord(plate_sel))
+        xv <- if ("x" %in% colnames(coords_df)) coords_df$x else coords_df[[1]]
+        yv <- if ("y" %in% colnames(coords_df)) coords_df$y else if (ncol(coords_df) >= 2) coords_df[[2]] else rep(1, length(xv))
+        runv <- as.character(Cardinal::run(plate_sel))
+        if (length(runv) != length(labels)) {
+          runv <- rep("run", length(labels))
+        }
+
+        plot_df <- data.frame(
+          x = as.numeric(xv),
+          y = as.numeric(yv),
+          run = runv,
+          label = factor(labels, levels = lvls),
+          stringsAsFactors = FALSE
         )
 
-      
-      
-      #print(p1, layout=n2mfrow(nplots))
-      print(p2)
+        p2 <- ggplot2::ggplot(plot_df, ggplot2::aes(x = x, y = y, fill = label)) +
+          ggplot2::geom_tile() +
+          ggplot2::facet_wrap(. ~ run) +
+          ggplot2::coord_fixed() +
+          ggplot2::scale_y_continuous(trans = "reverse") +
+          ggplot2::theme_minimal() +
+          ggplot2::scale_fill_manual(
+            values = unname(col_map[lvls]),
+            name = input$phen_cols_stats,
+            drop = FALSE
+          )
+        print(p2)
+      }
 
       
       dev.off()

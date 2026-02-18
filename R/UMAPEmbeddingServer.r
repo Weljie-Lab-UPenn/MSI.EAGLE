@@ -9,17 +9,73 @@ UMAPEmbeddingServer <- function(id, setup_values, preproc_values, preproc_values
       colors = NULL,
       selected_colors = NULL
     )
+
+    get_x2 <- function() {
+      if (is.function(preproc_values_umap)) {
+        x_umap <- try(preproc_values_umap(), silent = TRUE)
+        if (!inherits(x_umap, "try-error") &&
+            !is.null(x_umap) &&
+            !is.null(x_umap[["x2"]])) {
+          return(x_umap[["x2"]])
+        }
+      }
+      preproc_values()[["x2"]]
+    }
+
+    normalize_labels <- function(x) {
+      x <- as.character(x)
+      x <- iconv(x, from = "", to = "UTF-8", sub = "")
+      x <- gsub("[[:cntrl:]\u200B\u200C\u200D\uFEFF]", "", x, perl = TRUE)
+      x <- gsub("\\s+", " ", x, perl = TRUE)
+      x <- trimws(x)
+      x[is.na(x) | !nzchar(x)] <- "NA"
+      x
+    }
+
+    are_valid_colors <- function(x) {
+      x <- as.character(x)
+      ok <- rep(FALSE, length(x))
+      keep <- !is.na(x) & nzchar(x)
+      if (any(keep)) {
+        ok[keep] <- vapply(
+          x[keep],
+          function(val) {
+            tryCatch({
+              grDevices::col2rgb(val)
+              TRUE
+            }, error = function(e) FALSE)
+          },
+          logical(1)
+        )
+      }
+      ok
+    }
+
+    build_display_mapping <- function(labels, match_original = FALSE, palette = "Dark 3") {
+      labels <- normalize_labels(labels)
+      uniq <- unique(labels)
+      fill_values <- stats::setNames(rep("grey70", length(uniq)), uniq)
+
+      # Always honor literal color labels (e.g. "darkseagreen3", "#33AA88"),
+      # regardless of the "match original" toggle.
+      valid <- are_valid_colors(uniq)
+      if (any(valid)) {
+        fill_values[valid] <- uniq[valid]
+      }
+      remaining <- uniq[!valid]
+
+      if (length(remaining) > 0) {
+        base_pal <- grDevices::hcl.colors(12, palette = palette)
+        gen_pal <- grDevices::colorRampPalette(base_pal)(length(remaining))
+        fill_values[remaining] <- gen_pal
+      }
+
+      list(labels = labels, values = fill_values)
+    }
     
     # List runs for selection
     output$mytable = DT::renderDataTable({
-
-      
-      
-      x2 <- try(preproc_values_umap()[["x2"]])
-      if(inherits(x2, "try-error")) {
-        x2<-preproc_values()[["x2"]]
-      }
-      #browser()
+      x2 <- get_x2()
       
       req(x2$overview_peaks_sel)
       ovps <- x2$overview_peaks_sel
@@ -43,14 +99,9 @@ UMAPEmbeddingServer <- function(id, setup_values, preproc_values, preproc_values
     
     # Get active dataset based on table selection
     data_img <- reactive({
-      
-      x2 <- try(preproc_values_umap()[["x2"]])
-      if(inherits(x2, "try-error")) {
-        x2<-preproc_values()[["x2"]]
-      }
+      x2 <- get_x2()
       req(x2$overview_peaks_sel)
       req(input$mytable_rows_selected)
-      #browser()
       
       ids <- input$mytable_rows_selected
       x2$overview_peaks_sel %>% 
@@ -121,8 +172,9 @@ UMAPEmbeddingServer <- function(id, setup_values, preproc_values, preproc_values
       png(outfile, width = 800, height = 600)
       
       # Get metadata values for masking
-      color_values <- pData(data_img())[[input$color_var]]
-      mask <- color_values %in% color_state$selected_colors
+      color_values <- normalize_labels(pData(data_img())[[input$color_var]])
+      selected_vals <- normalize_labels(color_state$selected_colors)
+      mask <- color_values %in% selected_vals
       
       # Get intensity values
       intensity_values <- spectra(data_img())[selected_index(), ]
@@ -138,8 +190,14 @@ UMAPEmbeddingServer <- function(id, setup_values, preproc_values, preproc_values
       if(any(mask)) {
         # Normalize intensities for selected points only
         selected_intensities <- intensity_values[mask]
-        normalized_intensities <- (selected_intensities - min(selected_intensities)) / 
-          (max(selected_intensities) - min(selected_intensities))
+        rng <- range(selected_intensities, na.rm = TRUE)
+        if (!all(is.finite(rng))) {
+          normalized_intensities <- rep(0.5, length(selected_intensities))
+        } else if ((rng[2] - rng[1]) <= 0) {
+          normalized_intensities <- rep(0.5, length(selected_intensities))
+        } else {
+          normalized_intensities <- (selected_intensities - rng[1]) / (rng[2] - rng[1])
+        }
         
         # Create color palette and map values
         color_palette <- pals::viridis(100)
@@ -171,7 +229,8 @@ UMAPEmbeddingServer <- function(id, setup_values, preproc_values, preproc_values
       req(data_img(), input$color_var)
       
       # Get unique values from the selected variable
-      unique_values <- unique(pData(data_img())[[input$color_var]])
+      unique_values <- unique(normalize_labels(pData(data_img())[[input$color_var]]))
+      unique_values <- sort(unique_values)
       
       # Check if the number of unique values exceeds the limit
       if (length(unique_values) > 20) {
@@ -192,6 +251,8 @@ UMAPEmbeddingServer <- function(id, setup_values, preproc_values, preproc_values
       if (is.null(color_state$selected_colors) || input$color_var != color_state$last_selected_var) {
         color_state$selected_colors <- colors
         color_state$last_selected_var <- input$color_var  # Track the last selected variable
+      } else {
+        color_state$selected_colors <- intersect(normalize_labels(color_state$selected_colors), colors)
       }
       
       # Display the color choices with checkboxes, defaulting to all selected
@@ -204,7 +265,7 @@ UMAPEmbeddingServer <- function(id, setup_values, preproc_values, preproc_values
     
     # Update selected colors when changed
     observeEvent(input$selected_colors, {
-      color_state$selected_colors <- input$selected_colors
+      color_state$selected_colors <- normalize_labels(input$selected_colors)
     })
     
     # Modified UMAP plot with metadata colors and selection
@@ -215,28 +276,19 @@ UMAPEmbeddingServer <- function(id, setup_values, preproc_values, preproc_values
       png(outfile, width = 800, height = 600)
       
       # Get metadata values
-      color_values <- pData(data_img())[[input$color_var]]
+      color_values <- normalize_labels(pData(data_img())[[input$color_var]])
+      selected_vals <- normalize_labels(color_state$selected_colors)
       
       # Create mask for selected colors
-      mask <- color_values %in% color_state$selected_colors
+      mask <- color_values %in% selected_vals
       
-      if(input$col_match) {
-        # Use original colors for selected values, grey for unselected
-        plot_colors <- rep("grey80", length(color_values))
-        plot_colors[mask] <- color_values[mask]
-      } else {
-        unique_values <- unique(color_values[mask])
-        tol_palette <- pals::tol(max(12, length(unique_values)))
-        color_ramp <- colorRampPalette(tol_palette)
-        
-        # Create factor levels only for selected values
-        plot_colors <- rep("grey80", length(color_values))
-        if(length(unique_values) > 0) {
-          factor_levels <- as.numeric(factor(color_values[mask], levels = unique_values))
-          plot_colors[mask] <- color_ramp(length(unique_values))[factor_levels]
-        }
+      # Use a stable label->color map shared with spatial rendering.
+      plot_colors <- rep("grey80", length(color_values))
+      if (any(mask)) {
+        mapping <- build_display_mapping(color_values[mask], match_original = isTRUE(input$col_match))
+        plot_colors[mask] <- unname(mapping$values[mapping$labels])
       }
-      #browser()
+
       print(pairs(umap_coords(),
                   col = plot_colors,
                   pch = ".",
@@ -267,33 +319,26 @@ UMAPEmbeddingServer <- function(id, setup_values, preproc_values, preproc_values
                                 enhance = "hist",
                                 smooth = "gaussian"))
         } else {
-          # Create a subset of data containing only selected colors
-          
-          #browser()
-          img_vec <- pData(data_img())[[input$color_var]]
-          select_vec <- color_state$selected_colors
-          
-          # Check if select_vec only contains "TRUE" and "FALSE"
-          if (all(select_vec %in% c("TRUE", "FALSE"))) {
-            # Convert to logical
-            select_vec <- as.logical(select_vec)
+          img_vec <- normalize_labels(pData(data_img())[[input$color_var]])
+          select_vec <- normalize_labels(color_state$selected_colors)
+          keep <- img_vec %in% select_vec
+
+          subset_data <- data_img() %>% subsetPixels(keep)
+          if (ncol(subset_data) > 0) {
+            subset_labels <- normalize_labels(pData(subset_data)[[input$color_var]])
+            mapping <- build_display_mapping(subset_labels, match_original = isTRUE(input$col_match))
+            pData(subset_data)$.__embed_color_label <- factor(
+              mapping$labels,
+              levels = names(mapping$values)
+            )
+            print(Cardinal::image(
+              subset_data,
+              ".__embed_color_label",
+              col = unname(mapping$values)
+            ))
           } else {
-            select_vec <- as.character(select_vec)
-          }
-          
-          if (is.logical(img_vec) && is.logical(select_vec) ||
-              (is.character(img_vec) && is.character(select_vec) )) {
-            
-              subset_data <- data_img() %>%
-                subsetPixels(img_vec %in% select_vec)
-          } else {
-            return()
-          }
-          
-          if(ncol(subset_data) > 0) {
-            print(Cardinal::image(subset_data,
-                                  input$color_var,
-                                  col = pals::tol()))
+            graphics::plot.new()
+            graphics::text(0.5, 0.5, "No selected labels to display.")
           }
         }
       }

@@ -138,20 +138,110 @@ get_umap<-function(img.dat, outliers=T, thresh=0.15, min_dist=0, set_op_mix_rati
 #choice of cosine metric is based on https://pubs.acs.org/doi/10.1021/acs.analchem.8b05827
 #optimize output function with a, b, and min_dist, spread as shown here
 #https://jlmelville.github.io/uwot/abparams.html
-umap_run<-function(img.dat, nn=5, metric="cosine", n_components = 3, fastmap=FALSE, fm_r=1, fm_method="adaptive", fm_metric="average", fm_ncomp=3,...) {
+umap_run<-function(img.dat, nn=5, metric="cosine", n_components = 3, fastmap=FALSE, fm_r=1, fm_method="adaptive", fm_metric="euclidean", fm_ncomp=3,...) {
   #library(uwot)
   #library(Cardinal)
   #library(scales)
   if(fastmap==TRUE){
-    fm<-spatialFastmap(img.dat, r=fm_r, method=fm_method, metric=fm_metric, ncomp=fm_ncomp)
-    print(summary(fm))
-    fm2<-resultData(fm)[[1]] #Note, selecting only the first model
-    fmdata<-fm2$scores
-    if(sum(is.na(fmdata))>0){
-      print("NA or NaN detected in fastmap output. Try 'gaussian' weights")
-      return()
+    fm_r <- suppressWarnings(as.numeric(fm_r))
+    if (!is.finite(fm_r) || fm_r <= 0) {
+      fm_r <- 1
     }
-    aa_no_ssc_umap_trim2<-uwot::umap((fmdata), metric = metric, n_neighbors = nn, n_components=n_components,...)
+    fm_weights <- tolower(as.character(fm_method)[1])
+    if (!fm_weights %in% c("gaussian", "adaptive")) {
+      fm_weights <- "adaptive"
+    }
+    fm_metric <- tolower(as.character(fm_metric)[1])
+    valid_fm_metrics <- c("euclidean", "manhattan", "cosine", "correlation")
+    if (!fm_metric %in% valid_fm_metrics) {
+      warning(sprintf("Invalid fastmap metric '%s'; using 'euclidean'.", fm_metric))
+      fm_metric <- "euclidean"
+    }
+    
+    # Force coordinate storage to double before neighbor search to avoid
+    # integer-only kdsearch failures in some Cardinal builds.
+    coord_df <- try(as.data.frame(Cardinal::coord(img.dat)), silent = TRUE)
+    if (inherits(coord_df, "try-error") || nrow(coord_df) == 0) {
+      stop("Could not extract coordinates for spatialFastmap.")
+    }
+    coord_num <- coord_df[vapply(coord_df, is.numeric, logical(1))]
+    if (ncol(coord_num) < 2) {
+      stop("spatialFastmap requires at least two numeric coordinate columns.")
+    }
+    coord_mat <- as.matrix(coord_num)
+    storage.mode(coord_mat) <- "double"
+    
+    groups <- try(as.character(Cardinal::run(img.dat)), silent = TRUE)
+    if (inherits(groups, "try-error") || length(groups) != nrow(coord_mat)) {
+      groups <- NULL
+    }
+    
+    neighbors <- try(
+      Cardinal::findNeighbors(coord_mat, r = fm_r, groups = groups),
+      silent = TRUE
+    )
+    if (inherits(neighbors, "try-error")) {
+      stop(sprintf("neighbor search failed: %s", as.character(neighbors)))
+    }
+    
+    fm <- try(
+      spatialFastmap(
+        img.dat,
+        r = fm_r,
+        neighbors = neighbors,
+        weights = fm_weights,
+        metric = fm_metric,
+        ncomp = fm_ncomp
+      ),
+      silent = TRUE
+    )
+    if (inherits(fm, "try-error")) {
+      stop(sprintf("spatialFastmap failed: %s", as.character(fm)))
+    }
+    
+    print(summary(fm))
+    fmdata <- NULL
+    
+    if (inherits(fm, "fastmap")) {
+      fmdata <- fm$x
+    } else if (inherits(fm, "SpatialFastmap")) {
+      fm_x <- try(fm$x, silent = TRUE)
+      if (!inherits(fm_x, "try-error") && !is.null(fm_x)) {
+        fmdata <- fm_x
+      }
+      if (is.null(fmdata)) {
+        fm_model <- try(modelData(fm), silent = TRUE)
+        if (!inherits(fm_model, "try-error") && is.list(fm_model) && !is.null(fm_model$x)) {
+          fmdata <- fm_model$x
+        }
+      }
+      if (is.null(fmdata)) {
+        fm_pred <- try(stats::predict(fm, newdata = img.dat), silent = TRUE)
+        if (!inherits(fm_pred, "try-error") && !is.null(fm_pred)) {
+          fmdata <- fm_pred
+        }
+      }
+    } else {
+      fm_result <- try(resultData(fm), silent = TRUE)
+      if (!inherits(fm_result, "try-error") && length(fm_result) >= 1) {
+        fm2 <- fm_result[[1]]
+        if (!is.null(fm2$scores)) {
+          fmdata <- fm2$scores
+        }
+      }
+    }
+    
+    if (is.null(fmdata)) {
+      stop(sprintf("spatialFastmap produced no usable scores object (class=%s).", paste(class(fm), collapse = ",")))
+    }
+    fmdata <- as.matrix(fmdata)
+    if (nrow(fmdata) < 2 || ncol(fmdata) < 2) {
+      stop(sprintf("spatialFastmap scores have invalid shape: %s x %s", nrow(fmdata), ncol(fmdata)))
+    }
+    if (any(!is.finite(fmdata))) {
+      stop("NA/NaN/Inf detected in fastmap output. Try 'gaussian' weights or lower fastmap r.")
+    }
+    aa_no_ssc_umap_trim2 <- uwot::umap((fmdata), metric = metric, n_neighbors = nn, n_components=n_components,...)
     
   } else {
     #browser()

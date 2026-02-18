@@ -130,6 +130,12 @@ StatsPrepUI <- function(id) {
                    
                    # create a dataTableOutput for the tabPanel
                    DT::dataTableOutput(ns("mytable_stats_plate")),
+
+                   checkboxInput(
+                     ns("overview_use_stats_ions"),
+                     "Use ions selected in stats table for upper plot",
+                     value = FALSE
+                   ),
                    
                    # create a plot_card_UI for the tabPanel
                    plot_card_UI(ns("plot_card_stats")),

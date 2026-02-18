@@ -36,6 +36,91 @@ plot_stats_results <- function(
       viridisLite::viridis(255, option = "A")
     }
   }
+
+  normalize_labels <- function(x) {
+    x <- as.character(x)
+    x <- iconv(x, from = "", to = "UTF-8", sub = "")
+    x <- gsub("[[:cntrl:]\u200B\u200C\u200D\uFEFF]", "", x, perl = TRUE)
+    x <- gsub("\\s+", " ", x, perl = TRUE)
+    x <- trimws(x)
+    x[is.na(x) | !nzchar(x)] <- "NA"
+    x
+  }
+
+  are_valid_colors <- function(x) {
+    x <- as.character(x)
+    ok <- rep(FALSE, length(x))
+    keep <- !is.na(x) & nzchar(x)
+    if (any(keep)) {
+      ok[keep] <- vapply(
+        x[keep],
+        function(val) {
+          tryCatch({
+            grDevices::col2rgb(val)
+            TRUE
+          }, error = function(e) FALSE)
+        },
+        logical(1)
+      )
+    }
+    ok
+  }
+
+  build_level_color_map <- function(vals, fallback_palette = "Dark 3") {
+    labs <- normalize_labels(vals)
+    lvls <- unique(labs)
+    if (length(lvls) == 0) {
+      lvls <- "NA"
+    }
+
+    map <- stats::setNames(rep("grey70", length(lvls)), lvls)
+    is_col <- are_valid_colors(lvls)
+    if (any(is_col)) {
+      map[is_col] <- lvls[is_col]
+    }
+    if (any(!is_col)) {
+      fallback <- grDevices::hcl.colors(sum(!is_col), palette = fallback_palette)
+      map[!is_col] <- fallback
+    }
+    map
+  }
+
+  build_groupings_plot <- function(obj, group_var, color_map) {
+    pdat <- as.data.frame(pData(obj))
+    if (!group_var %in% colnames(pdat)) {
+      stop(paste0("Grouping variable '", group_var, "' not found in pData"))
+    }
+
+    labels <- normalize_labels(pdat[[group_var]])
+    coords_df <- as.data.frame(Cardinal::coord(obj))
+    xv <- if ("x" %in% colnames(coords_df)) coords_df$x else coords_df[[1]]
+    yv <- if ("y" %in% colnames(coords_df)) coords_df$y else if (ncol(coords_df) >= 2) coords_df[[2]] else rep(1, length(xv))
+    runv <- as.character(Cardinal::run(obj))
+    if (length(runv) != length(labels)) {
+      runv <- rep("run", length(labels))
+    }
+
+    lvls <- names(color_map)
+    plot_df <- data.frame(
+      x = as.numeric(xv),
+      y = as.numeric(yv),
+      run = runv,
+      label = factor(labels, levels = lvls),
+      stringsAsFactors = FALSE
+    )
+
+    ggplot2::ggplot(plot_df, ggplot2::aes(x = x, y = y, fill = label)) +
+      ggplot2::geom_tile() +
+      ggplot2::facet_wrap(. ~ run) +
+      ggplot2::coord_fixed() +
+      ggplot2::scale_y_continuous(trans = "reverse") +
+      ggplot2::theme_minimal() +
+      ggplot2::scale_fill_manual(
+        values = unname(color_map[lvls]),
+        name = group_var,
+        drop = FALSE
+      )
+  }
   
   # Setup to ensure proper cleanup
   on.exit({
@@ -74,9 +159,9 @@ plot_stats_results <- function(
       stop("x5$stats_results is null")
     }
     
-    mycols <- ggsci::pal_npg()(length(levels(droplevels(factor(
-      as.data.frame(pData(x5$data_file_selected))[, phen_cols_stats]
-    )))))
+    phen_all <- as.data.frame(pData(x5$data_file_selected))[, phen_cols_stats]
+    color_map <- build_level_color_map(phen_all)
+    mycols <- unname(color_map)
     
     nplots <- length(stats_table_rows_selected)
     mplot <- FALSE
@@ -160,6 +245,9 @@ plot_stats_results <- function(
         dplyr::summarize(n = dplyr::n(),
                          min_value = min(value, na.rm = TRUE),
                          .groups = 'drop')
+
+      long_format_df[[phen_cols_stats]] <- normalize_labels(long_format_df[[phen_cols_stats]])
+      n_samples[[phen_cols_stats]] <- normalize_labels(n_samples[[phen_cols_stats]])
       
       p1 <- ggplot2::ggplot(long_format_df,
                             ggplot2::aes(x = !!ggplot2::sym(phen_cols_stats),
@@ -176,7 +264,7 @@ plot_stats_results <- function(
         ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1, vjust = 1)) +
         ggplot2::theme(legend.position = "none") +
         ggplot2::facet_wrap(~ion, scales = "free_y") +
-        ggplot2::scale_fill_manual(values = mycols) +
+        ggplot2::scale_fill_manual(values = color_map, drop = FALSE) +
         ggplot2::geom_text(
           data = n_samples,
           ggplot2::aes(x = !!ggplot2::sym(phen_cols_stats),
@@ -189,10 +277,29 @@ plot_stats_results <- function(
       
     } else if (plot_choice == "cardinal"){
       
-      # Cardinal plots require x5$test_result which doesn't exist for pixel-level tests
+      # Cardinal plots require a valid Cardinal meansTest result object.
+      # For pixel-level/fallback workflows, auto-fallback to ggplot instead of crashing.
       if (is.null(x5$test_result)) {
-        message("Cardinal plotting not available for pixel-level means test. Please use 'ggplot' option instead.")
-        stop("Cardinal plotting requires biological replicates with samples parameter. Use ggplot for pixel-level data.")
+        message("Cardinal means model unavailable; switching to ggplot output.")
+        return(plot_stats_results(
+          x5 = x5,
+          stats_table_rows_selected = stats_table_rows_selected,
+          stats_test = stats_test,
+          phen_cols_stats = phen_cols_stats,
+          group_var = group_var,
+          plot_choice = "ggplot",
+          aov_vars1 = aov_vars1,
+          aov_vars2 = aov_vars2,
+          aov_vars3 = aov_vars3,
+          output_factors = output_factors,
+          anova_type = anova_type,
+          chunks = chunks,
+          export_contrast = export_contrast,
+          export_colorscale = export_colorscale,
+          export_smooth = export_smooth,
+          export_scale = export_scale,
+          export_dark_bg = export_dark_bg
+        ))
       }
       
       m <- stats_table_rows_selected
@@ -201,7 +308,32 @@ plot_stats_results <- function(
       fdr_vals <- x5$stats_table_filtered$fdr[m]
       names(i_vals) <- paste0("mz= ", round(mz_vals, 4), " FDR= ", formatC(fdr_vals, digits = 3, format = "fg"))
       
-      p1 <- plot(x5$test_result, i = i_vals, col = mycols, las = 0, fill = TRUE, free = "xy")
+      p1 <- try(
+        plot(x5$test_result, i = i_vals, col = mycols, las = 0, fill = TRUE, free = "xy"),
+        silent = TRUE
+      )
+      if (inherits(p1, "try-error")) {
+        message("Cardinal means plot failed (likely fallback model). Switching to ggplot. Error: ", as.character(p1))
+        return(plot_stats_results(
+          x5 = x5,
+          stats_table_rows_selected = stats_table_rows_selected,
+          stats_test = stats_test,
+          phen_cols_stats = phen_cols_stats,
+          group_var = group_var,
+          plot_choice = "ggplot",
+          aov_vars1 = aov_vars1,
+          aov_vars2 = aov_vars2,
+          aov_vars3 = aov_vars3,
+          output_factors = output_factors,
+          anova_type = anova_type,
+          chunks = chunks,
+          export_contrast = export_contrast,
+          export_colorscale = export_colorscale,
+          export_smooth = export_smooth,
+          export_scale = export_scale,
+          export_dark_bg = export_dark_bg
+        ))
+      }
       print(p1)
       if (exists("par_mode")) bpstop(par_mode())
       return(p1)
@@ -241,12 +373,7 @@ plot_stats_results <- function(
       
     } else if (plot_choice=="groupings"){
       
-      p3 <- image(
-        x5$data_file_selected,
-        phen_cols_stats,
-        key = TRUE,
-        col = mycols
-      )
+      p3 <- build_groupings_plot(x5$data_file_selected, phen_cols_stats, color_map)
       return(p3)
     }
     
@@ -255,9 +382,9 @@ plot_stats_results <- function(
       stop("x5$stats_results is null")
     }
     
-    mycols <- ggsci::pal_npg()(length(levels(droplevels(factor(
-      as.data.frame(pData(x5$data_file_selected))[, phen_cols_stats]
-    )))))
+    phen_all <- as.data.frame(pData(x5$data_file_selected))[, phen_cols_stats]
+    color_map <- build_level_color_map(phen_all)
+    mycols <- unname(color_map)
     
     mz_vals <- x5$stats_results$mz[m]
     i_vals <- x5$stats_results$i[m]
@@ -327,11 +454,7 @@ plot_stats_results <- function(
         
         fm <- as.formula(paste0("tech_avg~(", phen_cols_stats, ")"))
         
-        ncolors <- length(levels(as.factor(as.data.frame(
-          pData(x5$data_file_selected)[, phen_cols_stats]
-        )[,1])))
-        
-        mycols <- ggsci::pal_npg()(ncolors)
+        dat_long_tech_avg[[phen_cols_stats]] <- normalize_labels(dat_long_tech_avg[[phen_cols_stats]])
         
         #create plot with means using ggplot2
         plot_list[[j]]<- ggplot2::ggplot(dat_long_tech_avg, ggplot2::aes_string(x=phen_cols_stats, y="tech_avg", fill=phen_cols_stats)) +
@@ -342,7 +465,7 @@ plot_stats_results <- function(
           ggprism::theme_prism() +
           ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)) +
           ggplot2::theme(legend.position = "none") +
-          ggplot2::scale_fill_manual(values = mycols)+
+          ggplot2::scale_fill_manual(values = color_map, drop = FALSE)+
           #add title
           ggplot2::ggtitle(paste("mz =",round(mz_to_plot[j],4)))
         
@@ -351,11 +474,9 @@ plot_stats_results <- function(
       p5<-gridExtra::grid.arrange(grobs=plot_list)
     }
     
-    ncolors <- length(levels(as.factor(as.data.frame(
-      pData(x5$data_file_selected)[, phen_cols_stats]
-    )[,1])))
-    
-    mycols <- ggsci::pal_npg()(ncolors)
+    phen_all <- as.data.frame(pData(x5$data_file_selected))[, phen_cols_stats]
+    color_map <- build_level_color_map(phen_all)
+    mycols <- unname(color_map)
     
     
     
@@ -405,11 +526,10 @@ plot_stats_results <- function(
     }
     p3 <- matter::as_facets(plot_list, ncol = 1)
     
-    p4 <- image(
+    p4 <- build_groupings_plot(
       x5$data_file_selected[, Cardinal::run(x5$data_file_selected) %in% runNames(x5$data_file_selected)[]],
       fm2,
-      key = TRUE,
-      col = mycols
+      color_map
     )
     
     

@@ -81,9 +81,9 @@ MSI.EAGLE <- function(...) {
     
     setup_values <- DataSetupServer("tab1", rawd = rawd, wd = wd)
     preproc_values <- PeakPickServer("tab2", setup_values)
-    UMAPServer("tab3", setup_values, preproc_values)
+    UMAPServer("tab3", setup_values, preproc_values, NULL)
     SSCsegServer("tab3a", setup_values, preproc_values)
-    UMAPEmbeddingServer("tab3b", setup_values, preproc_values)
+    UMAPEmbeddingServer("tab3b", setup_values, preproc_values, NULL)
     PhenoServer("tab4", setup_values, preproc_values)
     MaskedAnalysisServer("tab5", setup_values)
     proc_values<-StatsPrepServer("tab6", setup_values )

@@ -1,5 +1,5 @@
 ### R/UMAPServer.R
-UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
+UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = NULL) {
   moduleServer(id, function(input, output, session) {
     #for dynamic UI
     ns = session$ns
@@ -110,6 +110,66 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
     draw_empty_plot <- function(msg) {
       graphics::plot.new()
       graphics::text(0.5, 0.5, labels = msg, cex = 1.1)
+    }
+    
+    are_valid_colors <- function(x) {
+      x <- as.character(x)
+      ok <- rep(FALSE, length(x))
+      keep <- !is.na(x) & nzchar(x)
+      if (any(keep)) {
+        ok[keep] <- vapply(
+          x[keep],
+          function(val) {
+            tryCatch({
+              col2rgb(val)
+              TRUE
+            }, error = function(e) FALSE)
+          },
+          logical(1)
+        )
+      }
+      ok
+    }
+    
+    normalize_labels <- function(x) {
+      x <- as.character(x)
+      x <- iconv(x, from = "", to = "UTF-8", sub = "")
+      x <- gsub("[[:cntrl:]\u200B\u200C\u200D\uFEFF]", "", x, perl = TRUE)
+      x <- gsub("\\s+", " ", x, perl = TRUE)
+      x <- trimws(x)
+      x[is.na(x) | !nzchar(x)] <- "NA"
+      x
+    }
+    
+    build_fill_mapping <- function(labels, fallback_palette = "Dark 3") {
+      labels <- normalize_labels(labels)
+      uniq <- unique(labels)
+      valid_color <- are_valid_colors(uniq)
+      
+      fill_values <- stats::setNames(rep("grey70", length(uniq)), uniq)
+      if (any(valid_color)) {
+        fill_values[valid_color] <- uniq[valid_color]
+      }
+      if (any(!valid_color)) {
+        non_color <- uniq[!valid_color]
+        pal <- grDevices::hcl.colors(max(length(non_color), 1), palette = fallback_palette)
+        fill_values[non_color] <- pal[seq_along(non_color)]
+      }
+      
+      list(labels = labels, values = fill_values)
+    }
+    
+    log_fill_mapping <- function(tag, fill_values, n_show = 12) {
+      if (length(fill_values) == 0) {
+        return(invisible(NULL))
+      }
+      n <- min(length(fill_values), n_show)
+      msg <- paste(
+        sprintf("%s=%s", names(fill_values)[seq_len(n)], as.character(fill_values)[seq_len(n)]),
+        collapse = ", "
+      )
+      message(sprintf("[%s] color map (%d labels): %s", tag, length(fill_values), msg))
+      invisible(NULL)
     }
     
     
@@ -359,23 +419,37 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
     
     output$fm_params <- renderUI({
       if (input$fastmap == TRUE) {
-        list(
-          numericInput(ns("fm_r"), "spatial r for fastmap", value = 1),
-          numericInput(
-            ns("fm_ncomp"),
-            "Number of fastmap components",
-            value = 20,
-            min = 3
+        tagList(
+          fluidRow(
+            column(6, numericInput(ns("fm_r"), "Fastmap r", value = 1)),
+            column(
+              6,
+              numericInput(
+                ns("fm_ncomp"),
+                "Fastmap components",
+                value = 20,
+                min = 3
+              )
+            )
           ),
-          selectInput(
-            ns("fm_method"),
-            "Fastmap method",
-            choices = c("gaussian", "adaptive")
-          ),
-          selectInput(
-            ns("fm_metric"),
-            "Fastmap metric",
-            choices = c("average", "neighborhood", "correlation")
+          fluidRow(
+            column(
+              6,
+              selectInput(
+                ns("fm_method"),
+                "Fastmap weights",
+                choices = c("gaussian", "adaptive")
+              )
+            ),
+            column(
+              6,
+              selectInput(
+                ns("fm_metric"),
+                "Fastmap metric",
+                choices = c("euclidean", "manhattan", "cosine", "correlation"),
+                selected = "euclidean"
+              )
+            )
           )
         )
       }
@@ -424,38 +498,100 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
           x2$rcol_plot <- NULL
         }
         
+        # Parse/validate UMAP parameters
+        coalesce_input <- function(x, default) {
+          if (is.null(x) || length(x) == 0) default else x
+        }
+        parse_pca_umap <- function(x) {
+          txt <- trimws(as.character(coalesce_input(x, "")))
+          if (identical(txt, "") || tolower(txt) == "null") {
+            return(NULL)
+          }
+          val <- suppressWarnings(as.integer(txt))
+          if (!is.finite(val) || val < 1) {
+            showNotification("Invalid PCA component value. Using NULL (no PCA).", type = "warning", duration = 6)
+            return(NULL)
+          }
+          val
+        }
+        pca_val <- parse_pca_umap(input$pca_umap)
+        nn_val <- max(2L, as.integer(round(coalesce_input(input$nn, 8))))
+        n_trees_val <- max(1L, as.integer(round(coalesce_input(input$n_trees, 100))))
+        search_k_val <- as.integer(round(coalesce_input(input$search_k, 1000L)))
+        if (!is.finite(search_k_val) || search_k_val < 1L) {
+          search_k_val <- 1000L
+        }
+        min_dist_val <- suppressWarnings(as.numeric(input$min_dist))
+        if (!is.finite(min_dist_val) || min_dist_val < 0) min_dist_val <- 0.02
+        set_op_mix_ratio_val <- suppressWarnings(as.numeric(input$set_op_mix_ratio))
+        if (!is.finite(set_op_mix_ratio_val)) set_op_mix_ratio_val <- 0.15
+        set_op_mix_ratio_val <- min(1, max(0, set_op_mix_ratio_val))
+        metric_val <- as.character(coalesce_input(input$umap_metric, "cosine"))
+        spread_val <- suppressWarnings(as.numeric(input$umap_spread))
+        if (!is.finite(spread_val) || spread_val <= 0) spread_val <- 1
+        local_connectivity_val <- suppressWarnings(as.numeric(input$local_connectivity))
+        if (!is.finite(local_connectivity_val) || local_connectivity_val < 0) local_connectivity_val <- 1
+        repulsion_strength_val <- suppressWarnings(as.numeric(input$repulsion_strength))
+        if (!is.finite(repulsion_strength_val) || repulsion_strength_val <= 0) repulsion_strength_val <- 1
+        negative_sample_rate_val <- as.integer(round(coalesce_input(input$negative_sample_rate, 10)))
+        if (!is.finite(negative_sample_rate_val) || negative_sample_rate_val < 1L) negative_sample_rate_val <- 10L
+        learning_rate_val <- suppressWarnings(as.numeric(input$learning_rate))
+        if (!is.finite(learning_rate_val) || learning_rate_val <= 0) learning_rate_val <- 1
+        init_val <- as.character(coalesce_input(input$umap_init, "spectral"))
+        n_epochs_val <- as.integer(round(coalesce_input(input$n_epochs, 0)))
+        if (!is.finite(n_epochs_val) || n_epochs_val <= 0L) {
+          n_epochs_val <- NULL
+        }
+        
+        umap_args <- list(
+          img.dat = img.dat,
+          outliers = FALSE,
+          nn = nn_val,
+          search_k = search_k_val,
+          min_dist = min_dist_val,
+          n_trees = n_trees_val,
+          set_op_mix_ratio = set_op_mix_ratio_val,
+          pca = pca_val,
+          metric = metric_val,
+          spread = spread_val,
+          local_connectivity = local_connectivity_val,
+          repulsion_strength = repulsion_strength_val,
+          negative_sample_rate = negative_sample_rate_val,
+          learning_rate = learning_rate_val,
+          init = init_val
+        )
+        if (!is.null(n_epochs_val)) {
+          umap_args$n_epochs <- n_epochs_val
+        }
+        
         # Run UMAP
         if (input$fastmap == TRUE) {
           setCardinalBPPARAM(par_mode())
-          data_list <- try(get_umap(
-            img.dat,
-            outliers = FALSE,
-            nn = input$nn,
-            search_k = input$search_k,
-            min_dist = input$min_dist,
-            n_trees = input$n_trees,
-            set_op_mix_ratio = input$set_op_mix_ratio,
-            pca = eval(parse(text = input$pca_umap)),
-            fastmap = TRUE,
-            fm_r = input$fm_r,
-            fm_method = input$fm_method,
-            fm_metric = input$fm_metric,
-            fm_ncomp = input$fm_ncomp
-          ))
+          umap_args$fastmap <- TRUE
+          umap_args$fm_r <- input$fm_r
+          umap_args$fm_method <- input$fm_method
+          umap_args$fm_metric <- input$fm_metric
+          umap_args$fm_ncomp <- input$fm_ncomp
+          data_list <- try(do.call(get_umap, umap_args), silent = TRUE)
           if (class(data_list) %in% "try-error") {
-            showNotification("Fastmap UMAP failed, check parameters", type = "error")
-            message("Fastmap UMAP failed, check parameters")
+            err_txt <- gsub("\\s+", " ", as.character(data_list))
+            err_txt <- sub("^Error in .*?:\\s*", "", err_txt)
+            err_txt <- substr(err_txt, 1, 180)
+            showNotification(
+              paste0("Fastmap UMAP failed: ", err_txt),
+              type = "error",
+              duration = 10
+            )
+            message("Fastmap UMAP failed: ", as.character(data_list))
             return()
           }
         } else {
-          data_list <- get_umap(
-            img.dat = img.dat,
-            outliers = FALSE,
-            search_k = input$search_k,
-            min_dist = input$min_dist,
-            set_op_mix_ratio = input$set_op_mix_ratio,
-            pca = eval(parse(text = input$pca_umap))
-          )
+          data_list <- try(do.call(get_umap, umap_args), silent = TRUE)
+          if (class(data_list) %in% "try-error") {
+            showNotification("UMAP failed, check parameters", type = "error")
+            message("UMAP failed, check parameters")
+            return()
+          }
         }
         
         if (is.null(data_list$umap_separation$umap_out)) {
@@ -1058,6 +1194,9 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
         "som" = x2$data_list$som_umap_separation$unit.classif,
         "skmeans" = x2$data_list$skmeans_umap_separation$cluster
       )
+      if (!is.null(x2$bkcols)) {
+        x2$bkcols <- normalize_labels(x2$bkcols)
+      }
     })
     
     output$data_list_table <- renderPrint({
@@ -1099,29 +1238,27 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
       }
       
       if (!is.null(x2$bkcols) && length(x2$bkcols) == length(tf_list)) {
-        cols <- x2$bkcols[tf_list]
+        cols <- normalize_labels(x2$bkcols[tf_list])
       } else {
         cols <- rep("grey70", sum(tf_list))
       }
-      cols[cols == 0] <- 100
-      cols[cols %in% NA] <- 100
+      emb_fill <- build_fill_mapping(cols)
+      cols_plot <- unname(emb_fill$values[emb_fill$labels])
       
       updateSelectizeInput(session,
                            'Color_choices',
-                           choices = cols,
+                           choices = unique(emb_fill$labels),
                            server = TRUE)
       
-      palette(pals::polychrome())
       print(
         pairs(
           x2$data_list$umap_separation$umap_out[tf_list,],
-          col = cols,
+          col = cols_plot,
           pch = ".",
           cex = input$cex,
           main = runNames(x2$overview_peaks_sel)
         )
       )
-      palette("ggplot2")
       
       #
       #
@@ -1253,8 +1390,9 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
           alt = "pData field not found"
         ))
       }
-      cols = pdat_df[, x2$rcol_plot]
-      tf_list <- cols %in% input$show_dat
+      cols <- normalize_labels(pdat_df[, x2$rcol_plot, drop = TRUE])
+      show_vals <- normalize_labels(input$show_dat)
+      tf_list <- cols %in% show_vals
       tf_list[is.na(tf_list)] <- FALSE
       
       img.dat <- safe_subset_pixels(img.dat, tf_list, "pData display filter", notify = FALSE)
@@ -1275,7 +1413,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
       y <- coord(img.dat)[, 2]
       runs = Cardinal::run(img.dat)
       aa <- data.frame(x, y, runs)
-      cols = (as.data.frame(pData(img.dat))[, x2$rcol_plot])
+      cols <- normalize_labels((as.data.frame(pData(img.dat))[, x2$rcol_plot, drop = TRUE]))
       
       # } else {
       #   
@@ -1306,47 +1444,16 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
         ))
       }
       
-      #test cols to make sure they will work. from here: https://stackoverflow.com/questions/13289009/check-if-character-string-is-a-valid-color-representation
-      areColors <- function(x) {
-        sapply(x, function(X) {
-          tryCatch(is.matrix(col2rgb(X)), 
-                   error = function(e) FALSE)
-        })
-      }
-      
-      if(sum(areColors(cols))<length(cols)){
-        cat("\npData field for vizualization not recognized as colors, converting to alphabet")
-        
-        cols_col<-as.numeric(as.factor(cols))
-        
-        #max_col<-max(as.numeric(as.factor(cols)))
-        
-        #alph_cols<-palette("alphabet")[1:max_col]
-        
-        #cols_col<-factor(cols_col, levels=alph_cols)
-        
-        cols=cols_col
-        
-        
-        p1 <- ggplot2::ggplot(aa, ggplot2::aes(x = x, y = y)) +
-          ggplot2::geom_tile(ggplot2::aes(fill = factor(cols))) +
-          ggplot2::facet_wrap(. ~ runs) +
-          ggplot2::theme_minimal() +
-          ggplot2::scale_y_continuous(trans = "reverse")+
-          ggplot2::theme(legend.position = "bottom")+
-          ggplot2::scale_fill_discrete(name=x2$rcol_plot, labels=levels(factor(as.data.frame(pData(img.dat))[, x2$rcol_plot])))
-        
-        
-      } else {
-        
-        
-        p1 <- ggplot2::ggplot(aa, ggplot2::aes(x = x, y = y)) +
-          ggplot2::geom_tile(fill = cols) +
-          ggplot2::facet_wrap(. ~ runs) +
-          ggplot2::theme_minimal() +
-          ggplot2::scale_y_continuous(trans = "reverse")
-        
-      }
+      fill_map <- build_fill_mapping(cols)
+      fill_factor <- factor(fill_map$labels, levels = names(fill_map$values))
+      log_fill_mapping("plot7_tissue_umap", fill_map$values)
+      p1 <- ggplot2::ggplot(aa, ggplot2::aes(x = x, y = y)) +
+        ggplot2::geom_tile(ggplot2::aes(fill = fill_factor)) +
+        ggplot2::facet_wrap(. ~ runs) +
+        ggplot2::theme_minimal() +
+        ggplot2::scale_y_continuous(trans = "reverse") +
+        ggplot2::theme(legend.position = "bottom") +
+        ggplot2::scale_fill_manual(values = fill_map$values, name = x2$rcol_plot, drop = FALSE)
       
       print(p1)
       
@@ -1419,24 +1526,28 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
       req(runs)
       a <- data.frame(x, y, runs)
       if (!is.null(x2$bkcols) && length(x2$bkcols) == length(tf_list)) {
-        cols <- x2$bkcols[tf_list]
+        cols <- normalize_labels(x2$bkcols[tf_list])
       } else {
         cols <- rep("grey70", nrow(a))
       }
       
       cat(names(table(cols)))
-      cols[cols == 0] <- 100 #for h/dbscan?
       
       
       
       
       
       #if(input$umap_cols=="Reduced2" | input$umap_cols=="Reduced" ){
+      fill_map <- build_fill_mapping(cols)
+      fill_factor <- factor(fill_map$labels, levels = names(fill_map$values))
+      log_fill_mapping("plot7", fill_map$values)
       p1 <- ggplot2::ggplot(a, ggplot2::aes(x = x, y = y)) +
-        ggplot2::geom_tile(fill = cols) +
+        ggplot2::geom_tile(ggplot2::aes(fill = fill_factor)) +
         ggplot2::facet_wrap(. ~ runs) +
         ggplot2::theme_minimal() +
-        ggplot2::scale_y_continuous(trans = "reverse")
+        ggplot2::scale_y_continuous(trans = "reverse") +
+        ggplot2::theme(legend.position = "bottom") +
+        ggplot2::scale_fill_manual(values = fill_map$values, name = input$umap_cols, drop = FALSE)
       # } else { #for h/dbscan
       #   if(length(table(cols))/length(pals::polychrome()) >1) {
       #     ff<-floor(length(table(cols))/length(pals::polychrome()))+1
@@ -2371,117 +2482,94 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap) {
     
     
     output$umap_choice <- renderUI({
-      switch(
-        input$seg_choice,
-        "bk_seg" = list(
-          numericInput(ns("min_dist"), "minimum distance for UMAP", 0.01),
-          numericInput(ns("search_k"), "# of node to search", 50),
-          
-          numericInput(
-            ns("nn"),
-            "UMAP nearest neighbors",
-            min = 2,
-            max = 100,
-            value = 3
+      make_umap_controls <- function(show_anat_editor = FALSE) {
+        tagList(
+          tags$div(style = "font-weight:600; margin-bottom:6px;", "Common parameters"),
+          fluidRow(
+            column(
+              6,
+              numericInput(
+                ns("nn"),
+                "Nearest neighbors",
+                min = 2,
+                max = 100,
+                value = 8
+              )
+            ),
+            column(
+              6,
+              numericInput(ns("min_dist"), "Min distance", min = 0, value = 0.02, step = 0.01)
+            )
           ),
-          numericInput(ns("n_trees"), "Number of trees for UMAP", 50),
-          numericInput(
-            ns("set_op_mix_ratio"),
-            "set_op_mix_ratio",
-            min = 0,
-            max = 1,
-            value = 0.25
+          fluidRow(
+            column(6, textInput(ns("pca_umap"), "PCA components (NULL = none)", value = "")),
+            column(
+              6,
+              selectInput(
+                ns("umap_metric"),
+                "Metric",
+                choices = c("cosine", "euclidean", "manhattan", "correlation"),
+                selected = "cosine"
+              )
+            )
           ),
-          textInput(
-            ns("pca_umap"),
-            "UMAP PCA components (NULL for no PCA)",
-            value = NULL
+          fluidRow(
+            column(
+              6,
+              numericInput(
+                ns("set_op_mix_ratio"),
+                "set_op_mix_ratio",
+                min = 0,
+                max = 1,
+                value = 0.15,
+                step = 0.01
+              )
+            ),
+            column(6, numericInput(ns("search_k"), "search_k", value = 1000, min = 1))
           ),
-          numericInput(ns("k_clustering"), "k for clustering methods", 5),
-          #checkboxInput(ns("use_python"), "Use Python?"),
-          uiOutput(ns("use_python")),
-          numericInput(ns("eps"), "DBSCAN eps", .15),
-          numericInput(
-            ns("minPts"),
-            "H/DBSCAN min points / cluster",
-            min = 2,
-            value = 50
+          fluidRow(
+            column(6, numericInput(ns("n_trees"), "n_trees", value = 100, min = 1))
           ),
-          numericInput(
-            ns("cex"),
-            "cex, tile plot size adjustment",
-            min = 0.1,
-            value = 2
+          tags$div(style = "font-weight:600; margin-top:6px; margin-bottom:6px;", "Advanced parameters"),
+          fluidRow(
+            column(6, numericInput(ns("umap_spread"), "Spread", value = 1, min = 0.01, step = 0.05)),
+            column(6, numericInput(ns("local_connectivity"), "Local connectivity", value = 1, min = 0, step = 0.5))
           ),
-          numericInput(
-            ns("quant"),
-            "R color reduction quantile (0-1)",
-            min = 0,
-            max = 0.99,
-            value = .9
+          fluidRow(
+            column(6, numericInput(ns("repulsion_strength"), "Repulsion", value = 1.2, min = 0.01, step = 0.1)),
+            column(6, numericInput(ns("negative_sample_rate"), "Negative sample rate", value = 10, min = 1))
+          ),
+          fluidRow(
+            column(6, numericInput(ns("learning_rate"), "Learning rate", value = 1, min = 0.001, step = 0.1)),
+            column(6, numericInput(ns("n_epochs"), "n_epochs (0 = auto)", value = 600, min = 0))
+          ),
+          selectInput(
+            ns("umap_init"),
+            "Initialization",
+            choices = c("spectral", "random", "pca", "spca"),
+            selected = "spectral"
           ),
           checkboxInput(
             ns("fastmap"),
-            "Use spatialFastmap? (experimental)",
-            value =
-              FALSE
+            "Use spatialFastmap (experimental)",
+            value = FALSE
           ),
           uiOutput(ns("fm_params")),
           actionButton(ns("umap1"), label = "Start UMAP"),
-          actionButton(ns("action_dbscan"), label = "Re-run color clustering")
-        ),
-        "anat_seg" = list(
-          numericInput(ns("min_dist"), "minimum distance for UMAP", 0),
-          numericInput(
-            ns("nn"),
-            "UMAP nearest neighbors",
-            min = 2,
-            max = 100,
-            value = 3
-          ),
-          numericInput(ns("n_trees"), "Number of trees for UMAP", 50),
-          numericInput(
-            ns("set_op_mix_ratio"),
-            "set_op_mix_ratio",
-            min = 0,
-            max = 1,
-            value = 0.25
-          ),
-          textInput(
-            ns("pca_umap"),
-            "UMAP PCA components (NULL for no PCA)",
-            value = NULL
-          ),
-          numericInput(ns("eps"), "DBSCAN eps", .15),
-          numericInput(
-            ns("minPts"),
-            "H/DBSCAN min points / cluster",
-            min = 2,
-            value = 50L
-          ),
-          #checkboxInput(ns("use_python"), "Use Python?"),
-          uiOutput(ns("use_python")),
-          numericInput(
-            ns("cex"),
-            "cex, tile plot size adjustment",
-            min = 0.1,
-            value = 2
-          ),
-          numericInput(
-            ns("quant"),
-            "R color reduction quantile (0-1)",
-            min = 0,
-            max = 0.99,
-            value = .85
-          ),
-          checkboxInput(ns("fastmap"), "Use spatialFastmap?", value =
-                          FALSE),
-          uiOutput(ns("fm_params")),
-          actionButton(ns("umap1"), label = "Start UMAP"),
-          actionButton(ns("action_dbscan"), label = "Re-run color clustering"),
-          uiOutput(ns('anat_pdata')) #pData selection for anatomical features
-          
+          if (show_anat_editor) {
+            tagList(
+              tags$hr(style = "margin-top:8px;margin-bottom:8px;"),
+              uiOutput(ns("anat_pdata"))
+            )
+          }
         )
+      }
+      
+      switch(
+        input$seg_choice,
+        "bk_seg" = make_umap_controls(show_anat_editor = FALSE),
+        "anat_seg" = make_umap_controls(show_anat_editor = TRUE),
+        NULL
       )
     })
     

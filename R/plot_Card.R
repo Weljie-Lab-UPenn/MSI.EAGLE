@@ -83,11 +83,72 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
     
     #create new overview_peaks_sel object with mean values
     if(is.null(fData(overview_peaks_sel)$mean)) {
-      overview_peaks_sel<-Cardinal::summarizeFeatures(overview_peaks_sel, verbose=F)
-      if(class(overview_peaks_sel)=="try-error") {
+      overview_peaks_sel <- try(Cardinal::summarizeFeatures(overview_peaks_sel, verbose = FALSE), silent = TRUE)
+      if (inherits(overview_peaks_sel, "try-error")) {
         showNotification("No data available, please check your parameters or dataset", type="error")
+        message("plot_card_server summarizeFeatures failed: ", as.character(overview_peaks_sel))
         return()
       }
+    }
+    
+    sanitize_limits <- function(x, default = c(0, 1), clamp_nonnegative = FALSE) {
+      x <- suppressWarnings(as.numeric(x))
+      x <- x[is.finite(x)]
+      if (length(x) < 2) {
+        x <- default
+      } else {
+        x <- range(x)
+      }
+      if (clamp_nonnegative) {
+        x[1] <- max(0, x[1])
+      }
+      if (!is.finite(x[1]) || !is.finite(x[2]) || x[2] <= x[1]) {
+        x <- default
+      }
+      x
+    }
+    
+    get_safe_plot_limits <- function(obj) {
+      mz_vals <- try(suppressWarnings(as.numeric(Cardinal::mz(obj))), silent = TRUE)
+      mz_limits <- if (inherits(mz_vals, "try-error")) c(0, 1) else sanitize_limits(mz_vals, default = c(0, 1))
+      
+      mean_vals <- try(suppressWarnings(as.numeric(fData(obj)$mean)), silent = TRUE)
+      if (inherits(mean_vals, "try-error")) {
+        y_limits <- c(0, 1)
+      } else {
+        y_limits <- sanitize_limits(mean_vals, default = c(0, 1), clamp_nonnegative = TRUE)
+      }
+      
+      list(x = mz_limits, y = y_limits)
+    }
+
+    normalize_pdata_labels <- function(x) {
+      x <- as.character(x)
+      x <- iconv(x, from = "", to = "UTF-8", sub = "")
+      x <- gsub("[[:cntrl:]\u200B\u200C\u200D\uFEFF]", "", x, perl = TRUE)
+      x <- gsub("\\s+", " ", x, perl = TRUE)
+      x <- trimws(x)
+      x[is.na(x) | !nzchar(x)] <- "NA"
+      x
+    }
+
+    are_valid_colors <- function(x) {
+      x <- as.character(x)
+      ok <- rep(FALSE, length(x))
+      keep <- !is.na(x) & nzchar(x)
+      if (any(keep)) {
+        ok[keep] <- vapply(
+          x[keep],
+          function(val) {
+            tryCatch({
+              grDevices::col2rgb(val)
+              TRUE
+            }, error = function(e) FALSE)
+          },
+          logical(1)
+        )
+      }
+      ok
     }
     
     # NEW: Add UI for pixel masking options
@@ -427,6 +488,19 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
         if(!is.null(input$select_runs)) {
           overview_peaks_sel_masked <- subsetPixels(overview_peaks_sel_masked, run %in% input$select_runs)
         }
+
+        if (is.null(overview_peaks_sel_masked) || ncol(overview_peaks_sel_masked) == 0) {
+          graphics::plot.new()
+          graphics::text(0.5, 0.5, "No pixels available after mask/run filtering.")
+          dev.off()
+          return(list(
+            src = outfile,
+            contentType = 'image/png',
+            width = input$width_im,
+            height = input$height_im,
+            alt = "No pixels available"
+          ))
+        }
         
         vp_orig<-vizi_par()
         
@@ -453,19 +527,136 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
         
         if(input$plot_pdata){
           req(input$pdata_var_plot)
-          
-          #create list of arguments for image
-          arg_list<-list(overview_peaks_sel_masked, 
-                         input$pdata_var_plot,
-                         key=(input$colorkey3),
-                         col=pals::alphabet(),
-                         grid=FALSE)
-          smoothing_option <- if (input$smooth3 != "none") input$smooth3 else NULL
-          if (!is.null(smoothing_option)) {
-            pdata_vals <- as.data.frame(pData(overview_peaks_sel_masked))[[input$pdata_var_plot]]
-            if (is.numeric(pdata_vals) || is.integer(pdata_vals)) {
+          pdata_df <- as.data.frame(pData(overview_peaks_sel_masked))
+          if (!input$pdata_var_plot %in% colnames(pdata_df)) {
+            showNotification(
+              paste0("pData field '", input$pdata_var_plot, "' is not available in the current selection."),
+              type = "warning",
+              duration = 5
+            )
+            graphics::plot.new()
+            graphics::text(0.5, 0.5, "Selected pData field is not available.")
+            dev.off()
+            return(list(
+              src = outfile,
+              contentType = 'image/png',
+              width = input$width_im,
+              height = input$height_im,
+              alt = "Invalid pData field"
+            ))
+          }
+
+          pdata_vals <- pdata_df[[input$pdata_var_plot]]
+          if (length(pdata_vals) != ncol(overview_peaks_sel_masked)) {
+            showNotification(
+              "pData length mismatch for selected field; skipping phenotype plot.",
+              type = "error",
+              duration = 6
+            )
+            graphics::plot.new()
+            graphics::text(0.5, 0.5, "pData length mismatch.")
+            dev.off()
+            return(list(
+              src = outfile,
+              contentType = 'image/png',
+              width = input$width_im,
+              height = input$height_im,
+              alt = "pData mismatch"
+            ))
+          }
+
+          is_numeric_pdata <- is.numeric(pdata_vals) || is.integer(pdata_vals)
+          if (is_numeric_pdata) {
+            #create list of arguments for image
+            arg_list <- list(
+              overview_peaks_sel_masked,
+              input$pdata_var_plot,
+              key = (input$colorkey3),
+              col = cpal(input$color3),
+              grid = FALSE
+            )
+
+            smoothing_option <- if (input$smooth3 != "none") input$smooth3 else NULL
+            if (!is.null(smoothing_option)) {
               arg_list$smooth <- smoothing_option
-            } else {
+            }
+
+            if (input$dark_bg) {
+              arg_list$style <- "dark"
+            }
+
+            plt_tmp <- do.call(Cardinal::image, arg_list)
+            print(plt_tmp)
+          } else {
+            # Categorical pData plotted via ggplot to avoid pData mutation issues.
+            labels <- normalize_pdata_labels(pdata_vals)
+            if (length(labels) == 0) {
+              labels <- rep("NA", ncol(overview_peaks_sel_masked))
+            }
+            levels_lab <- unique(labels)
+            valid_col <- are_valid_colors(levels_lab)
+            col_map <- stats::setNames(rep("grey70", length(levels_lab)), levels_lab)
+
+            if (any(valid_col)) {
+              col_map[valid_col] <- levels_lab[valid_col]
+            }
+            if (any(!valid_col)) {
+              fallback_cols <- grDevices::hcl.colors(sum(!valid_col), palette = "Dark 3")
+              col_map[!valid_col] <- fallback_cols
+            }
+
+            coords_df <- as.data.frame(Cardinal::coord(overview_peaks_sel_masked))
+            xv <- if ("x" %in% colnames(coords_df)) coords_df$x else coords_df[[1]]
+            yv <- if ("y" %in% colnames(coords_df)) coords_df$y else if (ncol(coords_df) >= 2) coords_df[[2]] else rep(1, length(xv))
+            run_vec <- as.character(Cardinal::run(overview_peaks_sel_masked))
+            if (length(run_vec) != length(labels)) {
+              run_vec <- rep("run", length(labels))
+            }
+
+            plot_df <- data.frame(
+              x = as.numeric(xv),
+              y = as.numeric(yv),
+              run = run_vec,
+              label = factor(labels, levels = levels_lab),
+              stringsAsFactors = FALSE
+            )
+
+            p_plot <- ggplot2::ggplot(plot_df, ggplot2::aes(x = x, y = y, fill = label)) +
+              ggplot2::geom_tile() +
+              ggplot2::facet_wrap(. ~ run) +
+              ggplot2::coord_fixed() +
+              ggplot2::scale_y_continuous(trans = "reverse") +
+              ggplot2::theme_minimal() +
+              ggplot2::scale_fill_manual(
+                values = unname(col_map[levels_lab]),
+                name = input$pdata_var_plot,
+                drop = FALSE
+              )
+
+            if (!isTRUE(input$colorkey3)) {
+              p_plot <- p_plot + ggplot2::guides(fill = "none")
+            }
+
+            if (isTRUE(input$dark_bg)) {
+              p_plot <- p_plot +
+                ggplot2::theme(
+                  panel.background = ggplot2::element_rect(fill = "black", colour = NA),
+                  plot.background = ggplot2::element_rect(fill = "black", colour = NA),
+                  strip.background = ggplot2::element_rect(fill = "black", colour = NA),
+                  strip.text = ggplot2::element_text(color = "white"),
+                  text = ggplot2::element_text(color = "white"),
+                  axis.text = ggplot2::element_text(color = "white"),
+                  axis.title = ggplot2::element_text(color = "white"),
+                  legend.background = ggplot2::element_rect(fill = "black", colour = NA),
+                  legend.key = ggplot2::element_rect(fill = "black", colour = NA),
+                  legend.text = ggplot2::element_text(color = "white"),
+                  legend.title = ggplot2::element_text(color = "white")
+                )
+            }
+
+            print(p_plot)
+
+            if (input$smooth3 != "none") {
               showNotification(
                 paste0("Smoothing is only applied to numeric pData. Skipping for '", input$pdata_var_plot, "'."),
                 type = "message",
@@ -473,14 +664,6 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
               )
             }
           }
-          
-          if(input$dark_bg) {
-            arg_list$style <- "dark"
-          }
-          
-          plt_tmp<-do.call(Cardinal::image, arg_list)
-          
-          print(plt_tmp)
           
           vizi_par(vp_orig)
         } else if (input$ion_viz3=="viz_all") {
@@ -1029,14 +1212,14 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
           
           req(overview_peaks_sel)
           
-          a<-Cardinal::plot(overview_peaks_sel)
+          lims <- get_safe_plot_limits(overview_peaks_sel)
           
           
           sliderInput(ns("mass_range_plot"), 
                       label = p("m/z range for MS plot (X)"), 
-                      min = round(a$channels$x$limits[1]),
-                      max = round(a$channels$x$limits[2]), 
-                      value = round(a$channels$x$limits), 
+                      min = round(lims$x[1], 4),
+                      max = round(lims$x[2], 4), 
+                      value = round(lims$x, 4), 
                       step = NULL,
                       round = TRUE)
           
@@ -1047,14 +1230,17 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
       observe({
         output$plot_ranges2<- renderUI( {
           req(overview_peaks_sel)
-          a<-Cardinal::plot(overview_peaks_sel, "mean")
+          lims <- get_safe_plot_limits(overview_peaks_sel)
+          y_step <- max((lims$y[2] - lims$y[1]) / 20, .Machine$double.eps)
+          y_top <- if (is.null(input$param_numeric) || !is.finite(input$param_numeric)) lims$y[2] else input$param_numeric
+          y_top <- min(max(y_top, lims$y[1]), lims$y[2] * 1.05)
           
           sliderInput (ns("int_range_plot"), 
                        label = p("intensity range for MS plot (Y)"), 
-                       min = round(a$channels$y$limits[1],0),
-                       max = round(a$channels$y$limits[2],0)*1.05, 
-                       value = req(input$param_numeric), #round(a$par$ylim,0), 
-                       step = a$channels$y$limits[2]/20,
+                       min = round(lims$y[1], 0),
+                       max = round(lims$y[2] * 1.05, 0), 
+                       value = c(round(lims$y[1], 0), round(y_top, 0)),
+                       step = y_step,
                        round = TRUE
           )
         })
@@ -1081,24 +1267,24 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
           req(overview_peaks_sel)
           
           
-          a<-Cardinal::plot(overview_peaks_sel, "mean")
+          lims <- get_safe_plot_limits(overview_peaks_sel)
           
           
           numericInput(ns("param_numeric"),
                        "Manual y-axis intensity max value",
-                       min = round(a$channels$y$limits[1],0),
-                       max = round(a$channels$y$limits[2],0),
-                       value = round(a$channels$y$limits[2],0)
+                       min = round(lims$y[1], 0),
+                       max = round(lims$y[2], 0),
+                       value = round(lims$y[2], 0)
           )
         })
       })
       
       
       if(!is.null(overview_peaks_sel)) {
+        lims <- get_safe_plot_limits(overview_peaks_sel)
         
-        updateSliderInput(session, ns("int_range_plot"), value = c(round(Cardinal::plot(req(overview_peaks_sel))$channels$y$limits,0) 
-        ))
-        updateNumericInput(session, ns("param_numeric"), value = round(Cardinal::plot(req(overview_peaks_sel))$channels$y$limits[2],0))
+        updateSliderInput(session, ns("int_range_plot"), value = c(round(lims$y, 0)))
+        updateNumericInput(session, ns("param_numeric"), value = round(lims$y[2], 0))
       }
       
       observe({
@@ -1163,13 +1349,34 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
           # MODIFIED: Apply pixel mask to spectrum plot data as well
           overview_peaks_sel_plot_masked <- apply_pixel_mask(overview_peaks_sel_plot)
           
-          p1<-Cardinal::plot(overview_peaks_sel_plot_masked,
-                             xlim=xlim,
-                             ylim =ylim,
-                             grid=FALSE,
-                             "mean",
-                             annPeaks=input$show_mz,
-                             free="y")
+          p1 <- try(
+            Cardinal::plot(overview_peaks_sel_plot_masked,
+                           xlim=xlim,
+                           ylim =ylim,
+                           grid=FALSE,
+                           "mean",
+                           annPeaks=input$show_mz,
+                           free="y"),
+            silent = TRUE
+          )
+          if (inherits(p1, "try-error")) {
+            message("plot_card_server spectrum plotting failed: ", as.character(p1))
+            showNotification(
+              "Spectrum plotting failed for this file. Ion image plotting is still available.",
+              type = "warning",
+              duration = 8
+            )
+            plot.new()
+            text(0.5, 0.6, "Spectrum plot unavailable for this dataset.", cex = 1.1)
+            text(0.5, 0.45, "Try a source .imzML export if this came from a converted file.", cex = 0.9)
+            vizi_par(vp_orig)
+            dev.off()
+            return(list(src = outfile,
+                        contentType = 'image/png',
+                        width = input$width,
+                        height = input$height,
+                        alt = "This is alternate text"))
+          }
           print(p1)
           vizi_par(vp_orig)
           
@@ -1183,7 +1390,19 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
             
             ppm_error<- round(1e6*(x_sel-targ_mz)/targ_mz, 2)
             
-            p1_coord<-p1[[1]][[1]]$marks$peaks$encoding
+            p1_coord <- try(p1[[1]][[1]]$marks$peaks$encoding, silent = TRUE)
+            if (inherits(p1_coord, "try-error") || is.null(p1_coord)) {
+              showNotification("Could not access plotted peaks for ppm labels.", type = "warning")
+              p1_coord <- NULL
+            }
+            if (is.null(p1_coord)) {
+              dev.off()
+              return(list(src = outfile,
+                          contentType = 'image/png',
+                          width = input$width,
+                          height = input$height,
+                          alt = "This is alternate text"))
+            }
             
             y_labs<-p1_coord$y[p1_coord$x %in% x_sel]
             
@@ -1200,7 +1419,19 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
           
           if(input$show_int) {
             
-            p1_coord<-p1[[1]][[1]]$marks$peaks$encoding
+            p1_coord <- try(p1[[1]][[1]]$marks$peaks$encoding, silent = TRUE)
+            if (inherits(p1_coord, "try-error") || is.null(p1_coord)) {
+              showNotification("Could not access plotted peaks for intensity labels.", type = "warning")
+              p1_coord <- NULL
+            }
+            if (is.null(p1_coord)) {
+              dev.off()
+              return(list(src = outfile,
+                          contentType = 'image/png',
+                          width = input$width,
+                          height = input$height,
+                          alt = "This is alternate text"))
+            }
             
             dat=overview_peaks_sel_plot_masked
             x=mz(dat)
