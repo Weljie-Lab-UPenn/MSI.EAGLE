@@ -19,8 +19,8 @@ plot_stats_results <- function(
     chunks = getCardinalNChunks(),
     # ADD THESE NEW PARAMETERS WITH DEFAULTS:
     export_contrast = "histogram",
-    export_colorscale = "Spectral",
-    export_smooth = "none",
+    export_colorscale = "Inferno",
+    export_smooth = "gaussian",
     export_scale = TRUE,
     export_dark_bg = FALSE
 ) {
