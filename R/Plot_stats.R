@@ -181,8 +181,16 @@ plot_stats_results <- function(
       fdr_vals <- x5$stats_results$fdr[m]
       names(a) <- paste0("mz=", round(mz_vals, 4), " i=", i_vals, " FDR=", round(fdr_vals, 3))
       
-      # Convert pData to proper data frame before subsetting
-      b <- as.data.frame(pData(x5$data_file_selected))[, c(phen_cols_stats, group_var), drop = FALSE]
+      # Convert pData to proper data frame before subsetting.
+      # Keep grouping columns unique to avoid duplicate-name artifacts (e.g., polygon_is_cell.1).
+      pdat_sel <- as.data.frame(pData(x5$data_file_selected))
+      group_cols <- unique(c(phen_cols_stats, group_var))
+      group_cols <- group_cols[!is.na(group_cols) & nzchar(group_cols)]
+      group_cols <- group_cols[group_cols %in% colnames(pdat_sel)]
+      if (!phen_cols_stats %in% group_cols && phen_cols_stats %in% colnames(pdat_sel)) {
+        group_cols <- c(phen_cols_stats, group_cols)
+      }
+      b <- pdat_sel[, group_cols, drop = FALSE]
       
       # Combine data - ensure proper dimensions
       if (length(a) == 1) {
@@ -194,6 +202,7 @@ plot_stats_results <- function(
         dat_comb <- as.data.frame(do.call(cbind, a))
         colnames(dat_comb) <- names(a)
       }
+      ion_cols <- colnames(dat_comb)
       
       # Add phenotype data
       dat_comb <- cbind(dat_comb, b)
@@ -208,27 +217,21 @@ plot_stats_results <- function(
       if (is_pixel_level) {
         # Pixel-level: each row is an individual pixel/replicate
         message("Plotting pixel-level data - showing distribution within groups")
-        
-        # Get column names for ions (exclude phenotype columns)
-        ion_cols <- setdiff(colnames(dat_comb), c(phen_cols_stats, group_var))
-        
+
         long_format_df <- dat_comb %>%
           tidyr::pivot_longer(
             cols = dplyr::all_of(ion_cols),
             names_to = "ion",
             values_to = "value"
           ) %>% 
-          na.omit() %>%
-          dplyr::mutate(value = as.numeric(value))
+          dplyr::mutate(value = as.numeric(value)) %>%
+          dplyr::filter(is.finite(value))
         
       } else {
         # Biological replicate level: average by grouping variable
         summarized_df <- dat_comb %>%
-          dplyr::group_by(dplyr::across(dplyr::all_of(c(phen_cols_stats, group_var)))) %>%
-          dplyr::summarize(dplyr::across(dplyr::everything(), mean, na.rm = TRUE), .groups = 'keep')
-        
-        # Get column names for ions (exclude phenotype columns)
-        ion_cols <- setdiff(colnames(summarized_df), c(phen_cols_stats, group_var))
+          dplyr::group_by(dplyr::across(dplyr::all_of(group_cols))) %>%
+          dplyr::summarize(dplyr::across(dplyr::all_of(ion_cols), ~mean(.x, na.rm = TRUE)), .groups = "drop")
         
         long_format_df <- summarized_df %>%
           tidyr::pivot_longer(
@@ -236,8 +239,8 @@ plot_stats_results <- function(
             names_to = "ion",
             values_to = "value"
           ) %>% 
-          na.omit() %>%
-          dplyr::mutate(value = as.numeric(value))
+          dplyr::mutate(value = as.numeric(value)) %>%
+          dplyr::filter(is.finite(value))
       }
       
       n_samples <- long_format_df %>%

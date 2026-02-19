@@ -160,6 +160,9 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
     }
     
     log_fill_mapping <- function(tag, fill_values, n_show = 12) {
+      if (!isTRUE(getOption("msi.eagle.debug.umap.colors", FALSE))) {
+        return(invisible(NULL))
+      }
       if (length(fill_values) == 0) {
         return(invisible(NULL))
       }
@@ -1167,7 +1170,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
       if (is.null(x2$data_list)) {
         return()
       }
-      x2$bkcols <- switch(
+      new_bkcols <- switch(
         input$umap_cols,
         # Get color info
         #"RGB" = data_list_shiny()$umap_separation$color_scheme,
@@ -1194,8 +1197,11 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         "som" = x2$data_list$som_umap_separation$unit.classif,
         "skmeans" = x2$data_list$skmeans_umap_separation$cluster
       )
-      if (!is.null(x2$bkcols)) {
-        x2$bkcols <- normalize_labels(x2$bkcols)
+      if (!is.null(new_bkcols)) {
+        new_bkcols <- normalize_labels(new_bkcols)
+      }
+      if (!identical(x2$bkcols, new_bkcols)) {
+        x2$bkcols <- new_bkcols
       }
     })
     
@@ -1210,7 +1216,6 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
       x2 <- preproc_values()[["x2"]]
       req(x2$data_list)
       req(x2$tf_list)
-      print("plot6 continuing")
       # A temp file to save the output.
       # This file will be removed later by renderImage
       outfile <- tempfile(fileext = '.png')
@@ -1244,20 +1249,12 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
       }
       emb_fill <- build_fill_mapping(cols)
       cols_plot <- unname(emb_fill$values[emb_fill$labels])
-      
-      updateSelectizeInput(session,
-                           'Color_choices',
-                           choices = unique(emb_fill$labels),
-                           server = TRUE)
-      
-      print(
-        pairs(
-          x2$data_list$umap_separation$umap_out[tf_list,],
-          col = cols_plot,
-          pch = ".",
-          cex = input$cex,
-          main = runNames(x2$overview_peaks_sel)
-        )
+      pairs(
+        x2$data_list$umap_separation$umap_out[tf_list,],
+        col = cols_plot,
+        pch = ".",
+        cex = input$cex,
+        main = runNames(x2$overview_peaks_sel)
       )
       
       #
@@ -1530,12 +1527,6 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
       } else {
         cols <- rep("grey70", nrow(a))
       }
-      
-      cat(names(table(cols)))
-      
-      
-      
-      
       
       #if(input$umap_cols=="Reduced2" | input$umap_cols=="Reduced" ){
       fill_map <- build_fill_mapping(cols)
@@ -1864,14 +1855,24 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         
         # Get the data set with the appropriate name
         x2 <- preproc_values()[["x2"]]
-        dat <- (x2$bkcols)
-        cols <- unique(dat)
+        dat <- x2$bkcols
+        req(dat)
+        cols <- unique(normalize_labels(dat))
+        selected_cols <- input$cols
+        if (is.null(selected_cols) || length(selected_cols) == 0) {
+          selected_cols <- cols
+        } else {
+          selected_cols <- intersect(cols, normalize_labels(selected_cols))
+          if (length(selected_cols) == 0) {
+            selected_cols <- cols
+          }
+        }
         
         # Create the checkboxes and select them all by default
         checkboxGroupInput(ns("cols"),
                            "Choose colors",
                            choices  = cols,
-                           selected = cols)
+                           selected = selected_cols)
       })
     
     
@@ -1919,9 +1920,19 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         return()
       }
       req(x2$data_list)
-      tf_tmp <- x2$bkcols %in% input$cols
+      req(x2$bkcols)
+      bkcols_norm <- normalize_labels(x2$bkcols)
+      selected_cols <- input$cols
+      if (is.null(selected_cols) || length(selected_cols) == 0) {
+        selected_cols <- unique(bkcols_norm)
+      } else {
+        selected_cols <- normalize_labels(selected_cols)
+      }
+      tf_tmp <- bkcols_norm %in% selected_cols
       tf_tmp[is.na(tf_tmp)] <- FALSE
-      x2$tf_list <- tf_tmp
+      if (!identical(x2$tf_list, tf_tmp)) {
+        x2$tf_list <- tf_tmp
+      }
     }, ignoreInit = FALSE)
     
     #save processed data in a list when save button pressed and plot results

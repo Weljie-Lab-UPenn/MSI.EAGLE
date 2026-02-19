@@ -52,6 +52,16 @@ HistologyIntegrationUI <- function(id) {
               "Polygon file (.geojson/.json)",
               accept = c(".geojson", ".json")
             ),
+            selectInput(
+              ns("msi_plot_mode"),
+              "MSI display mode",
+              choices = c(
+                "Single m/z ion" = "mz",
+                "RGB ions (2-3)" = "rgb",
+                "pData field" = "pdata"
+              ),
+              selected = "mz"
+            ),
             selectizeInput(
               ns("mz_select"),
               "Select m/z",
@@ -59,6 +69,7 @@ HistologyIntegrationUI <- function(id) {
               selected = NULL,
               options = list(placeholder = "Load MSI data to populate m/z list")
             ),
+            uiOutput(ns("msi_mode_controls")),
             selectInput(
               ns("intensity_transform"),
               "Intensity transform",
@@ -93,7 +104,8 @@ HistologyIntegrationUI <- function(id) {
             actionButton(ns("map_to_pdata"), "Map selected source to pData"),
             shinyFiles::shinySaveButton(ns("save_mapped_imzml"), "Save mapped imzML", "Save", filetype = list("")),
             tags$hr(),
-            uiOutput(ns("pdata_field_ui"))
+            uiOutput(ns("pdata_field_ui")),
+            checkboxInput(ns("hide_pdata_legend"), "Hide pData legend", value = TRUE)
           )
         ),
         mainPanel(
@@ -132,8 +144,11 @@ HistologyIntegrationUI <- function(id) {
               column(
                 3,
                 sliderInput(ns("scale_x"), "Scale X", min = 0.001, max = 50, value = 1, step = 0.0005),
+                numericInput(ns("scale_x_num"), "Scale X (num)", value = 1, min = 0.001, max = 50, step = 0.0005),
                 sliderInput(ns("scale_y"), "Scale Y", min = 0.001, max = 50, value = 1, step = 0.0005),
+                numericInput(ns("scale_y_num"), "Scale Y (num)", value = 1, min = 0.001, max = 50, step = 0.0005),
                 sliderInput(ns("rotate_deg"), "Rotation (degrees)", min = -180, max = 180, value = 0, step = 0.5),
+                numericInput(ns("rotate_deg_num"), "Rotation (num)", value = 0, min = -180, max = 180, step = 0.1),
                 sliderInput(ns("translate_x"), "Translate X", min = -1000, max = 1000, value = 0, step = 1),
                 sliderInput(ns("translate_y"), "Translate Y", min = -1000, max = 1000, value = 0, step = 1)
               ),
@@ -165,21 +180,131 @@ HistologyIntegrationUI <- function(id) {
                 ),
                 checkboxInput(ns("polygon_color_by_label"), "Polygon color by label", value = FALSE),
                 polygon_color_input,
+                sliderInput(ns("polygon_linewidth"), "Polygon line width", min = 0.2, max = 6, value = 1, step = 0.1),
                 sliderInput(ns("histology_alpha"), "Histology alpha", min = 0, max = 1, value = 0.5, step = 0.01),
-                sliderInput(ns("cluster_alpha"), "Cluster alpha", min = 0, max = 1, value = 0.7, step = 0.01)
+                numericInput(ns("histology_alpha_num"), "Histology alpha (num)", value = 0.5, min = 0, max = 1, step = 0.01),
+                sliderInput(ns("cluster_alpha"), "Cluster alpha", min = 0, max = 1, value = 0.7, step = 0.01),
+                numericInput(ns("cluster_alpha_num"), "Cluster alpha (num)", value = 0.7, min = 0, max = 1, step = 0.01)
+              )
+            ),
+            checkboxInput(ns("show_fit_info"), "Show fit diagnostics/info", value = TRUE),
+            tabsetPanel(
+              id = ns("registration_fit_tabs"),
+              type = "tabs",
+              selected = "stat_fit",
+              tabPanel(
+                "Stat Fit",
+                value = "stat_fit",
+                tags$small("Color-map independent fit using inside-vs-outside ion statistics."),
+                fluidRow(
+                  column(2, numericInput(ns("stat_fit_range"), "Range", value = 20, min = 1, max = 300, step = 1)),
+                  column(2, numericInput(ns("stat_fit_step"), "Step", value = 2, min = 1, max = 50, step = 1)),
+                  column(2, numericInput(ns("stat_fit_buffer_px"), "Outside buffer (px)", value = 3, min = 1, max = 25, step = 1)),
+                  column(2, numericInput(ns("stat_fit_min_pixels"), "Min pixels/group", value = 10, min = 2, max = 1000, step = 1)),
+                  column(2, numericInput(ns("stat_fit_max_ions"), "Max ions", value = 200, min = 20, max = 2000, step = 10)),
+                  column(2, numericInput(ns("stat_fit_alpha"), "Alpha", value = 0.1, min = 0.001, max = 0.5, step = 0.01))
+                ),
+                fluidRow(
+                  column(
+                    4,
+                    selectInput(
+                      ns("stat_fit_outside_mode"),
+                      "Outside group",
+                      choices = c(
+                        "BBox complement (recommended)" = "bbox",
+                        "Local ring around polygon" = "local",
+                        "Global complement (all non-polygon pixels)" = "global"
+                      ),
+                      selected = "bbox"
+                    )
+                  ),
+                  column(3, selectInput(
+                    ns("stat_fit_objective"),
+                    "Stat objective",
+                    choices = c("Minimize score" = "min", "Maximize score" = "max"),
+                    selected = "min"
+                  )),
+                  column(2, numericInput(ns("stat_fit_bbox_pad"), "BBox pad (px)", value = 25, min = 0, max = 500, step = 1))
+                ),
+                fluidRow(
+                  column(
+                    2,
+                    tags$div(
+                      style = "margin-top: 24px;",
+                      actionButton(ns("run_stat_fit"), "Run Stat Fit")
+                    )
+                  ),
+                  column(4, uiOutput(ns("stat_fit_preview_ui"))),
+                  column(
+                    2,
+                    tags$div(
+                      style = "margin-top: 24px;",
+                      actionButton(ns("apply_stat_fit_choice"), "Apply selected")
+                    )
+                  ),
+                  column(
+                    2,
+                    tags$div(
+                      style = "margin-top: 24px;",
+                      checkboxInput(ns("stat_fit_use_adjusted"), "Use BH-adjusted p", value = TRUE)
+                    )
+                  ),
+                  column(
+                    2,
+                    tags$div(
+                      style = "margin-top: 24px;",
+                      checkboxInput(ns("stat_fit_use_abs_lfc"), "Use |log2FC|", value = TRUE)
+                    )
+                  )
+                ),
+                fluidRow(
+                  column(2, numericInput(ns("stat_fit_top_n"), "Top features", value = 10, min = 1, max = 100, step = 1)),
+                  column(
+                    3,
+                    tags$div(
+                      style = "margin-top: 24px;",
+                      actionButton(ns("stat_fit_max_info"), "Max info to console")
+                    )
+                  )
+                ),
+                conditionalPanel(
+                  condition = sprintf("input['%s']", ns("show_fit_info")),
+                  fluidRow(
+                    column(6, uiOutput(ns("stat_fit_heatmap_ui"))),
+                    column(6, plotOutput(ns("stat_fit_contour"), height = "240px"))
+                  ),
+                  verbatimTextOutput(ns("stat_fit_summary"))
+                )
+              ),
+              tabPanel(
+                "Edge Fit",
+                value = "edge_fit",
+                fluidRow(
+                  column(2, numericInput(ns("optimize_xy_range"), "Range", value = 40, min = 1, max = 500, step = 1)),
+                  column(2, numericInput(ns("optimize_xy_step"), "Step", value = 2, min = 1, max = 50, step = 1)),
+                  column(2, numericInput(ns("optimize_edge_band"), "Boundary band (px)", value = 4, min = 1, max = 20, step = 1)),
+                  column(
+                    2,
+                    tags$div(
+                      style = "margin-top: 24px;",
+                      actionButton(ns("optimize_xy"), "Auto-fit XY")
+                    )
+                  ),
+                  column(2, uiOutput(ns("optimize_xy_preview_ui"))),
+                  column(
+                    2,
+                    tags$div(
+                      style = "margin-top: 24px;",
+                      actionButton(ns("apply_optimize_xy_choice"), "Apply selected")
+                    )
+                  )
+                )
               )
             ),
             fluidRow(
-              column(3, numericInput(ns("scale_x_num"), "Scale X (num)", value = 1, min = 0.001, max = 50, step = 0.0005)),
-              column(3, numericInput(ns("scale_y_num"), "Scale Y (num)", value = 1, min = 0.001, max = 50, step = 0.0005)),
-              column(3, numericInput(ns("rotate_deg_num"), "Rotation (num)", value = 0, min = -180, max = 180, step = 0.1)),
-              column(3, actionButton(ns("reset_transform"), "Reset transform"))
-            ),
-            fluidRow(
-              column(3, numericInput(ns("histology_alpha_num"), "Histology alpha (num)", value = 0.5, min = 0, max = 1, step = 0.01)),
-              column(3, numericInput(ns("cluster_alpha_num"), "Cluster alpha (num)", value = 0.7, min = 0, max = 1, step = 0.01)),
+              column(3, actionButton(ns("reset_transform"), "Reset transform")),
               column(3, downloadButton(ns("download_registration_params"), "Save params (.txt)")),
-              column(3, fileInput(ns("registration_params_upload"), "Load params (.txt/.csv)", accept = c(".txt", ".csv")))
+              column(6, fileInput(ns("registration_params_upload"), "Load params (.txt/.csv)", accept = c(".txt", ".csv")))
             )
           ),
           tags$hr(),

@@ -629,6 +629,7 @@ StatsPrepServer <- function(id,  setup_values) {
         }
         group_var <- as.character(group_var)
         group_var <- group_var[!is.na(group_var) & nzchar(group_var)]
+        group_var <- unique(group_var)
         
         # if(!is.null(group_var) && group_var=='none'){
         #   group_var=input$phen_cols_stats
