@@ -65,9 +65,16 @@ MSI.EAGLE <- function(...) {
                    CorrelationUI("tab8"),
                    HistologyIntegrationUI("tab9"),
                    tabPanel("Help",
-                            HTML("<p><b>MSI.EAGLE</b></p>
-                                 <p>Please look at the github page for the latest manual,  updates, and contact info.</p>
-                                 <a href='http://165.123.67.19:30003/aalim/DESI_Shiny_Processing_script/src/branch/modules', target='_blank'>Click here</a>")
+                            HTML("<p><b>MSI.EAGLE</b> is a general MSI analysis platform with optional single-cell and multimodal registration workflows.</p>
+                                 <ul>
+                                   <li>Routine MSI preprocessing, visualization, clustering, and statistics</li>
+                                   <li>Polygon-informed mapping of cell regions into MSI pData</li>
+                                   <li>Spatially aware UMAP and clustering workflows</li>
+                                   <li>Histology, cluster-image, and polygon registration to MSI space</li>
+                                   <li>Integrated statistical testing and reproducible exports</li>
+                                 </ul>
+                                 <p>For setup and updates, see the project repository:</p>
+                                 <a href='https://github.com/Weljie-Lab-UPenn/MSI.EAGLE' target='_blank'>https://github.com/Weljie-Lab-UPenn/MSI.EAGLE</a>")
                             ),
                    tabPanel("debug",
                             actionButton("browser", "debug browser()")

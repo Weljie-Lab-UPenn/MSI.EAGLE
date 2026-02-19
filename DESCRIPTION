@@ -1,10 +1,16 @@
 Package: MSI.EAGLE
-Title: Mass Spectrometry Imaging Elegant and Adaptive Graphical Layer Extensions
+Title: Interactive Mass Spectrometry Imaging Analysis and Registration Platform
 Version: 0.0.0.9000
 Authors@R: 
     person("Aalim", "Weljie", , "aalimudin@gmail.com", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0002-7145-4494"))
-Description: This is a (relatively) user friendly interactive tool for analysis of mass spectrometry data. It includes high level options to the Cardinal package for data processing, as well as extended tools such as UMAP analysis, pixel phenotyping, and some basic statistical tools.
+Description: MSI.EAGLE provides an interactive Shiny workflow for end-to-end
+    mass spectrometry imaging (MSI) analysis, built on Cardinal and extended
+    with manifold learning, clustering, phenotyping, statistics, and
+    multimodal registration. It supports routine MSI workflows as well as
+    optional polygon-informed single-cell mapping, spatially aware UMAP
+    visualization, histology/cluster/polygon overlays, and reproducible export
+    of transformed datasets and registration parameters.
 License: GPL (>= 3)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
