@@ -143,7 +143,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
     
     build_fill_mapping <- function(labels, fallback_palette = "Dark 3") {
       labels <- normalize_labels(labels)
-      uniq <- unique(labels)
+      uniq <- sort(unique(labels))
       valid_color <- are_valid_colors(uniq)
       
       fill_values <- stats::setNames(rep("grey70", length(uniq)), uniq)
@@ -473,23 +473,44 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
     
     # Run UMAP
     observeEvent(input$umap1, {
-      if (is.null(input$mytable_rows_selected)) {
-        showNotification("Select a dataset from the table first", type = "warning")
-        print("Select a dataset from the table first")
+      sel_rows <- suppressWarnings(as.integer(input$mytable_rows_selected))
+      sel_rows <- sel_rows[is.finite(sel_rows)]
+      if (length(sel_rows) == 0) {
+        showNotification("Select one or more runs in the table first.", type = "warning", duration = 6)
+        message("[UMAPServer] Start UMAP aborted: no selected table rows.")
         return()
       }
       print("Starting UMAP")
       # Reset colorscale
       x2 <- preproc_values()[["x2"]]
+
+      # Rebuild selected dataset if selection exists but reactive object is missing.
+      if (is.null(x2$mytable_selected) && !is.null(x2$overview_peaks_sel)) {
+        all_runs <- runNames(x2$overview_peaks_sel)
+        sel_rows <- sel_rows[sel_rows >= 1 & sel_rows <= length(all_runs)]
+        if (length(sel_rows) > 0) {
+          x2$mytable_selected <-
+            x2$overview_peaks_sel %>% subsetPixels(
+              Cardinal::run(x2$overview_peaks_sel) %in% all_runs[sel_rows]
+            )
+          x2$tf_list <- rep(TRUE, ncol(x2$mytable_selected))
+        }
+      }
+      if (is.null(x2$mytable_selected) || ncol(x2$mytable_selected) == 0) {
+        showNotification("No active dataset found for UMAP. Re-select run(s) in the table and retry.", type = "error", duration = 8)
+        message("[UMAPServer] Start UMAP aborted: x2$mytable_selected is NULL or empty.")
+        return()
+      }
       
       gc()
       ptm <- proc.time()
       
-      withProgress(message = "Performing UMAP analysis and clustering", value = 0.2, {
+      tryCatch(withProgress(message = "Performing UMAP analysis and clustering", value = 0.2, {
         if (input$seg_choice == "anat_seg") {
           img.dat <- safe_subset_pixels(x2$mytable_selected, x2$tf_list, "UMAP input", notify = TRUE)
           if (is.null(img.dat) || ncol(img.dat) == 0) {
             showNotification("No pixels selected for UMAP. Adjust filters and try again.", type = "warning", duration = 6)
+            message("[UMAPServer] Start UMAP aborted: no pixels after anatomical mask.")
             return()
           }
           x2$tf_list_anat <- rep(TRUE, ncol(img.dat))
@@ -497,7 +518,12 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
           x2$umap_name <- runNames(img.dat)
           x2$pdat_anat <- pData(x2$mytable_selected)
         } else {
-          img.dat <- tmp_umap_dat()
+          img.dat <- try(tmp_umap_dat(), silent = TRUE)
+          if (inherits(img.dat, "try-error") || is.null(img.dat) || ncol(img.dat) == 0) {
+            showNotification("Unable to build UMAP input from selected runs. Re-select rows and retry.", type = "error", duration = 8)
+            message("[UMAPServer] Start UMAP aborted: tmp_umap_dat unavailable or empty.")
+            return()
+          }
           x2$rcol_plot <- NULL
         }
         
@@ -591,14 +617,18 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         } else {
           data_list <- try(do.call(get_umap, umap_args), silent = TRUE)
           if (class(data_list) %in% "try-error") {
-            showNotification("UMAP failed, check parameters", type = "error")
-            message("UMAP failed, check parameters")
+            err_txt <- gsub("\\s+", " ", as.character(data_list))
+            err_txt <- sub("^Error in .*?:\\s*", "", err_txt)
+            err_txt <- substr(err_txt, 1, 220)
+            showNotification(paste0("UMAP failed: ", err_txt), type = "error", duration = 10)
+            message("[UMAPServer] UMAP failed: ", as.character(data_list))
             return()
           }
         }
         
         if (is.null(data_list$umap_separation$umap_out)) {
-          print("UMAP matrix is null, exiting")
+          showNotification("UMAP returned no embedding matrix (umap_out is NULL). Check preprocessing/parameters.", type = "error", duration = 10)
+          message("[UMAPServer] UMAP matrix is NULL; data_list structure invalid for downstream clustering.")
           return()
         }
         
@@ -606,6 +636,34 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         
         # Prepare embeddings
         embeddings <- as.matrix(data_list$umap_separation$umap_out)
+        n_embed <- nrow(embeddings)
+        d_embed <- ncol(embeddings)
+        pairwise_guard <- 12000L
+        spectral_guard <- 8000L
+        hdbscan_guard <- 50000L
+        wd_diag <- tryCatch(as.character(setup_values()[["wd"]]), error = function(e) "")
+        if (!nzchar(wd_diag) || !dir.exists(wd_diag)) wd_diag <- getwd()
+        diag_file <- file.path(wd_diag, paste0("umap_tab_start_cluster_diag_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
+        write(paste0("# UMAP tab start clustering diagnostics"), file = diag_file)
+        log_diag <- function(...) {
+          line <- paste0(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " | ", paste0(...))
+          message("[UMAPServer] ", line)
+          try(write(line, file = diag_file, append = TRUE), silent = TRUE)
+        }
+        fmt_mem <- function(bytes) {
+          u <- c("B", "KB", "MB", "GB", "TB")
+          idx <- if (bytes > 0) floor(log(bytes, 1024)) else 0
+          idx <- max(0, min(idx, length(u) - 1))
+          paste0(round(bytes / (1024^idx), 2), " ", u[idx + 1])
+        }
+        est_mem <- function(method_name) {
+          n <- as.double(n_embed)
+          if (method_name %in% c("hierarchical", "kmedoids")) return((n * (n - 1) / 2) * 8)
+          if (method_name == "spectral") return((n * n * 8) * 2)
+          (n * d_embed * 8)
+        }
+        log_diag("rows=", n_embed, " dims=", d_embed, " methods=", paste(input$clustering_methods, collapse = ","), " guards(pairwise/spectral/hdbscan)=", pairwise_guard, "/", spectral_guard, "/", hdbscan_guard)
+        log_diag("gc_pre=", paste(capture.output(gc()), collapse = " | "))
         
         # Set number of clusters (if applicable)
         n_clusters <- input$k_clustering
@@ -627,12 +685,21 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         # Hierarchical Clustering
         if ("hierarchical" %in% input$clustering_methods) {
           print("Starting hierarchical clustering")
-          tryCatch({
-            hc <- hclust(dist(embeddings), method = "ward.D2")
-            data_list$hierarchical_umap_separation <- cutree(hc, k = n_clusters)
-          }, error = function(e) {
-            print(paste("Error in Hierarchical clustering:", e))
-          })
+          log_diag("method=hierarchical est_mem=", fmt_mem(est_mem("hierarchical")))
+          if (n_embed > pairwise_guard) {
+            msg <- paste0("Skipping hierarchical clustering: n=", n_embed, " exceeds guard ", pairwise_guard, ".")
+            showNotification(msg, type = "warning", duration = 8)
+            log_diag("method=hierarchical status=skipped_guard")
+          } else {
+            tryCatch({
+              hc <- hclust(dist(embeddings), method = "ward.D2")
+              data_list$hierarchical_umap_separation <- cutree(hc, k = n_clusters)
+              log_diag("method=hierarchical status=ok")
+            }, error = function(e) {
+              print(paste("Error in Hierarchical clustering:", e))
+              log_diag("method=hierarchical status=failed error=", conditionMessage(e))
+            })
+          }
         }
         
         # DBSCAN Clustering
@@ -652,41 +719,68 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         # HDBSCAN Clustering
         if ("hdbscan" %in% input$clustering_methods) {
           print("Starting HDBSCAN clustering")
-          tryCatch({
-            data_list$hdbscan_umap_separation <- dbscan::hdbscan(
-              embeddings,
-              minPts = input$minPts
-            )
-          }, error = function(e) {
-            print(paste("Error in HDBSCAN clustering:", e))
-          })
+          log_diag("method=hdbscan est_mem=", fmt_mem(est_mem("dbscan")))
+          if (n_embed > hdbscan_guard) {
+            msg <- paste0("Skipping HDBSCAN clustering: n=", n_embed, " exceeds guard ", hdbscan_guard, ".")
+            showNotification(msg, type = "warning", duration = 8)
+            log_diag("method=hdbscan status=skipped_guard")
+          } else {
+            tryCatch({
+              data_list$hdbscan_umap_separation <- dbscan::hdbscan(
+                embeddings,
+                minPts = input$minPts
+              )
+              log_diag("method=hdbscan status=ok")
+            }, error = function(e) {
+              print(paste("Error in HDBSCAN clustering:", e))
+              log_diag("method=hdbscan status=failed error=", conditionMessage(e))
+            })
+          }
         }
         
         # Spectral Clustering
         if ("spectral" %in% input$clustering_methods) {
           print("Starting spectral clustering")
-          tryCatch({
-            sigma <- 1
-            similarity_matrix <- exp(-as.matrix(dist(embeddings))^2 / (2 * sigma^2))
-            n_eigen <- n_clusters
-            eig <- RSpectra::eigs(similarity_matrix, k = n_eigen)
-            spectral_clusters <- kmeans(eig$vectors, centers = n_clusters)
-            data_list$spectral_umap_separation <- spectral_clusters
-          }, error = function(e) {
-            print(paste("Error in Spectral clustering:", e))
-          })
+          log_diag("method=spectral est_mem=", fmt_mem(est_mem("spectral")))
+          if (n_embed > spectral_guard) {
+            msg <- paste0("Skipping spectral clustering: n=", n_embed, " exceeds guard ", spectral_guard, ".")
+            showNotification(msg, type = "warning", duration = 8)
+            log_diag("method=spectral status=skipped_guard")
+          } else {
+            tryCatch({
+              sigma <- 1
+              similarity_matrix <- exp(-as.matrix(dist(embeddings))^2 / (2 * sigma^2))
+              n_eigen <- n_clusters
+              eig <- RSpectra::eigs(similarity_matrix, k = n_eigen)
+              spectral_clusters <- kmeans(eig$vectors, centers = n_clusters)
+              data_list$spectral_umap_separation <- spectral_clusters
+              log_diag("method=spectral status=ok")
+            }, error = function(e) {
+              print(paste("Error in Spectral clustering:", e))
+              log_diag("method=spectral status=failed error=", conditionMessage(e))
+            })
+          }
         }
         
         # K-medoids Clustering
         if ("kmedoids" %in% input$clustering_methods) {
           print("Starting K-medoids clustering")
-          showNotification("Running K-medoids clustering. This method can be slow on large datasets.", type = "message", duration = 8)
-          incProgress(amount = 0, detail = "Running K-medoids (can be slow)")
-          tryCatch({
-            data_list$kmedoids_umap_separation <- cluster::pam(embeddings, k = n_clusters)
-          }, error = function(e) {
-            print(paste("Error in K-medoids clustering:", e))
-          })
+          log_diag("method=kmedoids est_mem=", fmt_mem(est_mem("kmedoids")))
+          if (n_embed > pairwise_guard) {
+            msg <- paste0("Skipping K-medoids clustering: n=", n_embed, " exceeds guard ", pairwise_guard, ".")
+            showNotification(msg, type = "warning", duration = 8)
+            log_diag("method=kmedoids status=skipped_guard")
+          } else {
+            showNotification("Running K-medoids clustering. This method can be slow on large datasets.", type = "message", duration = 8)
+            incProgress(amount = 0, detail = "Running K-medoids (can be slow)")
+            tryCatch({
+              data_list$kmedoids_umap_separation <- cluster::pam(embeddings, k = n_clusters)
+              log_diag("method=kmedoids status=ok")
+            }, error = function(e) {
+              print(paste("Error in K-medoids clustering:", e))
+              log_diag("method=kmedoids status=failed error=", conditionMessage(e))
+            })
+          }
         }
         
         # Fuzzy C-means Clustering
@@ -706,11 +800,19 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
           if (!requireNamespace("mclust", quietly = TRUE)) {
             showNotification("Skipping Mclust clustering: package 'mclust' is not installed.", type = "warning", duration = 8)
           } else {
-            tryCatch({
-              data_list$mclust_umap_separation <- mclust::Mclust(embeddings, G = 1:n_clusters)
-            }, error = function(e) {
-              print(paste("Error in Mclust clustering:", e))
-            })
+            if (n_embed > pairwise_guard) {
+              msg <- paste0("Skipping Mclust: n=", n_embed, " exceeds guard ", pairwise_guard, ".")
+              showNotification(msg, type = "warning", duration = 8)
+              log_diag("method=mclust status=skipped_guard")
+            } else {
+              tryCatch({
+                data_list$mclust_umap_separation <- mclust::Mclust(embeddings, G = 1:n_clusters)
+                log_diag("method=mclust status=ok")
+              }, error = function(e) {
+                print(paste("Error in Mclust clustering:", e))
+                log_diag("method=mclust status=failed error=", conditionMessage(e))
+              })
+            }
           }
         }
         
@@ -746,6 +848,8 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         # Add any additional clustering methods here, following the same pattern
         
         print("Finished clustering methods")
+        log_diag("gc_post=", paste(capture.output(gc()), collapse = " | "))
+        showNotification(paste0("UMAP start diagnostics saved: ", diag_file), type = "message", duration = 8)
         
         incProgress(amount = 0.9, detail = "Starting quantile color reduction")
         
@@ -878,6 +982,13 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         
         
         x2$data_list <- data_list
+      }), error = function(e) {
+        showNotification(
+          paste0("UMAP start failed: ", conditionMessage(e)),
+          type = "error",
+          duration = 10
+        )
+        message("[UMAPServer] Start UMAP exception: ", conditionMessage(e))
       })
       print(proc.time() - ptm)
     })
@@ -904,6 +1015,34 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
       
       withProgress(message = "Re-running clustering on existing UMAP", {
         embeddings <- as.matrix(data_list$umap_separation$umap_out)
+        n_embed <- nrow(embeddings)
+        d_embed <- ncol(embeddings)
+        pairwise_guard <- 12000L
+        spectral_guard <- 8000L
+        hdbscan_guard <- 50000L
+        wd_diag <- tryCatch(as.character(setup_values()[["wd"]]), error = function(e) "")
+        if (!nzchar(wd_diag) || !dir.exists(wd_diag)) wd_diag <- getwd()
+        diag_file <- file.path(wd_diag, paste0("umap_tab_rerun_cluster_diag_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
+        write(paste0("# UMAP tab re-run clustering diagnostics"), file = diag_file)
+        log_diag <- function(...) {
+          line <- paste0(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " | ", paste0(...))
+          message("[UMAPServer] ", line)
+          try(write(line, file = diag_file, append = TRUE), silent = TRUE)
+        }
+        fmt_mem <- function(bytes) {
+          u <- c("B", "KB", "MB", "GB", "TB")
+          idx <- if (bytes > 0) floor(log(bytes, 1024)) else 0
+          idx <- max(0, min(idx, length(u) - 1))
+          paste0(round(bytes / (1024^idx), 2), " ", u[idx + 1])
+        }
+        est_mem <- function(method_name) {
+          n <- as.double(n_embed)
+          if (method_name %in% c("hierarchical", "kmedoids")) return((n * (n - 1) / 2) * 8)
+          if (method_name == "spectral") return((n * n * 8) * 2)
+          (n * d_embed * 8)
+        }
+        log_diag("rows=", n_embed, " dims=", d_embed, " methods=", paste(input$clustering_methods, collapse = ","), " guards(pairwise/spectral/hdbscan)=", pairwise_guard, "/", spectral_guard, "/", hdbscan_guard)
+        log_diag("gc_pre=", paste(capture.output(gc()), collapse = " | "))
         
         # Set the number of cores for parallel processing
         if (as.character(Sys.info()['sysname']) == "Windows") {
@@ -930,13 +1069,22 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         # Hierarchical Clustering
         if ("hierarchical" %in% input$clustering_methods) {
           print("Re-running hierarchical clustering")
-          tryCatch({
-            hc <- hclust(dist(embeddings), method = "ward.D2")
-            n_clusters <- input$k_clustering
-            data_list$hierarchical_umap_separation <- cutree(hc, k = n_clusters)
-          }, error = function(e) {
-            print(paste("Error in Hierarchical clustering:", e))
-          })
+          log_diag("method=hierarchical est_mem=", fmt_mem(est_mem("hierarchical")))
+          if (n_embed > pairwise_guard) {
+            msg <- paste0("Skipping hierarchical clustering: n=", n_embed, " exceeds guard ", pairwise_guard, ".")
+            showNotification(msg, type = "warning", duration = 8)
+            log_diag("method=hierarchical status=skipped_guard")
+          } else {
+            tryCatch({
+              hc <- hclust(dist(embeddings), method = "ward.D2")
+              n_clusters <- input$k_clustering
+              data_list$hierarchical_umap_separation <- cutree(hc, k = n_clusters)
+              log_diag("method=hierarchical status=ok")
+            }, error = function(e) {
+              print(paste("Error in Hierarchical clustering:", e))
+              log_diag("method=hierarchical status=failed error=", conditionMessage(e))
+            })
+          }
         }
         
         # DBSCAN Clustering
@@ -956,41 +1104,68 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         # HDBSCAN Clustering
         if ("hdbscan" %in% input$clustering_methods) {
           print("Re-running HDBSCAN")
-          tryCatch({
-            data_list$hdbscan_umap_separation <- dbscan::hdbscan(
-              embeddings,
-              minPts = input$minPts
-            )
-          }, error = function(e) {
-            print(paste("Error in HDBSCAN clustering:", e))
-          })
+          log_diag("method=hdbscan est_mem=", fmt_mem(est_mem("dbscan")))
+          if (n_embed > hdbscan_guard) {
+            msg <- paste0("Skipping HDBSCAN clustering: n=", n_embed, " exceeds guard ", hdbscan_guard, ".")
+            showNotification(msg, type = "warning", duration = 8)
+            log_diag("method=hdbscan status=skipped_guard")
+          } else {
+            tryCatch({
+              data_list$hdbscan_umap_separation <- dbscan::hdbscan(
+                embeddings,
+                minPts = input$minPts
+              )
+              log_diag("method=hdbscan status=ok")
+            }, error = function(e) {
+              print(paste("Error in HDBSCAN clustering:", e))
+              log_diag("method=hdbscan status=failed error=", conditionMessage(e))
+            })
+          }
         }
         
         # Spectral Clustering
         if ("spectral" %in% input$clustering_methods) {
           print("Re-running spectral clustering")
-          tryCatch({
-            sigma <- 1
-            similarity_matrix <- exp(-as.matrix(dist(embeddings))^2 / (2 * sigma^2))
-            n_eigen <- input$k_clustering
-            eig <- RSpectra::eigs(similarity_matrix, k = n_eigen)
-            spectral_clusters <- kmeans(eig$vectors, centers = n_eigen)
-            data_list$spectral_umap_separation <- spectral_clusters
-          }, error = function(e) {
-            print(paste("Error in Spectral clustering:", e))
-          })
+          log_diag("method=spectral est_mem=", fmt_mem(est_mem("spectral")))
+          if (n_embed > spectral_guard) {
+            msg <- paste0("Skipping spectral clustering: n=", n_embed, " exceeds guard ", spectral_guard, ".")
+            showNotification(msg, type = "warning", duration = 8)
+            log_diag("method=spectral status=skipped_guard")
+          } else {
+            tryCatch({
+              sigma <- 1
+              similarity_matrix <- exp(-as.matrix(dist(embeddings))^2 / (2 * sigma^2))
+              n_eigen <- input$k_clustering
+              eig <- RSpectra::eigs(similarity_matrix, k = n_eigen)
+              spectral_clusters <- kmeans(eig$vectors, centers = n_eigen)
+              data_list$spectral_umap_separation <- spectral_clusters
+              log_diag("method=spectral status=ok")
+            }, error = function(e) {
+              print(paste("Error in Spectral clustering:", e))
+              log_diag("method=spectral status=failed error=", conditionMessage(e))
+            })
+          }
         }
         
         # K-medoids Clustering
         if ("kmedoids" %in% input$clustering_methods) {
           print("Re-running K-medoids clustering")
-          showNotification("Re-running K-medoids clustering. This method can be slow on large datasets.", type = "message", duration = 8)
-          incProgress(amount = 0, detail = "Running K-medoids (can be slow)")
-          tryCatch({
-            data_list$kmedoids_umap_separation <- cluster::pam(embeddings, k = input$k_clustering)
-          }, error = function(e) {
-            print(paste("Error in K-medoids clustering:", e))
-          })
+          log_diag("method=kmedoids est_mem=", fmt_mem(est_mem("kmedoids")))
+          if (n_embed > pairwise_guard) {
+            msg <- paste0("Skipping K-medoids clustering: n=", n_embed, " exceeds guard ", pairwise_guard, ".")
+            showNotification(msg, type = "warning", duration = 8)
+            log_diag("method=kmedoids status=skipped_guard")
+          } else {
+            showNotification("Re-running K-medoids clustering. This method can be slow on large datasets.", type = "message", duration = 8)
+            incProgress(amount = 0, detail = "Running K-medoids (can be slow)")
+            tryCatch({
+              data_list$kmedoids_umap_separation <- cluster::pam(embeddings, k = input$k_clustering)
+              log_diag("method=kmedoids status=ok")
+            }, error = function(e) {
+              print(paste("Error in K-medoids clustering:", e))
+              log_diag("method=kmedoids status=failed error=", conditionMessage(e))
+            })
+          }
         }
         
         # Fuzzy C-means Clustering
@@ -1156,6 +1331,8 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         }
         
         print("Finished re-running selected clustering methods")
+        log_diag("gc_post=", paste(capture.output(gc()), collapse = " | "))
+        showNotification(paste0("UMAP re-run diagnostics saved: ", diag_file), type = "message", duration = 8)
         
         x2$data_list <- data_list
       })
@@ -1303,12 +1480,9 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
       req(input$mytable_rows_selected)
       req(input$seg_pdat_col)
       x2 <- preproc_values()[["x2"]]
-      
-      x2$rcol_plot <- input$seg_pdat_col
-      
-      req(x2$rcol_plot)
-      
-      print("plot7_tissue_umap_continuting")
+      rcol_plot <- input$seg_pdat_col
+      req(rcol_plot)
+
       outfile <- tempfile(fileext = '.png')
       
       png(outfile, width = 800, height = 600)
@@ -1376,8 +1550,8 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
       }
       
       pdat_df <- as.data.frame(pData(img.dat))
-      if (!x2$rcol_plot %in% colnames(pdat_df)) {
-        draw_empty_plot(sprintf("Field '%s' not found in pData.", x2$rcol_plot))
+      if (!rcol_plot %in% colnames(pdat_df)) {
+        draw_empty_plot(sprintf("Field '%s' not found in pData.", rcol_plot))
         dev.off()
         return(list(
           src = outfile,
@@ -1387,7 +1561,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
           alt = "pData field not found"
         ))
       }
-      cols <- normalize_labels(pdat_df[, x2$rcol_plot, drop = TRUE])
+      cols <- normalize_labels(pdat_df[, rcol_plot, drop = TRUE])
       show_vals <- normalize_labels(input$show_dat)
       tf_list <- cols %in% show_vals
       tf_list[is.na(tf_list)] <- FALSE
@@ -1410,7 +1584,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
       y <- coord(img.dat)[, 2]
       runs = Cardinal::run(img.dat)
       aa <- data.frame(x, y, runs)
-      cols <- normalize_labels((as.data.frame(pData(img.dat))[, x2$rcol_plot, drop = TRUE]))
+      cols <- normalize_labels((as.data.frame(pData(img.dat))[, rcol_plot, drop = TRUE]))
       
       # } else {
       #   
@@ -1450,7 +1624,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         ggplot2::theme_minimal() +
         ggplot2::scale_y_continuous(trans = "reverse") +
         ggplot2::theme(legend.position = "bottom") +
-        ggplot2::scale_fill_manual(values = fill_map$values, name = x2$rcol_plot, drop = FALSE)
+        ggplot2::scale_fill_manual(values = fill_map$values, name = rcol_plot, drop = FALSE)
       
       print(p1)
       
@@ -1829,7 +2003,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
           draw_empty_plot("No clustering color maps are available yet.")
         } else {
           n_cols <- 3  # Number of columns in the grid
-          print(do.call(gridExtra::grid.arrange, c(plot_list, ncol = n_cols)))
+          do.call(gridExtra::grid.arrange, c(plot_list, ncol = n_cols))
         }
       }
       
@@ -1857,7 +2031,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         x2 <- preproc_values()[["x2"]]
         dat <- x2$bkcols
         req(dat)
-        cols <- unique(normalize_labels(dat))
+        cols <- sort(unique(normalize_labels(dat)))
         selected_cols <- input$cols
         if (is.null(selected_cols) || length(selected_cols) == 0) {
           selected_cols <- cols
@@ -1924,7 +2098,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
       bkcols_norm <- normalize_labels(x2$bkcols)
       selected_cols <- input$cols
       if (is.null(selected_cols) || length(selected_cols) == 0) {
-        selected_cols <- unique(bkcols_norm)
+        selected_cols <- sort(unique(bkcols_norm))
       } else {
         selected_cols <- normalize_labels(selected_cols)
       }
