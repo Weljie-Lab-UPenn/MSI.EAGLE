@@ -111,6 +111,57 @@ PeakPickServer <- function(id, setup_values) {
       }
       TRUE
     }
+
+    parse_feature_index_selection <- function(selection_txt, n_features) {
+      if (is.null(selection_txt) || !nzchar(trimws(selection_txt))) {
+        return(seq_len(n_features))
+      }
+      tokens <- unlist(strsplit(trimws(selection_txt), "[,\\s]+"))
+      tokens <- tokens[nzchar(tokens)]
+      if (length(tokens) == 0) {
+        return(seq_len(n_features))
+      }
+
+      idx <- integer(0)
+      invalid <- character(0)
+      for (tok in tokens) {
+        if (grepl("^\\d+$", tok)) {
+          idx <- c(idx, as.integer(tok))
+        } else if (grepl("^\\d+:\\d+$", tok)) {
+          bounds <- as.integer(strsplit(tok, ":", fixed = TRUE)[[1]])
+          idx <- c(idx, seq.int(bounds[1], bounds[2]))
+        } else {
+          invalid <- c(invalid, tok)
+        }
+      }
+
+      if (length(invalid) > 0) {
+        stop(sprintf(
+          "Invalid feature selector token(s): %s. Use i indices like 1, 5, 20:40.",
+          paste(unique(invalid), collapse = ", ")
+        ))
+      }
+
+      idx <- sort(unique(idx))
+      idx <- idx[is.finite(idx) & idx >= 1 & idx <= n_features]
+      if (length(idx) == 0) {
+        stop(sprintf("No valid feature indices remain after filtering to 1..%d.", n_features))
+      }
+      idx
+    }
+
+    combine_with_cardinal_fallback <- function(img_list, context = "combine") {
+      combined <- try(Cardinal::combine(img_list), silent = TRUE)
+      if (!inherits(combined, "try-error")) {
+        message(sprintf("[PeakPick] %s: using Cardinal::combine", context))
+        return(combined)
+      }
+      message(sprintf(
+        "[PeakPick] %s: Cardinal::combine failed; using combine_card fallback. Error: %s",
+        context, as.character(combined)
+      ))
+      combine_card(img_list)
+    }
     
     # any time the reactive changes, update the selectInput
     observeEvent(my_files(),
@@ -155,74 +206,107 @@ PeakPickServer <- function(id, setup_values) {
     
     
     
+    output$operation_help <- renderUI({
+      req(input$pp_operation)
+      switch(
+        input$pp_operation,
+        "open_file" = tags$div(
+          tags$strong("Open existing dataset"),
+          tags$ul(
+            tags$li("Restore a peak-picked .imzML/.rds dataset."),
+            tags$li("Edit xmin/xmax/ymin/ymax in the run table to crop per run."),
+            tags$li("Save exports the cropped runs plus optional feature index filter (i values).")
+          )
+        ),
+        "pp_raw" = tags$div(
+          tags$strong("Peak-pick raw files"),
+          tags$ul(
+            tags$li("Start from raw files in Data Setup, from a reference file, or from mean-spectrum peaks."),
+            tags$li("After processing, use the run table limits to crop."),
+            tags$li("Optional feature index filter applies on save (i values).")
+          )
+        ),
+        "subset_f" = tags$div(
+          tags$strong("Combine by coordinates"),
+          tags$ul(
+            tags$li("Use when two datasets share the same coordinate grid but have different peak lists."),
+            tags$li("The merged feature list can be filtered by i indices at save."),
+            tags$li("Run-table limits still define cropped export boundaries.")
+          )
+        ),
+        "add_same_pklist" = tags$div(
+          tags$strong("Combine by peak list"),
+          tags$ul(
+            tags$li("Use when datasets have the same mz/feature list and you want to append runs/pixels."),
+            tags$li("Optional feature index filter (i) is available at save."),
+            tags$li("Run-table x/y limits define cropped output.")
+          )
+        )
+      )
+    })
+
     output$peak_pick <- renderUI({
+      feature_select_ui <- tagList(
+        textInput(
+          ns("selected_mz"),
+          "Optional feature index filter for save (i values)",
+          placeholder = "Examples: 1,5,20:40 or 1 5 20:40. Leave blank to save all features."
+        ),
+        helpText("Applies to save in all modes, including single-file open/restore.")
+      )
+      save_button_ui <- shinyFiles::shinySaveButton(
+        ns("save_imzml"),
+        "Save cropped / filtered imzML",
+        "Save",
+        filetype = list("")
+      )
+
       switch(
         input$pp_operation,
         "open_file" = list(
           radioButtons(
             ns("peak_pick_status"),
             "Cardinal v3.6+ processed .imzML/.rds file?",
-            
-            c("Yes" = "pp_y", "No, older .rds" = "pp_old")), 
+            c("Yes" = "pp_y", "No, older .rds" = "pp_old")
+          ),
           uiOutput(ns('pk_file')),
           actionButton(ns("action"), label = HTML("Restore saved file")),
-          shinyFiles::shinySaveButton(ns("save_imzml"), "Save imzML File", "Save", filetype = list(""))
+          feature_select_ui,
+          save_button_ui
         ),
         "pp_raw" = list(
           radioButtons(
             ns("peak_pick_status"),
-            "Start from an existing peak_picked file?",
+            "Start from an existing peak-picked file?",
             c(
               "No, fresh pick raw files" = "pp_no",
-              "From Reference file" = "pp_ref",
-              "From Mean Spectrum" = "pp_mean"
+              "From reference file" = "pp_ref",
+              "From mean spectrum" = "pp_mean"
             )
           ),
           uiOutput(ns('pk_file_condition')),
-          textInput(
-            ns("selected_mz"),
-            "Features selected / filtered (by comma or colon)"
-          ),
-          # downloadButton(
-          #   ns("save_selected"),
-          #   "Save selected runs from peak picked file"
-          # ),
+          feature_select_ui,
           p(),
-          shinyFiles::shinySaveButton(ns("save_imzml"), "Save imzML File", "Save", filetype = list(""))
+          save_button_ui
         ),
         "subset_f" = list(
           uiOutput(ns('pk_file')),
           actionButton(ns("action"), label = HTML("Restore first file")),
-          
           uiOutput(ns('add_file')),
           actionButton(ns('action_add_file'), "Add file (same coordinates)"),
-          
-          
-          textInput(
-            ns("selected_mz"),
-            "Features selected / filtered (by comma or colon)"
-          ),
-          # downloadButton(ns("save_selected"), "Save selected runs and features"),
-          shinyFiles::shinySaveButton(ns("save_imzml"), "Save imzML File", "Save", filetype = list(""))
+          feature_select_ui,
+          save_button_ui
         ),
         "add_same_pklist" = list(
           uiOutput(ns('pk_file')),
           actionButton(ns("action"), label = HTML("Restore first file")),
-          
           uiOutput(ns('add_file')),
           actionButton(
             ns('action_add_file_same'),
-            "Add Imageset (same peaklist)"
+            "Add imageset (same peak list)"
           ),
-          textInput(
-            ns("selected_mz"),
-            "Features selected / filtered (by comma or colon)"
-          ),
-          # downloadButton(
-          #   ns("save_selected"),
-          #   "Save selected runs and features from combined data"
-          # ),
-          shinyFiles::shinySaveButton(ns("save_imzml"), "Save imzML File", "Save", filetype = list(""))
+          feature_select_ui,
+          save_button_ui
         )
         # "demo" = list(selectInput(
         #   ns("cardworkdat"),
@@ -877,7 +961,12 @@ PeakPickServer <- function(id, setup_values) {
         pData(y)[, cols_selected] <- "NA"
       }
       
-      dat<-combine_card(list(x,y))
+      dat <- try(combine_with_cardinal_fallback(list(x, y), context = "same-peaklist combine"), silent = TRUE)
+      if (inherits(dat, "try-error")) {
+        showNotification("Combining same-peaklist datasets failed. Check file compatibility and run metadata.", type = "error", duration = 10)
+        message("PeakPick same-peaklist combine failure: ", as.character(dat))
+        return()
+      }
 
       x0$overview_peaks <- dat
       
@@ -967,7 +1056,7 @@ PeakPickServer <- function(id, setup_values) {
       req(x2$run_table),
       selection = list(mode = "multiple", selected = c(1:nrow(x2$run_table))),
       caption = HTML(
-        "<b/>Select files for further processing and edit pixels to remove noise:"
+        "<b>Run table:</b> select runs to export. Edit xmin/xmax/ymin/ymax to crop each run before saving."
       ),
       editable = TRUE
     )
@@ -988,7 +1077,7 @@ PeakPickServer <- function(id, setup_values) {
     })
     
     output$overview_text <- renderText({
-      x2$run_table$min
+      "Tip: saved output uses current run selections, x/y crop bounds from this table, and optional feature index filter (i values)."
     })
     
     
@@ -1052,11 +1141,8 @@ PeakPickServer <- function(id, setup_values) {
     })
     
     
-    #save the modified files (subset, added etc) and use the Features selected variable
-    # to filter which features are saved.
-    
+    # Save current cropped dataset (run-table x/y limits), selected runs, and optional feature indices.
     observeEvent(input$save_imzml, {
-      
       req(input$save_imzml)
       if (is.null(x2$overview_peaks_sel) || is.null(x0$overview_peaks)) {
         showNotification("No peak-picked dataset available to save. Load or create a dataset first.", type = "warning", duration = 8)
@@ -1066,79 +1152,53 @@ PeakPickServer <- function(id, setup_values) {
         showNotification("Select at least one run in the peak-pick table before saving.", type = "warning", duration = 8)
         return(NULL)
       }
-      
-      
+
       volumes <- c(wd = setup_values()[["wd"]], home = fs::path_home())
       shinyFiles::shinyFileSave(input, "save_imzml", roots = volumes, session = session)
-      
-      
       save_path <- shinyFiles::parseSavePath(volumes, input$save_imzml)
       if (nrow(save_path) == 0) return(NULL)
-      
-      #browser()
+
       filen <- as.character(save_path$datapath)
-      # 
-      #   #Save state template from here: https://www.r-bloggers.com/2019/06/shiny-application-with-modules-saving-and-restoring-from-rds/
-      # output$save_selected <- downloadHandler(
-      #   filename = function() {
-      #     paste0(getwd(),
-      #            "/MSI-proc_hi_SN-peak_picked-subset-",
-      #            Sys.Date(),
-      #            ".rds")
-      #   },
-      #   content = function(file) {
-          #restore original fData frame since we are only dealing with pixels
-          fData(x2$overview_peaks_sel) <- fData(x0$overview_peaks)
-          
-          
-          #dataset feature list
-          features <- 1:nrow(x2$overview_peaks_sel)
-          #check to see if we're selecting a subset of the features by looking at the mz input field
-          if (!is.null(input$selected_mz) &&
-              input$selected_mz != "") {
-            if (grepl(",|:", input$selected_mz)) {
-              features_sel <-
-                sort(as.numeric(eval(parse(
-                  text = paste0("c(", input$selected_mz, ")")
-                ))))
-            } else {
-              features_sel <-
-                sort(as.numeric(unlist(
-                  strsplit(input$selected_mz, "\\s+")
-                )))
-            }
-          } else {
-            features_sel <- features
-          }
-          #pk_img <- x0$overview_peaks
-          #browser()
-          #save subset of data
-          run_keep <- runNames(x2$overview_peaks_sel)[input$peak_pick_selection_rows_selected]
-          if (is.null(run_keep) || length(run_keep) == 0) {
-            showNotification("No runs selected to save.", type = "warning", duration = 8)
-            return(NULL)
-          }
-          pk_img <- try({
-            x2$overview_peaks_sel[features_sel, ] %>%
-              subsetPixels(Cardinal::run(x2$overview_peaks_sel) %in% run_keep)
-          }, silent = TRUE)
-          if (inherits(pk_img, "try-error")) {
-            showNotification("Could not subset dataset for save. This file may be incompatible; try exporting from .imzML source.", type = "error", duration = 10)
-            message("PeakPick save subset failure: ", as.character(pk_img))
-            return(NULL)
-          }
-          #print(pk_img)
-          print("saving selected subset of image file")
-          print(pk_img)
-          print(filen)
-          #TODO - why is the ID column replicated??
-          #saveRDS(pk_img, file)
-          
-          
-          writeImzML(pk_img, filen)
-          saveRDS(pk_img, paste0(filen, ".rds"))
+
+      # restore full feature metadata before optional feature filtering
+      fData(x2$overview_peaks_sel) <- fData(x0$overview_peaks)
+
+      features_sel <- tryCatch(
+        parse_feature_index_selection(input$selected_mz, nrow(x2$overview_peaks_sel)),
+        error = function(e) {
+          showNotification(conditionMessage(e), type = "error", duration = 10)
+          return(NULL)
         }
       )
+      if (is.null(features_sel)) return(NULL)
+
+      run_keep <- unique(as.character(x2$run_table$runs[input$peak_pick_selection_rows_selected]))
+      run_keep <- run_keep[nzchar(run_keep)]
+      if (length(run_keep) == 0) {
+        showNotification("No valid runs selected to save.", type = "warning", duration = 8)
+        return(NULL)
+      }
+
+      pk_img <- try({
+        x2$overview_peaks_sel[features_sel, ] %>%
+          subsetPixels(Cardinal::run(x2$overview_peaks_sel) %in% run_keep)
+      }, silent = TRUE)
+      if (inherits(pk_img, "try-error")) {
+        showNotification("Could not subset dataset for save. This file may be incompatible; try exporting from .imzML source.", type = "error", duration = 10)
+        message("PeakPick save subset failure: ", as.character(pk_img))
+        return(NULL)
+      }
+
+      writeImzML(pk_img, filen)
+      saveRDS(pk_img, paste0(filen, ".rds"))
+
+      n_runs_saved <- length(unique(as.character(Cardinal::run(pk_img))))
+      showNotification(
+        sprintf("Saved cropped dataset: %d run(s), %d feature(s), %d pixel(s).", n_runs_saved, nrow(pk_img), ncol(pk_img)),
+        type = "message",
+        duration = 8
+      )
+    })
     
     
     

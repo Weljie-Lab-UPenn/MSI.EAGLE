@@ -9,14 +9,15 @@ PeakPickUI <- function(id) {
            sidebarLayout(
              sidebarPanel(
                
-               radioButtons(ns("pp_operation"), "Peakpeaking operation",
-                            c("Open previously peakpicked file"="open_file",
-                              "Peakpick rawfiles (ie. imzML loaded in Data Setup tab)"="pp_raw",
-                              "Add two imagesets (same coordinates)"="subset_f",
-                              "Add two imagesets (same peaklist)"="add_same_pklist"
+               radioButtons(ns("pp_operation"), "Peak-picking operation",
+                            c("Open existing peak-picked dataset"="open_file",
+                              "Peak-pick raw files from Data Setup"="pp_raw",
+                              "Combine datasets (same coordinates; merge features)"="subset_f",
+                              "Combine datasets (same peak list; append runs)"="add_same_pklist"
                               #"Demo data from CardinalWorkflows package"="demo"
                               )
                ),
+               uiOutput(ns("operation_help")),
                uiOutput(ns("peak_pick")),
                fluidRow(column(2, verbatimTextOutput(ns("value"))))
 
