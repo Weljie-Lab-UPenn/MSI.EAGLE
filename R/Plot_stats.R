@@ -168,18 +168,63 @@ plot_stats_results <- function(
     
     if (plot_choice == "ggplot") {
       
-      # Extract spectra for selected ions - properly handle Cardinal S4 objects
-      a <- lapply(m, function(x) {
-        # Get the subset for this specific m/z
-        subset_data <- x5$data_file_selected[which(mz(x5$data_file_selected) %in% x5$stats_results$mz[x]), ]
-        # Extract spectra as matrix and return as vector
-        as.vector(as.matrix(spectra(subset_data)))
-      })
-      
       i_vals <- x5$stats_results$i[m]
       mz_vals <- x5$stats_results$mz[m]
       fdr_vals <- x5$stats_results$fdr[m]
-      names(a) <- paste0("mz=", round(mz_vals, 4), " i=", i_vals, " FDR=", round(fdr_vals, 3))
+      ion_names <- paste0("mz=", round(mz_vals, 4), " i=", i_vals, " FDR=", round(fdr_vals, 3))
+
+      # Extract all selected ions in one subset call (much faster on large datasets)
+      pdat_n <- nrow(as.data.frame(pData(x5$data_file_selected)))
+      feat_idx <- rep(NA_integer_, length(m))
+      fdat_df <- try(as.data.frame(fData(x5$data_file_selected)), silent = TRUE)
+
+      if (!inherits(fdat_df, "try-error") && "i" %in% colnames(fdat_df)) {
+        feat_idx <- match(i_vals, suppressWarnings(as.numeric(fdat_df$i)))
+      }
+      if (anyNA(feat_idx)) {
+        mz_lookup <- suppressWarnings(as.numeric(mz(x5$data_file_selected)))
+        feat_idx_mz <- match(mz_vals, mz_lookup)
+        feat_idx[is.na(feat_idx)] <- feat_idx_mz[is.na(feat_idx)]
+      }
+
+      feat_idx_unique <- unique(feat_idx[is.finite(feat_idx)])
+      if (length(feat_idx_unique) == 0) {
+        stop("Could not match selected ions to dataset features for ggplot plotting.")
+      }
+
+      subset_data <- x5$data_file_selected[feat_idx_unique, ]
+      spec_mat <- as.matrix(spectra(subset_data))
+      if (!is.matrix(spec_mat)) {
+        spec_mat <- matrix(spec_mat, nrow = length(feat_idx_unique))
+      }
+
+      # Normalize orientation to [features x pixels]
+      if (ncol(spec_mat) == pdat_n) {
+        spec_feat_pix <- spec_mat
+      } else if (nrow(spec_mat) == pdat_n) {
+        spec_feat_pix <- t(spec_mat)
+      } else {
+        stop(sprintf(
+          "Unexpected spectra matrix shape for ggplot plotting: %s x %s (pixels=%s)",
+          nrow(spec_mat), ncol(spec_mat), pdat_n
+        ))
+      }
+
+      idx_map <- match(feat_idx, feat_idx_unique)
+      dat_mat <- matrix(NA_real_, nrow = pdat_n, ncol = length(m))
+      valid_cols <- which(!is.na(idx_map))
+      if (length(valid_cols) > 0) {
+        dat_mat[, valid_cols] <- t(spec_feat_pix[idx_map[valid_cols], , drop = FALSE])
+      }
+      dat_comb <- as.data.frame(dat_mat, check.names = FALSE, stringsAsFactors = FALSE)
+      colnames(dat_comb) <- ion_names
+      ion_cols <- colnames(dat_comb)
+      if (anyNA(idx_map)) {
+        warning(sprintf(
+          "Could not match %d selected ion(s) to the current dataset; plotting with NA columns for unmatched ions.",
+          sum(is.na(idx_map))
+        ))
+      }
       
       # Convert pData to proper data frame before subsetting.
       # Keep grouping columns unique to avoid duplicate-name artifacts (e.g., polygon_is_cell.1).
@@ -191,18 +236,6 @@ plot_stats_results <- function(
         group_cols <- c(phen_cols_stats, group_cols)
       }
       b <- pdat_sel[, group_cols, drop = FALSE]
-      
-      # Combine data - ensure proper dimensions
-      if (length(a) == 1) {
-        # Single ion selected
-        dat_comb <- as.data.frame(matrix(a[[1]], ncol = 1))
-        colnames(dat_comb) <- names(a)[1]
-      } else {
-        # Multiple ions - combine as columns
-        dat_comb <- as.data.frame(do.call(cbind, a))
-        colnames(dat_comb) <- names(a)
-      }
-      ion_cols <- colnames(dat_comb)
       
       # Add phenotype data
       dat_comb <- cbind(dat_comb, b)

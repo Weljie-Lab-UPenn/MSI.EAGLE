@@ -2645,9 +2645,12 @@ StatsPrepServer <- function(id,  setup_values) {
             lab <- paste0("log2FC(", labels[2], "/", labels[1], ")")
             dat <- cbind(dat, log2FC)
             names(dat)[names(dat) == "log2FC"] <- lab
-            dat <- cbind(dat, apply(mean_spectra[, vars, drop = FALSE], 2, function(v) signif(as.numeric(v), 3)))
+            mean_vals_num <- as.data.frame(lapply(mean_spectra[, vars, drop = FALSE], function(v) as.numeric(v)))
+            mean_col_labels <- sub("\\.mean$", "", colnames(mean_vals_num))
+            mean_col_labels <- sub("^X(-?[0-9.]+)$", "\\1", mean_col_labels)
+            dat <- cbind(dat, apply(mean_vals_num, 2, function(v) signif(as.numeric(v), 3)))
             dat <-
-              cbind(dat, max_mean_group = colnames(mean_spectra[, vars])[max.col(mean_spectra[, vars])])
+              cbind(dat, max_mean_group = mean_col_labels[max.col(as.matrix(mean_vals_num), ties.method = "first")])
             dat$mz <- round(dat$mz, 4)
             
             
@@ -2701,21 +2704,23 @@ StatsPrepServer <- function(id,  setup_values) {
           #find max from each row, only from columns not named mz or mean in temp_means
           
 
-          #create temp dataset with only columns of interest
-          pattern <- "^mz$|^mean$|^mean\\..*$|^ID\\..|^ID$"
-          
-          # Use grep to identify columns that match the pattern
-          cols_to_exclude <- grep(pattern, names(mean_spectra))
-          
-          # Exclude those columns using negative indexing
-          df_filtered <- mean_spectra[, -cols_to_exclude]
+          # Keep only group mean columns (exclude global mean/count/freq metadata columns)
+          mean_col_idx <- grep("\\.mean$", names(mean_spectra))
+          if (length(mean_col_idx) == 0) {
+            showNotification("Could not identify group mean columns for max_mean_group.", type = "error")
+            return()
+          }
+          df_filtered <- mean_spectra[, mean_col_idx, drop = FALSE]
+          df_filtered <- as.data.frame(lapply(df_filtered, function(v) as.numeric(v)))
+          df_group_labels <- sub("\\.mean$", "", colnames(df_filtered))
+          df_group_labels <- sub("^X(-?[0-9.]+)$", "\\1", df_group_labels)
           
           
           
           temp_means <-
             cbind( 
                   as.data.frame(lapply(df_filtered, function(v) signif(as.numeric(v), 3))),
-                  max_mean_group = colnames(df_filtered)[max.col(df_filtered)]
+                  max_mean_group = df_group_labels[max.col(as.matrix(df_filtered), ties.method = "first")]
                   )
           if(!is.null(mean_spectra$ID)){
             temp_means <- cbind(mz=round(mean_spectra$mz,4), ID=mean_spectra$ID, temp_means)

@@ -14,6 +14,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       restore_rgb_select = NULL,
       restore_rgb_values = NULL,
       restore_rgb_auto_n = NULL,
+      rgb_mz_applied = NULL,
       restore_overlay_pdata_field = NULL,
       stat_fit_grid = NULL,
       stat_fit_candidates = NULL,
@@ -60,12 +61,16 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
             ),
             fluidRow(
               column(
-                6,
+                4,
                 actionButton(ns("rgb_add_from_mz"), "Add selected m/z")
               ),
               column(
-                6,
+                4,
                 actionButton(ns("rgb_clear_mz"), "Clear RGB channels")
+              ),
+              column(
+                4,
+                actionButton(ns("rgb_apply_mz"), "Apply RGB channels")
               )
             ),
             textOutput(ns("rgb_channels_summary")),
@@ -254,6 +259,13 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           rgb_sel <- idx_vals[seq_len(min(2, length(idx_vals)))]
         }
         updateSelectizeInput(session, "rgb_mz_select", choices = choices, selected = rgb_sel, server = TRUE)
+        # Keep an applied RGB selection so UI updates don't trigger repeated heavy re-renders.
+        applied_now <- intersect(as.character(isolate(xh$rgb_mz_applied)), idx_vals)
+        if (length(applied_now) < 2) {
+          xh$rgb_mz_applied <- rgb_sel
+        } else {
+          xh$rgb_mz_applied <- applied_now[seq_len(min(3L, length(applied_now)))]
+        }
         restore_n <- suppressWarnings(as.integer(isolate(xh$restore_rgb_auto_n)))
         if (length(restore_n) == 0L) restore_n <- NA_integer_
         if (isTRUE(is.finite(restore_n) && restore_n %in% c(2L, 3L))) {
@@ -325,6 +337,30 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       choices <- idx_vals
       names(choices) <- labels
       updateSelectizeInput(session, "rgb_mz_select", choices = choices, selected = character(0), server = TRUE)
+      showNotification("RGB channel selection cleared. Click 'Apply RGB channels' to refresh the plot.", type = "message", duration = 5)
+    }, ignoreInit = TRUE)
+
+    observeEvent(input$rgb_apply_mz, {
+      obj <- try(msi_for_pdata(), silent = TRUE)
+      if (inherits(obj, "try-error")) {
+        showNotification("Load MSI data first.", type = "warning", duration = 5)
+        return()
+      }
+      mzv <- suppressWarnings(as.numeric(Cardinal::mz(obj)))
+      if (length(mzv) == 0) {
+        showNotification("No m/z values available to apply.", type = "warning", duration = 5)
+        return()
+      }
+      idx_vals <- as.character(seq_along(mzv))
+      sel <- intersect(as.character(isolate(input$rgb_mz_select)), idx_vals)
+      sel <- unique(sel)
+      if (length(sel) > 3) sel <- sel[seq_len(3L)]
+      xh$rgb_mz_applied <- sel
+      if (length(sel) %in% c(2L, 3L)) {
+        showNotification("Applied RGB channel selection.", type = "message", duration = 4)
+      } else {
+        showNotification("Select 2 or 3 RGB channels, then click Apply.", type = "warning", duration = 6)
+      }
     }, ignoreInit = TRUE)
 
     output$rgb_channels_summary <- renderText({
@@ -339,14 +375,27 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       mzv <- suppressWarnings(as.numeric(Cardinal::mz(obj)))
       if (length(mzv) == 0) return("RGB channels: no m/z values available")
 
-      idx <- suppressWarnings(as.integer(input$rgb_mz_select))
-      idx <- idx[is.finite(idx) & idx >= 1L & idx <= length(mzv)]
-      idx <- unique(idx)
-      if (length(idx) == 0) return("RGB channels: none selected")
+      idx_pending <- suppressWarnings(as.integer(input$rgb_mz_select))
+      idx_pending <- idx_pending[is.finite(idx_pending) & idx_pending >= 1L & idx_pending <= length(mzv)]
+      idx_pending <- unique(idx_pending)
+      idx_applied <- suppressWarnings(as.integer(isolate(xh$rgb_mz_applied)))
+      idx_applied <- idx_applied[is.finite(idx_applied) & idx_applied >= 1L & idx_applied <= length(mzv)]
+      idx_applied <- unique(idx_applied)
+      if (length(idx_pending) == 0 && length(idx_applied) == 0) return("RGB channels: none selected")
 
-      ch <- c("R", "G", "B")[seq_len(min(3, length(idx)))]
-      vals <- format(mzv[idx], digits = 10, scientific = FALSE, trim = TRUE)
-      paste0("RGB channels: ", paste(sprintf("%s=%s", ch, vals), collapse = ", "))
+      fmt_ch <- function(idx) {
+        if (length(idx) == 0) return("none")
+        ch <- c("R", "G", "B")[seq_len(min(3, length(idx)))]
+        vals <- format(mzv[idx], digits = 10, scientific = FALSE, trim = TRUE)
+        paste(sprintf("%s=%s", ch, vals), collapse = ", ")
+      }
+      pending_txt <- fmt_ch(idx_pending)
+      applied_txt <- fmt_ch(idx_applied)
+      if (!identical(pending_txt, applied_txt)) {
+        paste0("RGB channels (selected): ", pending_txt, " | applied: ", applied_txt)
+      } else {
+        paste0("RGB channels: ", applied_txt)
+      }
     })
 
     observeEvent(input$suggest_rgb_mz, {
@@ -729,7 +778,9 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         mz_sel_val <- mz_axis[mz_sel_idx]
       }
 
-      rgb_sel_idx <- suppressWarnings(as.integer(input$rgb_mz_select))
+      rgb_sel_source <- isolate(xh$rgb_mz_applied)
+      if (is.null(rgb_sel_source) || length(rgb_sel_source) == 0) rgb_sel_source <- input$rgb_mz_select
+      rgb_sel_idx <- suppressWarnings(as.integer(rgb_sel_source))
       rgb_sel_idx <- rgb_sel_idx[is.finite(rgb_sel_idx) & rgb_sel_idx >= 1L & rgb_sel_idx <= length(mz_axis)]
       rgb_sel_idx <- unique(rgb_sel_idx)
       rgb_sel_vals <- if (length(rgb_sel_idx) > 0) mz_axis[rgb_sel_idx] else numeric(0)
@@ -738,7 +789,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         msi_plot_mode = input$msi_plot_mode,
         mz_select = input$mz_select,
         mz_value = mz_sel_val,
-        rgb_mz_select = paste(as.character(input$rgb_mz_select), collapse = ","),
+        rgb_mz_select = paste(as.character(rgb_sel_idx), collapse = ","),
         rgb_mz_values = paste(format(rgb_sel_vals, digits = 10, scientific = FALSE, trim = TRUE), collapse = ","),
         rgb_auto_n = input$rgb_auto_n,
         overlay_pdata_field = input$overlay_pdata_field,
@@ -1009,7 +1060,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
       # 2) RGB mode
       if (identical(mode_req, "rgb")) {
-        idx_rgb <- suppressWarnings(as.integer(input$rgb_mz_select))
+        idx_rgb <- suppressWarnings(as.integer(xh$rgb_mz_applied))
         idx_rgb <- unique(idx_rgb[is.finite(idx_rgb) & idx_rgb >= 1L & idx_rgb <= length(mzv)])
         if (length(idx_rgb) %in% c(2, 3)) {
           sp <- try(as.matrix(Cardinal::spectra(obj)[idx_rgb, , drop = FALSE]), silent = TRUE)
@@ -1042,6 +1093,26 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
             ))
           }
         }
+        # In RGB mode, do not fall back to single-ion rendering while the user is
+        # editing channel selections. This avoids repeated expensive redraws from
+        # changes to the standalone m/z selector used only for channel picking.
+        empty_mat <- matrix("#00000000", nrow = ny, ncol = nx)
+        return(list(
+          raster = as.raster(empty_mat),
+          nx = nx,
+          ny = ny,
+          mz_selected = NA_real_,
+          mz_index = NA_integer_,
+          rgb_mz = numeric(0),
+          pdata_field = NULL,
+          mode = "rgb",
+          mode_requested = mode_req,
+          display_label = "RGB: select 2-3 channels and click Apply RGB channels",
+          opt_signal = NULL,
+          x_norm = x_norm,
+          y_norm = y_norm,
+          row_idx = row_idx
+        ))
       }
 
       # 3) Single m/z mode (default fallback)
@@ -3798,8 +3869,82 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       filen <- sub("\\.imzML$", "", filen, ignore.case = TRUE)
 
       obj <- xh$mapped_obj
-      writeImzML(obj, filen)
-      saveRDS(obj, paste0(filen, ".rds"))
+      n_feat <- suppressWarnings(as.integer(try(nrow(obj), silent = TRUE)))
+      n_pix <- suppressWarnings(as.integer(try(ncol(obj), silent = TRUE)))
+      est_bytes <- NA_real_
+      if (is.finite(n_feat) && is.finite(n_pix) && n_feat > 0 && n_pix > 0) {
+        # Rough lower-bound estimate for one double-precision intensity array.
+        est_bytes <- as.numeric(n_feat) * as.numeric(n_pix) * 8
+      }
+      if (is.finite(est_bytes)) {
+        message(sprintf(
+          "[HistologyIntegration] Saving mapped imzML: features=%d pixels=%d rough intensity bytes=%.2f GB",
+          n_feat, n_pix, est_bytes / (1024^3)
+        ))
+      } else {
+        message("[HistologyIntegration] Saving mapped imzML: could not estimate output size.")
+      }
+
+      app_chunks <- suppressWarnings(as.integer(try(setup_values()[["chunks"]], silent = TRUE)))
+      if (!is.finite(app_chunks) || app_chunks < 1L) app_chunks <- 20L
+      write_chunks <- if (is.finite(n_pix) && n_pix > 0) {
+        as.integer(max(app_chunks, min(500L, ceiling(n_pix / 2000))))
+      } else {
+        as.integer(max(app_chunks, 100L))
+      }
+      if (!is.finite(write_chunks) || write_chunks < 1L) write_chunks <- 100L
+
+      showNotification(
+        sprintf("Saving mapped imzML (serial write, %d chunks). This may take time.", write_chunks),
+        type = "message",
+        duration = 8
+      )
+
+      old_chunks <- try(Cardinal::getCardinalNChunks(), silent = TRUE)
+      old_bp <- try(Cardinal::getCardinalBPPARAM(), silent = TRUE)
+      on.exit({
+        # Restore app defaults if available; otherwise restore previous values if we captured them.
+        bp_restore <- try(setup_values()[["par_mode"]], silent = TRUE)
+        if (!inherits(bp_restore, "try-error") && !is.null(bp_restore)) {
+          try(Cardinal::setCardinalBPPARAM(bp_restore), silent = TRUE)
+        } else if (!inherits(old_bp, "try-error") && !is.null(old_bp)) {
+          try(Cardinal::setCardinalBPPARAM(old_bp), silent = TRUE)
+        }
+        chunks_restore <- suppressWarnings(as.integer(try(setup_values()[["chunks"]], silent = TRUE)))
+        if (is.finite(chunks_restore) && chunks_restore > 0L) {
+          try(Cardinal::setCardinalNChunks(chunks_restore), silent = TRUE)
+        } else if (!inherits(old_chunks, "try-error")) {
+          try(Cardinal::setCardinalNChunks(old_chunks), silent = TRUE)
+        }
+      }, add = TRUE)
+
+      if (requireNamespace("BiocParallel", quietly = TRUE)) {
+        try(Cardinal::setCardinalBPPARAM(BiocParallel::SerialParam()), silent = TRUE)
+      }
+      try(Cardinal::setCardinalNChunks(write_chunks), silent = TRUE)
+
+      write_ok <- try(writeImzML(obj, filen), silent = TRUE)
+      if (inherits(write_ok, "try-error")) {
+        err_txt <- gsub("\\s+", " ", as.character(write_ok))
+        message("[HistologyIntegration] writeImzML failed for mapped object: ", err_txt)
+        showNotification(
+          paste0(
+            "Mapped imzML save failed. Serial write was used, so likely causes are disk space or a partial/locked output folder. ",
+            "Check free space on the target drive (often several GB required) and delete any partial output folder before retrying."
+          ),
+          type = "error",
+          duration = 12
+        )
+        return()
+      }
+
+      rds_ok <- try(saveRDS(obj, paste0(filen, ".rds")), silent = TRUE)
+      if (inherits(rds_ok, "try-error")) {
+        message("[HistologyIntegration] saveRDS companion file failed: ", as.character(rds_ok))
+        showNotification("imzML saved, but companion .rds save failed.", type = "warning", duration = 8)
+        return()
+      }
+
       showNotification("Saved mapped imzML and companion .rds file.", type = "message", duration = 6)
     })
 

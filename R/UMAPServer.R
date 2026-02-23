@@ -174,6 +174,235 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
       message(sprintf("[%s] color map (%d labels): %s", tag, length(fill_values), msg))
       invisible(NULL)
     }
+
+    sanitize_file_token <- function(x, default = "dataset", max_len = 80L) {
+      x <- as.character(x)
+      x <- if (length(x) > 0) x[[1]] else default
+      x <- trimws(x)
+      if (!nzchar(x) || is.na(x)) x <- default
+      x <- gsub("[^A-Za-z0-9._-]+", "_", x)
+      x <- gsub("^_+|_+$", "", x)
+      if (!nzchar(x)) x <- default
+      if (nchar(x) > max_len) x <- substr(x, 1, max_len)
+      x
+    }
+
+    autosave_threshold_seconds <- function() {
+      mins <- suppressWarnings(as.numeric(input$autosave_threshold_min))
+      if (length(mins) == 0 || !is.finite(mins[[1]]) || mins[[1]] <= 0) {
+        mins <- 10
+      } else {
+        mins <- mins[[1]]
+      }
+      mins * 60
+    }
+
+    autosave_is_enabled <- function() {
+      if (is.null(input$autosave_long_ops)) return(TRUE)
+      isTRUE(input$autosave_long_ops)
+    }
+
+    autosave_workdir <- function() {
+      wd <- tryCatch(as.character(setup_values()[["wd"]]), error = function(e) "")
+      if (!nzchar(wd) || !dir.exists(wd)) wd <- getwd()
+      wd
+    }
+
+    autosave_origin_name <- function() {
+      x2 <- preproc_values()[["x2"]]
+      x0 <- preproc_values()[["x0"]]
+      rn <- character(0)
+      if (!is.null(x0) && !is.null(x0$overview_peaks)) {
+        rn <- unique(as.character(runNames(x0$overview_peaks)))
+      }
+      if (length(rn) == 0 && !is.null(x2) && !is.null(x2$overview_peaks_sel)) {
+        rn <- unique(as.character(runNames(x2$overview_peaks_sel)))
+      }
+      if (length(rn) == 0 && !is.null(x2) && !is.null(x2$mytable_selected)) {
+        rn <- unique(as.character(runNames(x2$mytable_selected)))
+      }
+      rn <- rn[!is.na(rn) & nzchar(rn)]
+      if (length(rn) == 0) return("MSI_EAGLE")
+      base <- if (length(rn) == 1) rn[[1]] else paste0(rn[[1]], "_multi", length(rn))
+      sanitize_file_token(base, default = "MSI_EAGLE", max_len = 100L)
+    }
+
+    clean_feature_data_for_imzml <- function(img) {
+      if (is.null(img)) return(NULL)
+      a <- fData(img)[unique(colnames(fData(img)))]
+      fData(img) <- MassDataFrame(mz = a$mz, a %>% as.data.frame() %>% dplyr::select(-mz))
+      img
+    }
+
+    build_umap_autosave_dataset <- function(x2) {
+      if (is.null(x2) || is.null(x2$mytable_selected) || is.null(x2$data_list)) return(NULL)
+      if (is.null(x2$data_list$umap_separation) || is.null(x2$data_list$umap_separation$umap_out)) return(NULL)
+
+      n_pixels <- ncol(x2$mytable_selected)
+      if (!is.finite(n_pixels) || n_pixels <= 0) return(NULL)
+      tf_valid <- sanitize_tf_mask(x2$tf_list, n_pixels)
+      if (is.null(tf_valid)) tf_valid <- rep(TRUE, n_pixels)
+      if (sum(tf_valid) <= 0) return(NULL)
+
+      img <- safe_subset_pixels(x2$mytable_selected, tf_valid, "autosave UMAP snapshot", notify = FALSE)
+      if (is.null(img) || ncol(img) == 0) return(NULL)
+
+      map_vec <- function(vec) {
+        if (is.null(vec)) return(NULL)
+        if (length(vec) == sum(tf_valid)) return(vec)
+        if (length(vec) == length(tf_valid)) return(vec[tf_valid])
+        NULL
+      }
+      map_mat <- function(mat) {
+        if (is.null(mat)) return(NULL)
+        nr <- tryCatch(nrow(mat), error = function(e) NA_integer_)
+        if (!is.finite(nr)) return(NULL)
+        if (nr == sum(tf_valid)) return(mat)
+        if (nr == length(tf_valid)) return(mat[tf_valid, , drop = FALSE])
+        NULL
+      }
+
+      dl <- x2$data_list
+      vec <- map_vec(dl$umap_separation$col_reduced)
+      if (!is.null(vec)) img$Rcol_reduced <- vec
+      vec <- map_vec(dl$dbscan_umap_separation$cluster)
+      if (!is.null(vec)) img$col_dbscan <- vec
+      vec <- map_vec(dl$hdbscan_umap_separation$cluster)
+      if (!is.null(vec)) img$col_hdbscan <- vec
+      vec <- map_vec(dl$kmeans_umap_separation$cluster)
+      if (!is.null(vec)) img$col_kmeans <- vec
+      vec <- map_vec(dl$hierarchical_umap_separation)
+      if (!is.null(vec)) img$col_hierarchical <- vec
+      vec <- map_vec(dl$spectral_umap_separation$cluster)
+      if (!is.null(vec)) img$col_spectral <- vec
+      vec <- map_vec(dl$kmedoids_umap_separation$clustering)
+      if (!is.null(vec)) img$col_kmedoids <- vec
+      vec <- map_vec(dl$mclust_umap_separation$classification)
+      if (!is.null(vec)) img$col_mclust <- vec
+      vec <- map_vec(dl$som_umap_separation$unit.classif)
+      if (!is.null(vec)) img$col_som <- vec
+      vec <- map_vec(dl$skmeans_umap_separation$cluster)
+      if (!is.null(vec)) img$col_skmeans <- vec
+      fuzzy_mat <- map_mat(dl$fuzzy_umap_separation$membership)
+      if (!is.null(fuzzy_mat)) {
+        img$col_fuzzy <- apply(fuzzy_mat, 1, which.max)
+      }
+
+      emb <- map_mat(dl$umap_separation$umap_out)
+      if (!is.null(emb) && ncol(emb) >= 2) {
+        img$x_umap <- emb[, 1]
+        img$y_umap <- emb[, 2]
+        if (ncol(emb) >= 3) img$z_umap <- emb[, 3]
+      }
+
+      img
+    }
+
+    autosave_long_operation <- function(operation_name,
+                                        elapsed_sec,
+                                        dataset_builder = NULL,
+                                        metadata_builder = NULL) {
+      op_name <- sanitize_file_token(operation_name, default = "operation", max_len = 40L)
+      threshold_sec <- autosave_threshold_seconds()
+      if (!autosave_is_enabled()) {
+        message(sprintf("[UMAP-Autosave] %s: autosave disabled.", operation_name))
+        return(invisible(NULL))
+      }
+      if (!is.finite(elapsed_sec)) {
+        message(sprintf("[UMAP-Autosave] %s: elapsed time unavailable; skipping autosave.", operation_name))
+        return(invisible(NULL))
+      }
+      if (elapsed_sec < threshold_sec) {
+        message(sprintf("[UMAP-Autosave] %s finished in %.1fs (< %.1fs threshold); autosave skipped.", operation_name, elapsed_sec, threshold_sec))
+        return(invisible(NULL))
+      }
+
+      wd <- autosave_workdir()
+      origin <- autosave_origin_name()
+      stamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+      out_base <- file.path(wd, paste0(origin, "_Autosave_", op_name, "_", stamp))
+      out_base <- sub("\\.imzML$", "", out_base, ignore.case = TRUE)
+
+      message(sprintf("[UMAP-Autosave] Triggered for %s (%.1fs >= %.1fs).", operation_name, elapsed_sec, threshold_sec))
+      message(sprintf("[UMAP-Autosave] Building autosave snapshot for: %s", operation_name))
+
+      dataset <- NULL
+      dataset_err <- NULL
+      if (is.function(dataset_builder)) {
+        dataset <- try(dataset_builder(), silent = TRUE)
+        if (inherits(dataset, "try-error")) {
+          dataset_err <- as.character(dataset)
+          message("[UMAP-Autosave] Dataset build failed: ", dataset_err)
+          dataset <- NULL
+        }
+      }
+
+      imzml_written <- FALSE
+      if (!is.null(dataset) && inherits(dataset, "MSImagingExperiment")) {
+        dataset <- try(clean_feature_data_for_imzml(dataset), silent = TRUE)
+        if (inherits(dataset, "try-error")) {
+          dataset_err <- as.character(dataset)
+          dataset <- NULL
+          message("[UMAP-Autosave] Dataset cleanup failed: ", dataset_err)
+        } else {
+          message(sprintf("[UMAP-Autosave] Writing imzML autosave: %s", out_base))
+          write_ok <- try(writeImzML(dataset, out_base), silent = TRUE)
+          if (inherits(write_ok, "try-error")) {
+            dataset_err <- as.character(write_ok)
+            message("[UMAP-Autosave] writeImzML failed: ", dataset_err)
+          } else {
+            imzml_written <- TRUE
+          }
+        }
+      } else if (!is.null(dataset)) {
+        dataset_err <- paste0("Dataset class not supported for imzML autosave: ", paste(class(dataset), collapse = ","))
+        message("[UMAP-Autosave] ", dataset_err)
+      }
+
+      meta_payload <- NULL
+      if (is.function(metadata_builder)) {
+        meta_payload <- try(metadata_builder(), silent = TRUE)
+        if (inherits(meta_payload, "try-error")) {
+          message("[UMAP-Autosave] Metadata build failed: ", as.character(meta_payload))
+          meta_payload <- list(metadata_error = as.character(meta_payload))
+        }
+      }
+
+      meta_file <- paste0(out_base, "_meta.rds")
+      meta_wrapped <- list(
+        operation = operation_name,
+        elapsed_seconds = elapsed_sec,
+        threshold_seconds = threshold_sec,
+        saved_at = as.character(Sys.time()),
+        origin_dataset = origin,
+        imzml_base = out_base,
+        imzml_written = imzml_written,
+        dataset_error = dataset_err,
+        payload = meta_payload
+      )
+      meta_ok <- try(saveRDS(meta_wrapped, meta_file), silent = TRUE)
+      if (inherits(meta_ok, "try-error")) {
+        message("[UMAP-Autosave] Metadata sidecar save failed: ", as.character(meta_ok))
+      }
+
+      if (imzml_written) {
+        showNotification(
+          paste0("Autosaved imzML snapshot: ", basename(out_base)),
+          type = "message",
+          duration = 8
+        )
+        message("[UMAP-Autosave] Autosave complete (imzML): ", out_base)
+      } else {
+        showNotification(
+          paste0("Autosave metadata saved (imzML snapshot failed): ", basename(meta_file)),
+          type = "warning",
+          duration = 8
+        )
+        message("[UMAP-Autosave] Autosave completed with metadata only: ", meta_file)
+      }
+
+      list(imzml_base = out_base, imzml_written = imzml_written, meta_file = meta_file)
+    }
     
     
     
@@ -571,6 +800,11 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         if (!is.finite(n_epochs_val) || n_epochs_val <= 0L) {
           n_epochs_val <- NULL
         }
+        uwot_n_threads <- suppressWarnings(as.integer(round(tryCatch(setup_values()[["ncores"]], error = function(e) NA_real_))))
+        if (!is.finite(uwot_n_threads) || uwot_n_threads < 1L) {
+          uwot_n_threads <- 1L
+        }
+        message(sprintf("[UMAPServer] uwot threads configured from app ncores: n_threads=%d, n_sgd_threads=auto, fast_sgd=TRUE", uwot_n_threads))
         
         umap_args <- list(
           img.dat = img.dat,
@@ -587,7 +821,10 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
           repulsion_strength = repulsion_strength_val,
           negative_sample_rate = negative_sample_rate_val,
           learning_rate = learning_rate_val,
-          init = init_val
+          init = init_val,
+          n_threads = uwot_n_threads,
+          n_sgd_threads = "auto",
+          fast_sgd = TRUE
         )
         if (!is.null(n_epochs_val)) {
           umap_args$n_epochs <- n_epochs_val
@@ -990,7 +1227,37 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         )
         message("[UMAPServer] Start UMAP exception: ", conditionMessage(e))
       })
+      elapsed_umap <- as.numeric((proc.time() - ptm)[["elapsed"]])
       print(proc.time() - ptm)
+      message(sprintf("[UMAP-Autosave] Start UMAP elapsed: %.1fs", elapsed_umap))
+      autosave_long_operation("Start_UMAP", elapsed_umap,
+        dataset_builder = function() {
+          x2_after <- preproc_values()[["x2"]]
+          build_umap_autosave_dataset(x2_after)
+        },
+        metadata_builder = function() {
+        x2_after <- preproc_values()[["x2"]]
+        list(
+          module = "UMAPServer",
+          operation = "Start UMAP",
+          selected_rows = input$mytable_rows_selected,
+          seg_choice = input$seg_choice,
+          clustering_methods = input$clustering_methods,
+          umap_params = list(
+            nn = input$nn,
+            min_dist = input$min_dist,
+            pca_umap = input$pca_umap,
+            metric = input$umap_metric
+          ),
+          umap_state = list(
+            data_list = x2_after$data_list,
+            tf_list = x2_after$tf_list,
+            selected_rows = input$mytable_rows_selected,
+            seg_choice = input$seg_choice,
+            clustering_methods = input$clustering_methods
+          )
+        )
+      })
     })
     
     #     observe({
@@ -2363,6 +2630,8 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
     # 
     
     observeEvent(input$store_proc, {
+      ptm_store <- proc.time()
+      message("[UMAP-Autosave] Store processed data started.")
       x2 <- preproc_values()[["x2"]]
       if (is.null(x2$mytable_selected)) {
         showNotification("No active dataset to store. Select runs and run UMAP/filters first.", type = "warning", duration = 6)
@@ -2663,6 +2932,31 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
       # do.call(cbind, x2$list_proc_img[input$mytable_rows_selected])  # TODO check carefully!!
       # tmp_umap_dat <- reactive({return(tmp.img)})
       x2$tf_list <- rep(TRUE, ncol(combine_card(x2$list_proc_img[input$mytable_rows_selected])))
+
+      elapsed_store <- as.numeric((proc.time() - ptm_store)[["elapsed"]])
+      message(sprintf("[UMAP-Autosave] Store processed data elapsed: %.1fs", elapsed_store))
+      autosave_long_operation("Store_Processed_Data", elapsed_store,
+        dataset_builder = function() {
+          x2_after <- preproc_values()[["x2"]]
+          sel_rows <- suppressWarnings(as.integer(input$mytable_rows_selected))
+          sel_rows <- sel_rows[is.finite(sel_rows)]
+          if (!is.null(x2_after$list_proc_img) && length(x2_after$list_proc_img) > 0 && length(sel_rows) > 0) {
+            return(combine_card(x2_after$list_proc_img[sel_rows]))
+          }
+          x2_after$mytable_selected
+        },
+        metadata_builder = function() {
+        x2_after <- preproc_values()[["x2"]]
+        list(
+          module = "UMAPServer",
+          operation = "Store processed data",
+          selected_rows = input$mytable_rows_selected,
+          seg_choice = input$seg_choice,
+          tf_list = x2_after$tf_list,
+          list_proc_img = x2_after$list_proc_img,
+          mytable_selected = x2_after$mytable_selected
+        )
+      })
     })
     
     
@@ -2739,8 +3033,45 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
             "Use spatialFastmap (experimental)",
             value = FALSE
           ),
-          uiOutput(ns("fm_params")),
-          actionButton(ns("umap1"), label = "Start UMAP"),
+	      uiOutput(ns("fm_params")),
+          tags$hr(style = "margin-top:8px;margin-bottom:8px;"),
+          tags$div(style = "font-weight:600; margin-bottom:6px;", "Autosave"),
+          fluidRow(
+            column(
+              6,
+              checkboxInput(
+                ns("autosave_long_ops"),
+                "Autosave long operations",
+                value = TRUE
+              )
+            ),
+            column(
+              6,
+              numericInput(
+                ns("autosave_threshold_min"),
+                "Threshold (minutes)",
+                min = 1,
+                max = 240,
+                step = 1,
+                value = 10
+              )
+            )
+          ),
+          fluidRow(
+            column(
+              8,
+              fileInput(
+                ns("umap_state_rds"),
+                "Load UMAP state (.rds)",
+                accept = c(".rds")
+              )
+            ),
+            column(
+              4,
+              tags$div(style = "margin-top:24px;", actionButton(ns("load_umap_state"), "Restore state"))
+            )
+          ),
+	      actionButton(ns("umap1"), label = "Start UMAP"),
           if (show_anat_editor) {
             tagList(
               tags$hr(style = "margin-top:8px;margin-bottom:8px;"),
@@ -2756,6 +3087,61 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         "anat_seg" = make_umap_controls(show_anat_editor = TRUE),
         NULL
       )
+    })
+
+    observeEvent(input$load_umap_state, {
+      req(input$load_umap_state)
+
+      file_info <- input$umap_state_rds
+      if (is.null(file_info) || is.null(file_info$datapath) || !nzchar(file_info$datapath)) {
+        showNotification("Select a UMAP state .rds file first.", type = "warning", duration = 6)
+        return()
+      }
+
+      x2 <- preproc_values()[["x2"]]
+      if (is.null(x2$mytable_selected) || ncol(x2$mytable_selected) == 0) {
+        showNotification("Load/select an MSI dataset before restoring UMAP state.", type = "warning", duration = 7)
+        return()
+      }
+
+      state_raw <- try(readRDS(file_info$datapath), silent = TRUE)
+      if (inherits(state_raw, "try-error")) {
+        showNotification("Could not read UMAP state .rds file.", type = "error", duration = 8)
+        message("[UMAP-Autosave] Failed to read UMAP state file: ", as.character(state_raw))
+        return()
+      }
+
+      extract_umap_state <- function(obj) {
+        if (is.list(obj) && !is.null(obj$data_list)) return(obj)
+        if (is.list(obj) && !is.null(obj$umap_state) && is.list(obj$umap_state)) return(obj$umap_state)
+        if (is.list(obj) && !is.null(obj$payload) && is.list(obj$payload)) {
+          if (!is.null(obj$payload$umap_state) && is.list(obj$payload$umap_state)) return(obj$payload$umap_state)
+          if (!is.null(obj$payload$data_list)) return(obj$payload)
+        }
+        NULL
+      }
+
+      state <- extract_umap_state(state_raw)
+      if (is.null(state) || is.null(state$data_list)) {
+        showNotification("Selected .rds does not contain a valid UMAP state.", type = "error", duration = 8)
+        message("[UMAP-Autosave] Invalid UMAP state format in: ", file_info$datapath)
+        return()
+      }
+
+      x2$data_list <- state$data_list
+      tf_loaded <- sanitize_tf_mask(state$tf_list, ncol(x2$mytable_selected))
+      if (!is.null(tf_loaded)) {
+        x2$tf_list <- tf_loaded
+      }
+
+      known_methods <- c("kmeans", "hierarchical", "dbscan", "hdbscan", "spectral", "kmedoids", "fuzzy", "mclust", "som", "skmeans")
+      restored_methods <- intersect(as.character(state$clustering_methods), known_methods)
+      if (length(restored_methods) > 0) {
+        updateCheckboxGroupInput(session, "clustering_methods", selected = restored_methods)
+      }
+
+      showNotification("UMAP state restored from .rds.", type = "message", duration = 7)
+      message("[UMAP-Autosave] Restored UMAP state from: ", file_info$datapath)
     })
     
     output$use_python <- renderUI({
@@ -3061,6 +3447,8 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
     })
     
     observeEvent(input$save_imzml, {
+      ptm_save <- proc.time()
+      message("[UMAP-Autosave] Save imzML started.")
       
       req(input$save_imzml)
       x2 <- preproc_values()[["x2"]]
@@ -3115,6 +3503,22 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
       fData(pk_img) <- MassDataFrame(mz=a$mz, a %>% as.data.frame() %>% dplyr::select(-mz))
       
       writeImzML(pk_img, filen)
+      elapsed_save <- as.numeric((proc.time() - ptm_save)[["elapsed"]])
+      message(sprintf("[UMAP-Autosave] Save imzML elapsed: %.1fs", elapsed_save))
+      autosave_long_operation("Save_imzML", elapsed_save,
+        dataset_builder = function() {
+          pk_img
+        },
+        metadata_builder = function() {
+        x2_after <- preproc_values()[["x2"]]
+        list(
+          module = "UMAPServer",
+          operation = "Save imzML",
+          target_path = filen,
+          selected_rows = input$mytable_rows_selected,
+          list_proc_img = x2_after$list_proc_img
+        )
+      })
       
       
       
