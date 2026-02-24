@@ -34,8 +34,150 @@ CorrelationServer <- function(id, proc_values, setup_values) {
     # ReactiveValues to store data_file and hmap_choices
     x6 <- reactiveValues(
       data_file = NULL,
-      hmap_choices = NULL
+      hmap_choices = NULL,
+      coloc_raw = NULL,
+      coloc_sorted = NULL,
+      coloc_data_file = NULL,
+      coloc_seed_mz = NULL,
+      coloc_sort_metric = NULL,
+      coloc_full_table = FALSE
     )
+
+    sort_coloc_table <- function(df, metric = NULL, direction = "desc") {
+      if (is.null(df)) return(NULL)
+      out <- as.data.frame(df, stringsAsFactors = FALSE)
+      if (!is.null(metric) && nzchar(metric) && metric %in% colnames(out) && nrow(out) > 1) {
+        ord_key <- tryCatch(xtfrm(out[[metric]]), error = function(e) seq_len(nrow(out)))
+        ord <- order(ord_key, decreasing = identical(direction, "desc"), na.last = TRUE)
+        out <- out[ord, , drop = FALSE]
+      }
+      rownames(out) <- NULL
+      out
+    }
+
+    format_sig4_label <- function(x) {
+      out <- suppressWarnings(as.numeric(x))
+      lbl <- as.character(x)
+      if (length(lbl) != length(out)) {
+        lbl <- vapply(out, function(v) {
+          if (is.finite(v)) format(v, digits = 15, trim = TRUE) else NA_character_
+        }, character(1))
+      }
+      ok <- is.finite(out)
+      if (any(ok)) {
+        lbl[ok] <- vapply(out[ok], function(v) format(signif(v, 4), digits = 4, trim = TRUE), character(1))
+      }
+      lbl
+    }
+
+    format_mz_fixed4_label <- function(x) {
+      out <- suppressWarnings(as.numeric(x))
+      lbl <- as.character(x)
+      ok <- is.finite(out)
+      if (any(ok)) {
+        lbl[ok] <- sprintf("%.4f", out[ok])
+      }
+      lbl
+    }
+
+    make_mz_select_choices <- function(mz_values) {
+      mz_num <- suppressWarnings(as.numeric(mz_values))
+      mz_num <- mz_num[is.finite(mz_num)]
+      if (length(mz_num) == 0) return(character(0))
+      vals <- vapply(mz_num, function(v) format(v, digits = 15, trim = TRUE), character(1))
+      lbls <- format_mz_fixed4_label(mz_num)
+      stats::setNames(vals, lbls)
+    }
+
+    refresh_coloc_sorted <- function() {
+      x6$coloc_sorted <- sort_coloc_table(
+        x6$coloc_raw,
+        metric = x6$coloc_sort_metric,
+        direction = if (!is.null(input$corr_table_order)) input$corr_table_order else "desc"
+      )
+      invisible(NULL)
+    }
+
+    get_selected_coloc_row <- function() {
+      idx <- suppressWarnings(as.integer(input$corr_table_rows_selected))
+      idx <- idx[is.finite(idx)]
+      if (length(idx) == 0 || is.null(x6$coloc_sorted) || nrow(x6$coloc_sorted) == 0) return(NULL)
+      idx <- idx[[1]]
+      if (idx < 1 || idx > nrow(x6$coloc_sorted)) return(NULL)
+      x6$coloc_sorted[idx, , drop = FALSE]
+    }
+
+    run_colocalization <- function(seed_mz_override = NULL) {
+      if (identical(input$corr_source, "from_stats")) {
+        if (is.null(x6$data_file)) {
+          showNotification("No stats-backed dataset available. Run/read stats data first.", type = "warning", duration = 7)
+          return(invisible(NULL))
+        }
+      } else if (identical(input$corr_source, "from_file")) {
+        if (is.null(x6$data_file)) {
+          showNotification("No file loaded. Click 'Read Selected File' first.", type = "warning", duration = 7)
+          return(invisible(NULL))
+        }
+      } else {
+        showNotification("Invalid data source selected.", type = "error")
+        return(invisible(NULL))
+      }
+
+      selected_mz <- if (!is.null(seed_mz_override)) as.character(seed_mz_override) else input$corr_mz
+      if (is.null(selected_mz) || !nzchar(selected_mz)) {
+        showNotification("Choose a valid m/z value before generating colocalization.", type = "warning", duration = 7)
+        return(invisible(NULL))
+      }
+
+      mz_num <- suppressWarnings(as.numeric(selected_mz))
+      if (!is.finite(mz_num)) {
+        showNotification("Selected m/z value is not numeric.", type = "error")
+        return(invisible(NULL))
+      }
+
+      plot_n_req <- suppressWarnings(as.integer(input$corr_plot_n))
+      if (!is.finite(plot_n_req) || plot_n_req < 1) plot_n_req <- 3L
+      # Without a separate "number of features" control, compute a modest table by
+      # default and use the full-table toggle when the user wants all rows.
+      n_req <- if (isTRUE(input$corr_full_table)) Inf else max(25L, plot_n_req)
+
+      coloc <- tryCatch({
+        colocalized(
+          x6$data_file,
+          mz = mz_num,
+          n = n_req,
+          sort.by = input$corr_sort
+        )
+      }, error = function(e) {
+        showNotification(paste("Error in correlation computation:", e$message), type = "error", duration = 8)
+        NULL
+      })
+      if (is.null(coloc)) return(invisible(NULL))
+
+      coloc_df <- tryCatch(as.data.frame(coloc), error = function(e) NULL)
+      if (is.null(coloc_df) || nrow(coloc_df) == 0) {
+        showNotification("Correlation returned no rows.", type = "warning", duration = 6)
+        return(invisible(NULL))
+      }
+      if (!"mz" %in% colnames(coloc_df)) {
+        showNotification("Correlation result does not contain 'mz' values.", type = "error", duration = 8)
+        return(invisible(NULL))
+      }
+
+      x6$coloc_raw <- coloc_df
+      x6$coloc_data_file <- x6$data_file
+      x6$coloc_seed_mz <- mz_num
+      x6$coloc_sort_metric <- input$corr_sort
+      x6$coloc_full_table <- isTRUE(input$corr_full_table)
+      refresh_coloc_sorted()
+
+      showNotification(
+        sprintf("Colocalization computed for m/z %.6f (%d rows).", mz_num, nrow(coloc_df)),
+        type = "message",
+        duration = 5
+      )
+      invisible(NULL)
+    }
     
     ### Render UI for Source Selection ###
     output$source_ui <- renderUI({
@@ -164,133 +306,188 @@ CorrelationServer <- function(id, proc_values, setup_values) {
         # Remove duplicates and sort
         sig_mz <- unique(sort(sig_mz))
         
+        mz_choices <- make_mz_select_choices(sig_mz)
+
         selectInput(
           ns("corr_mz"),
           "Choose m/z Value for Correlation Analysis",
-          choices = sig_mz,
-          selected = NULL
+          choices = mz_choices,
+          selected = if (!is.null(input$corr_mz) && nzchar(input$corr_mz)) input$corr_mz else NULL
         )
       } else if (input$corr_source == "from_file") {
         req(x6$data_file)
         
           mz_values <- mz(x6$data_file)
+          mz_choices <- make_mz_select_choices(mz_values)
         
         selectInput(
           ns("corr_mz"),
           "Choose m/z Value for Correlation Analysis",
-          choices = mz_values,
-          selected = NULL
+          choices = mz_choices,
+          selected = if (!is.null(input$corr_mz) && nzchar(input$corr_mz)) input$corr_mz else NULL
         )
       } else {
         NULL
       }
     })
     
-    ### Render Correlation Plot ###
+    ### Correlation Execution / Result Controls ###
     observeEvent(input$action_corr, {
-      # Validate inputs based on source
-      if (input$corr_source == "from_stats") {
-        if (is.null(x6$data_file)) {
-          showNotification("No stats-backed dataset available. Run/read stats data first.", type = "warning", duration = 7)
-          return(NULL)
-        }
-        if (is.null(input$corr_mz) || !nzchar(input$corr_mz)) {
-          showNotification("Choose an m/z value from the stats-filtered list before generating colocalization.", type = "warning", duration = 7)
-          return(NULL)
-        }
-      } else if (input$corr_source == "from_file") {
-        if (is.null(x6$data_file)) {
-          showNotification("No file loaded. Click 'Read Selected File' first.", type = "warning", duration = 7)
-          return(NULL)
-        }
-        if (is.null(input$corr_mz) || !nzchar(input$corr_mz)) {
-          showNotification("Choose an m/z value before generating colocalization.", type = "warning", duration = 7)
-          return(NULL)
-        }
-      } else {
-        showNotification("Invalid data source selected.", type = "error")
+      run_colocalization()
+    })
+
+    observeEvent(input$corr_table_order, {
+      if (!is.null(x6$coloc_raw)) refresh_coloc_sorted()
+    }, ignoreInit = TRUE)
+
+    observeEvent(input$corr_use_selected, {
+      row <- get_selected_coloc_row()
+      if (is.null(row) || !"mz" %in% colnames(row)) {
+        showNotification("Select a row in the correlation table first.", type = "warning", duration = 6)
         return(NULL)
       }
-      
-      output$plot15 <- renderImage({
-        req(x6$data_file)
-        req(input$corr_mz)
-        req(input$corr_n)
-        req(input$corr_sort)
-        req(input$corr_plot_n)
-        
-        # Get the selected m/z or i value
-        selected_mz <- input$corr_mz
-        
-        # Check if selected_mz is valid
-        if (is.null(selected_mz) || selected_mz == "") {
-          showNotification("Please select a valid m/z or i value for correlation.", type = "error")
-          return(NULL)
-        }
-      
-        # Generate the correlation data using colocalized
-        coloc <- tryCatch({
-          colocalized(
-            x6$data_file,
-            mz = as.numeric(selected_mz),
-            n = input$corr_n,
-            sort.by = input$corr_sort
+      mz_val <- as.character(row$mz[[1]])
+      updateSelectInput(session, "corr_mz", selected = mz_val)
+      showNotification(sprintf("Set correlation seed m/z to %s (results not recomputed yet).", mz_val), type = "message", duration = 5)
+    })
+
+    observeEvent(input$corr_rerun_selected, {
+      row <- get_selected_coloc_row()
+      if (is.null(row) || !"mz" %in% colnames(row)) {
+        showNotification("Select a row in the correlation table first.", type = "warning", duration = 6)
+        return(NULL)
+      }
+      mz_val <- as.character(row$mz[[1]])
+      updateSelectInput(session, "corr_mz", selected = mz_val)
+      run_colocalization(seed_mz_override = mz_val)
+    })
+
+    output$corr_table <- DT::renderDT({
+      req(x6$coloc_sorted)
+      df <- x6$coloc_sorted
+      dt <- DT::datatable(
+        df,
+        rownames = FALSE,
+        selection = "multiple",
+        options = list(
+          pageLength = 15,
+          scrollX = TRUE
+        )
+      )
+      num_cols <- names(df)[vapply(df, is.numeric, logical(1))]
+      signif_cols <- setdiff(num_cols, c("mz", "i"))
+      if (length(signif_cols) > 0) {
+        dt <- DT::formatSignif(dt, columns = signif_cols, digits = 4)
+      }
+      if ("mz" %in% colnames(df)) {
+        dt <- DT::formatRound(dt, columns = "mz", digits = 4)
+      }
+      if ("i" %in% colnames(df)) {
+        dt <- DT::formatRound(dt, columns = "i", digits = 0)
+      }
+      dt
+    }, server = TRUE)
+
+    ### Render Correlation Plot (from cached results only) ###
+    output$plot15 <- renderImage({
+      req(x6$coloc_sorted)
+      req(x6$coloc_data_file)
+      req(input$corr_plot_n)
+
+      coloc_df <- x6$coloc_sorted
+      if (!"mz" %in% colnames(coloc_df) || nrow(coloc_df) == 0) {
+        return(NULL)
+      }
+
+      sel_idx <- suppressWarnings(as.integer(input$corr_table_rows_selected))
+      sel_idx <- sel_idx[is.finite(sel_idx) & sel_idx >= 1 & sel_idx <= nrow(coloc_df)]
+
+      if (length(sel_idx) > 0) {
+        sel_idx <- unique(sel_idx)
+        plot_mz <- suppressWarnings(as.numeric(coloc_df$mz[sel_idx]))
+      } else {
+        plot_n <- suppressWarnings(as.integer(input$corr_plot_n))
+        if (!is.finite(plot_n) || plot_n < 1) plot_n <- 1L
+        plot_n <- min(plot_n, nrow(coloc_df))
+        plot_mz <- suppressWarnings(as.numeric(coloc_df$mz[seq_len(plot_n)]))
+      }
+      plot_mz <- plot_mz[is.finite(plot_mz)]
+      if (isTRUE(input$corr_plot_include_source) && is.finite(x6$coloc_seed_mz)) {
+        plot_mz <- unique(c(as.numeric(x6$coloc_seed_mz), plot_mz))
+      }
+      if (length(plot_mz) == 0) {
+        showNotification("No valid m/z values available in cached correlation results for plotting.", type = "warning", duration = 6)
+        return(NULL)
+      }
+
+      n_runs <- suppressWarnings(length(runNames(x6$coloc_data_file)))
+      if (!is.finite(n_runs) || n_runs < 1) n_runs <- 1L
+
+      # Keep run-by-feature layout for multi-run data; use a denser grid for single-run
+      # datasets so labels stay readable when plotting many correlated ions.
+      if (n_runs == 1L) {
+        ncol_layout <- max(1L, min(4L, ceiling(sqrt(length(plot_mz)))))
+        nrow_layout <- max(1L, ceiling(length(plot_mz) / ncol_layout))
+      } else {
+        nrow_layout <- n_runs
+        ncol_layout <- length(plot_mz)
+      }
+
+      panel_w <- if (n_runs == 1L) 360L else 320L
+      panel_h <- if (n_runs == 1L) 300L else 280L
+      img_width <- max(900L, min(2800L, as.integer(panel_w * ncol_layout + if (isTRUE(input$key_on)) 180L else 80L)))
+      img_height <- max(650L, min(2400L, as.integer(panel_h * nrow_layout + 110L)))
+
+      outfile <- tempfile(fileext = ".png")
+      grDevices::png(outfile, width = img_width, height = img_height, res = 120)
+      on.exit(try(grDevices::dev.off(), silent = TRUE), add = TRUE)
+
+      img_args <- list(
+        x = x6$coloc_data_file,
+        mz = plot_mz,
+        layout = c(nrow_layout, ncol_layout),
+        scale = TRUE,
+        col = function(n) rev(cpal("Spectral")(n)),
+        colorkey = isTRUE(input$key_on)
+      )
+      if (isTRUE(input$corr_enhance_hist)) {
+        img_args$enhance <- "histogram"
+      }
+      if (isTRUE(input$corr_smooth_gaussian)) {
+        img_args$smooth <- "gaussian"
+      }
+
+      p1 <- tryCatch({
+        do.call(image, img_args)
+      }, error = function(e) {
+        showNotification(paste("Error in plotting:", e$message), type = "error", duration = 8)
+        NULL
+      })
+
+      if (!is.null(p1)) {
+        font_scale <- min(1.35, 1 + 0.06 * max(0, length(plot_mz) - 1))
+        if (inherits(p1, "trellis")) {
+          print(
+            p1,
+            par.settings = list(
+              fontsize = list(
+                text = 12 * font_scale,
+                points = 11 * font_scale
+              )
+            )
           )
-        }, error = function(e) {
-          showNotification(paste("Error in correlation computation:", e$message), type = "error")
-          NULL
-        })
-        
-        if (is.null(coloc)) {
-          return(NULL)
-        }
-        
-        print(coloc)
-        # Ensure 'coloc$mz' is available
-        if (!"mz" %in% names(coloc)) {
-          showNotification("Correlation result does not contain 'mz' values.", type = "error")
-          return(NULL)
-        }
-        
-        # Generate the plot
-        outfile <- tempfile(fileext = '.png')
-        png(outfile, width = 800, height = 600)
-        
-        # Determine m/z values to plot based on 'corr_plot_n'
-        plot_n <- min(input$corr_plot_n, length(coloc$mz))
-        plot_mz <- coloc$mz[1:plot_n]
-        
-        # Generate the image using Cardinal's image function
-        p1 <- tryCatch({
-          image(
-            x6$data_file,
-            mz = plot_mz,
-            layout = c(length(runNames(x6$data_file)), plot_n),
-            enhance = "histogram",
-            scale=T,
-            col = cpal("Spectral"),
-            colorkey = input$key_on
-          )
-        }, error = function(e) {
-          showNotification(paste("Error in plotting:", e$message), type = "error")
-          NULL
-        })
-        
-        if (!is.null(p1)) {
+        } else {
           print(p1)
         }
-        
-        dev.off()
-        
-        # Return a list containing the filename
-        list(
-          src = outfile,
-          contentType = 'image/png',
-          width = 800,
-          height = 600,
-          alt = "Correlation Heatmap"
-        )
-      }, deleteFile = TRUE)
-    })
+      }
+
+      list(
+        src = outfile,
+        contentType = "image/png",
+        width = img_width,
+        height = img_height,
+        alt = "Correlation Heatmap"
+      )
+    }, deleteFile = TRUE)
   })
 }

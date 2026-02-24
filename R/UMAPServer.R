@@ -202,6 +202,11 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
       isTRUE(input$autosave_long_ops)
     }
 
+    autosave_imzml_enabled <- function() {
+      if (is.null(input$autosave_write_imzml)) return(FALSE)
+      isTRUE(input$autosave_write_imzml)
+    }
+
     autosave_workdir <- function() {
       wd <- tryCatch(as.character(setup_values()[["wd"]]), error = function(e) "")
       if (!nzchar(wd) || !dir.exists(wd)) wd <- getwd()
@@ -317,6 +322,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         return(invisible(NULL))
       }
 
+      want_imzml <- autosave_imzml_enabled()
       wd <- autosave_workdir()
       origin <- autosave_origin_name()
       stamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
@@ -326,15 +332,26 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
       message(sprintf("[UMAP-Autosave] Triggered for %s (%.1fs >= %.1fs).", operation_name, elapsed_sec, threshold_sec))
       message(sprintf("[UMAP-Autosave] Building autosave snapshot for: %s", operation_name))
 
+      if (!want_imzml) {
+        message(sprintf("[UMAP-Autosave] %s: imzML autosave disabled; metadata-only autosave.", operation_name))
+      }
+
       dataset <- NULL
       dataset_err <- NULL
-      if (is.function(dataset_builder)) {
+      if (want_imzml && is.function(dataset_builder)) {
         dataset <- try(dataset_builder(), silent = TRUE)
         if (inherits(dataset, "try-error")) {
           dataset_err <- as.character(dataset)
           message("[UMAP-Autosave] Dataset build failed: ", dataset_err)
           dataset <- NULL
         }
+      } else if (want_imzml && !is.function(dataset_builder)) {
+        dataset_err <- "No autosave dataset builder available for imzML snapshot."
+        message("[UMAP-Autosave] ", dataset_err)
+      }
+      if (want_imzml && is.null(dataset) && is.null(dataset_err)) {
+        dataset_err <- "No autosave dataset available to write imzML snapshot."
+        message("[UMAP-Autosave] ", dataset_err)
       }
 
       imzml_written <- FALSE
@@ -376,6 +393,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         saved_at = as.character(Sys.time()),
         origin_dataset = origin,
         imzml_base = out_base,
+        imzml_requested = want_imzml,
         imzml_written = imzml_written,
         dataset_error = dataset_err,
         payload = meta_payload
@@ -393,12 +411,30 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
         )
         message("[UMAP-Autosave] Autosave complete (imzML): ", out_base)
       } else {
+        no_data_msg <- isTRUE(want_imzml) && !is.null(dataset_err) &&
+          grepl("No autosave dataset", dataset_err, fixed = TRUE)
+        if (no_data_msg) {
+          showNotification(
+            "Autosave imzML was requested, but no dataset was available to save. Metadata sidecar was written.",
+            type = "warning",
+            duration = 10
+          )
+          message("[UMAP-Autosave] imzML autosave requested but no dataset was available; metadata-only autosave completed.")
+        } else if (!isTRUE(want_imzml)) {
+          showNotification(
+            paste0("Autosave metadata saved (.rds only): ", basename(meta_file)),
+            type = "message",
+            duration = 8
+          )
+          message("[UMAP-Autosave] Autosave metadata-only completed (imzML disabled): ", meta_file)
+        } else {
         showNotification(
           paste0("Autosave metadata saved (imzML snapshot failed): ", basename(meta_file)),
           type = "warning",
           duration = 8
         )
         message("[UMAP-Autosave] Autosave completed with metadata only: ", meta_file)
+        }
       }
 
       list(imzml_base = out_base, imzml_written = imzml_written, meta_file = meta_file)
@@ -3054,6 +3090,16 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
                 max = 240,
                 step = 1,
                 value = 10
+              )
+            )
+          ),
+          fluidRow(
+            column(
+              12,
+              checkboxInput(
+                ns("autosave_write_imzml"),
+                "Also autosave imzML snapshot (slower, larger files)",
+                value = FALSE
               )
             )
           ),
