@@ -4,6 +4,97 @@ DataSetupServer <- function(id, rawd, wd) {
     
     ns = session$ns #for dyanamic variable namespace
     
+    log_msi_import_summary <- function(obj, file_name, file_path = NULL, elapsed_s = NA_real_) {
+      fmt_int <- function(x) {
+        x <- suppressWarnings(as.integer(x)[1])
+        if (is.na(x)) "NA" else as.character(x)
+      }
+      fmt_num <- function(x, digits = 4) {
+        x <- suppressWarnings(as.numeric(x)[1])
+        if (!is.finite(x)) "NA" else format(round(x, digits), nsmall = digits, scientific = FALSE, trim = TRUE)
+      }
+      
+      pdata_df <- suppressWarnings(tryCatch(as.data.frame(Cardinal::pData(obj)), error = function(e) NULL))
+      pdata_cols <- if (is.null(pdata_df)) character(0) else colnames(pdata_df)
+      
+      mz_vals <- suppressWarnings(tryCatch(as.numeric(Cardinal::mz(obj)), error = function(e) numeric(0)))
+      mz_vals <- mz_vals[is.finite(mz_vals)]
+      
+      n_features <- if (length(mz_vals) > 0) {
+        length(mz_vals)
+      } else {
+        suppressWarnings(tryCatch(as.integer(nrow(obj)), error = function(e) NA_integer_))
+      }
+      
+      n_pixels <- if (!is.null(pdata_df) && nrow(pdata_df) > 0) {
+        nrow(pdata_df)
+      } else {
+        suppressWarnings(tryCatch(as.integer(ncol(obj)), error = function(e) NA_integer_))
+      }
+      
+      run_names <- suppressWarnings(tryCatch(Cardinal::runNames(obj), error = function(e) character(0)))
+      run_vec <- if (!is.null(pdata_df) && "run" %in% names(pdata_df)) as.character(pdata_df$run) else character(0)
+      run_vec <- run_vec[!is.na(run_vec) & nzchar(run_vec)]
+      n_runs <- max(length(run_names), length(unique(run_vec)))
+      
+      x_rng <- c(NA_real_, NA_real_)
+      y_rng <- c(NA_real_, NA_real_)
+      nx <- NA_integer_
+      ny <- NA_integer_
+      if (!is.null(pdata_df) && nrow(pdata_df) > 0) {
+        if ("x" %in% names(pdata_df)) {
+          xv <- suppressWarnings(as.numeric(pdata_df$x))
+          xv <- xv[is.finite(xv)]
+          if (length(xv) > 0) {
+            x_rng <- range(xv)
+            nx <- length(unique(xv))
+          }
+        }
+        if ("y" %in% names(pdata_df)) {
+          yv <- suppressWarnings(as.numeric(pdata_df$y))
+          yv <- yv[is.finite(yv)]
+          if (length(yv) > 0) {
+            y_rng <- range(yv)
+            ny <- length(unique(yv))
+          }
+        }
+      }
+      
+      centroided_flag <- suppressWarnings(tryCatch(Cardinal::centroided(obj), error = function(e) NA))
+      centroided_flag <- if (length(centroided_flag) > 0) centroided_flag[[1]] else NA
+      pdata_preview <- if (length(pdata_cols) > 0) {
+        paste(utils::head(pdata_cols, 10), collapse = ", ")
+      } else {
+        "(none)"
+      }
+      if (length(pdata_cols) > 10) {
+        pdata_preview <- paste0(pdata_preview, sprintf(", ... (+%d more)", length(pdata_cols) - 10))
+      }
+      
+      message(sprintf(
+        "[DataSetup] Loaded imzML | file='%s'%s",
+        file_name,
+        if (!is.null(file_path) && nzchar(file_path)) paste0(" | path='", file_path, "'") else ""
+      ))
+      message(sprintf(
+        "[DataSetup] Summary | features=%s pixels=%s runs=%s x=%s..%s y=%s..%s mz=%s..%s centroided=%s elapsed_s=%s",
+        fmt_int(n_features),
+        fmt_int(n_pixels),
+        fmt_int(n_runs),
+        fmt_int(x_rng[1]),
+        fmt_int(x_rng[2]),
+        fmt_int(y_rng[1]),
+        fmt_int(y_rng[2]),
+        if (length(mz_vals) > 0) fmt_num(min(mz_vals), 4) else "NA",
+        if (length(mz_vals) > 0) fmt_num(max(mz_vals), 4) else "NA",
+        if (is.na(centroided_flag)) "NA" else as.character(centroided_flag),
+        fmt_num(elapsed_s, 3)
+      ))
+      message(sprintf("[DataSetup] Grid size | nx=%s ny=%s", fmt_int(nx), fmt_int(ny)))
+      message(sprintf("[DataSetup] pData columns (%d): %s", length(pdata_cols), pdata_preview))
+      invisible(NULL)
+    }
+    
     
     output$pp_params_display <- renderUI({
       
@@ -229,15 +320,20 @@ DataSetupServer <- function(id, rawd, wd) {
 
         x1$raw_list <- sapply(files_selected(), function(x)
         {
+          file_path <- normalizePath(file.path(input$folder, x), winslash = "/", mustWork = FALSE)
+          message(sprintf("[DataSetup] Reading imzML: '%s'", file_path))
+          t0 <- proc.time()[["elapsed"]]
           y <- Cardinal::readMSIData(
-            paste0(input$folder,"//",x),
+            file_path,
             #folder=input$folder,
             resolution = input$res,
             units = input$units,
             mass.range = mass.range
           )
+          elapsed_s <- proc.time()[["elapsed"]] - t0
           #Cardinal::centroided(y) <- TRUE
           coord(y)$z <- NULL
+          log_msi_import_summary(y, file_name = x, file_path = file_path, elapsed_s = elapsed_s)
           return(y)
         })
         
@@ -245,6 +341,7 @@ DataSetupServer <- function(id, rawd, wd) {
         #print(x1$raw_list[[1]])
         #graphics.off()
         names(x1$raw_list) <- files_selected()
+        message(sprintf("[DataSetup] Completed import for %d file(s): %s", length(x1$raw_list), paste(names(x1$raw_list), collapse = ", ")))
         
       })
     })

@@ -192,8 +192,10 @@ plot_stats_results <- function(
         stop("Could not match selected ions to dataset features for ggplot plotting.")
       }
 
-      subset_data <- x5$data_file_selected[feat_idx_unique, ]
-      spec_mat <- as.matrix(spectra(subset_data))
+      # Avoid subsetting the full MSImagingExperiment object here because some
+      # Cardinal versions rebuild featureData as DFrame (not MassDataFrame),
+      # which can fail for multi-feature selections.
+      spec_mat <- as.matrix(spectra(x5$data_file_selected)[feat_idx_unique, , drop = FALSE])
       if (!is.matrix(spec_mat)) {
         spec_mat <- matrix(spec_mat, nrow = length(feat_idx_unique))
       }

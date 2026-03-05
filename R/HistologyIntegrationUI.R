@@ -120,6 +120,7 @@ HistologyIntegrationUI <- function(id) {
             inline = TRUE
           ),
           plotOutput(ns("overlay_plot"), height = "680px"),
+          downloadButton(ns("download_overlay_pdf"), "Download overlay (PDF)"),
           tags$hr(),
           div(
             class = "compact-controls",
@@ -195,7 +196,7 @@ HistologyIntegrationUI <- function(id) {
               tabPanel(
                 "Stat Fit",
                 value = "stat_fit",
-                tags$small("Color-map independent fit using inside-vs-outside ion statistics."),
+                tags$small("Color-map independent fit using inside-vs-outside or polygon-cluster-group ion statistics."),
                 fluidRow(
                   column(2, numericInput(ns("stat_fit_range"), "Range", value = 20, min = 1, max = 300, step = 1)),
                   column(2, numericInput(ns("stat_fit_step"), "Step", value = 2, min = 1, max = 50, step = 1)),
@@ -205,6 +206,18 @@ HistologyIntegrationUI <- function(id) {
                   column(2, numericInput(ns("stat_fit_alpha"), "Alpha", value = 0.1, min = 0.001, max = 0.5, step = 0.01))
                 ),
                 fluidRow(
+                  column(
+                    3,
+                    selectInput(
+                      ns("stat_fit_metric_mode"),
+                      "Stat-fit metric",
+                      choices = c(
+                        "Inside vs outside polygon (t-test)" = "inside_outside",
+                        "Polygon cluster groups (ANOVA; exclude outside/unassigned)" = "polygon_cluster_groups"
+                      ),
+                      selected = "inside_outside"
+                    )
+                  ),
                   column(
                     4,
                     selectInput(
@@ -222,9 +235,12 @@ HistologyIntegrationUI <- function(id) {
                     ns("stat_fit_objective"),
                     "Stat objective",
                     choices = c("Minimize score" = "min", "Maximize score" = "max"),
-                    selected = "min"
+                      selected = "min"
                   )),
                   column(2, numericInput(ns("stat_fit_bbox_pad"), "BBox pad (px)", value = 25, min = 0, max = 500, step = 1))
+                ),
+                fluidRow(
+                  column(6, uiOutput(ns("stat_fit_group_field_ui")))
                 ),
                 fluidRow(
                   column(
@@ -298,7 +314,85 @@ HistologyIntegrationUI <- function(id) {
                       actionButton(ns("apply_optimize_xy_choice"), "Apply selected")
                     )
                   )
+                ),
+                fluidRow(
+                  column(
+                    4,
+                    selectInput(
+                      ns("edge_fit_signal_source"),
+                      "Edge-fit optimization signal",
+                      choices = c(
+                        "Current MSI display (default)" = "current",
+                        "pData field (numeric or categorical)" = "pdata"
+                      ),
+                      selected = "current"
+                    )
+                  ),
+                  column(8, uiOutput(ns("edge_fit_pdata_field_ui")))
                 )
+              ),
+              tabPanel(
+                "Polygon clustering",
+                value = "polygon_clustering",
+                tags$small("Cluster polygons using QuPath measurements (cells/nuclei) or geometry-only features for manual polygons."),
+                fluidRow(
+                  column(
+                    4,
+                    fileInput(
+                      ns("polygon_cluster_table"),
+                      "External measurements table (optional override)",
+                      accept = c(".csv", ".tsv", ".txt")
+                    ),
+                    tags$small("By default, clustering uses attributes already stored in the loaded polygon GeoJSON."),
+                    selectInput(
+                      ns("polygon_cluster_feature_mode"),
+                      "Feature source",
+                      choices = c(
+                        "Auto (GeoJSON attributes if available, else geometry)" = "auto",
+                        "Attributes only" = "measurements",
+                        "Attributes + geometry" = "measurements_plus_geometry",
+                        "Geometry only (manual polygons)" = "geometry"
+                      ),
+                      selected = "auto"
+                    ),
+                    uiOutput(ns("polygon_cluster_id_field_ui")),
+                    uiOutput(ns("polygon_cluster_features_ui"))
+                  ),
+                  column(
+                    4,
+                    uiOutput(ns("polygon_cluster_join_field_ui")),
+                    selectInput(
+                      ns("polygon_cluster_join_mode"),
+                      "Attribute-to-polygon matching",
+                      choices = c(
+                        "Exact match on selected IDs" = "exact",
+                        "Row order (same polygon order in file/table)" = "row_order"
+                      ),
+                      selected = "exact"
+                    ),
+                    numericInput(ns("polygon_cluster_k"), "Number of clusters (k)", value = 4, min = 2, max = 50, step = 1),
+                    numericInput(ns("polygon_cluster_keep_prop"), "Keep proportion per cluster (distinctive polygons)", value = 1, min = 0.01, max = 1, step = 0.05),
+                    numericInput(ns("polygon_cluster_pca_dims"), "PCA dimensions", value = 4, min = 1, max = 20, step = 1),
+                    numericInput(ns("polygon_cluster_seed"), "Random seed", value = 123, min = 1, step = 1),
+                    numericInput(ns("polygon_cluster_nstart"), "k-means nstart", value = 25, min = 1, max = 200, step = 1),
+                    checkboxInput(ns("polygon_cluster_scale"), "Scale features", value = TRUE),
+                    checkboxInput(ns("polygon_cluster_drop_unmatched"), "Exclude unmatched polygons from clustering", value = FALSE)
+                  ),
+                  column(
+                    4,
+                    textInput(ns("polygon_cluster_pdata_col"), "Clustered pData column name", value = "polygon_cluster_class"),
+                    tags$div(style = "margin-top: 24px;", actionButton(ns("run_polygon_clustering"), "Run polygon clustering")),
+                    tags$div(style = "margin-top: 8px;", actionButton(ns("use_polygon_clusters_for_labels"), "Use clusters for overlay/mapping")),
+                    tags$small("Then set overlay to polygon + color-by-label, or use the existing polygon mapping button to write clustered labels into pData."),
+                    tags$br(), tags$br(),
+                    verbatimTextOutput(ns("polygon_cluster_summary"))
+                  )
+                ),
+                fluidRow(
+                  column(6, plotOutput(ns("polygon_cluster_plot"), height = "260px")),
+                  column(6, DT::dataTableOutput(ns("polygon_cluster_counts_table")))
+                ),
+                DT::dataTableOutput(ns("polygon_cluster_preview_table"))
               )
             ),
             fluidRow(

@@ -51,6 +51,7 @@ plot_card_UI<-function(id) {
                column(6, numericInput(ns("width_im"), "Image plot width (px)", value = 800, step = 50)),
                column(6, numericInput(ns("height_im"), "Image plot height (px)", value=600, step = 50))
              ),
+             downloadButton(ns("download_plot3_pdf"), "Download image (PDF)"),
              checkboxInput(ns("plot_pdata"), "Plot Phenotype data?", value=FALSE),
              uiOutput(ns("plotpdata")),
              checkboxInput(ns("expand_fonts"), "Extended font options?", value=FALSE),
@@ -80,6 +81,79 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
     ns = session$ns
     
     graphics.off()
+    plot3_last_png <- reactiveVal(NULL)
+    plot3_last_recorded <- reactiveVal(NULL)
+    
+    cache_plot3_png <- function(src_png) {
+      if (is.null(src_png) || !file.exists(src_png)) {
+        return(invisible(FALSE))
+      }
+      prev_png <- isolate(plot3_last_png())
+      if (!is.null(prev_png) && file.exists(prev_png)) {
+        unlink(prev_png)
+      }
+      cached_png <- tempfile(pattern = paste0("plot3_cache_", session$token, "_"), fileext = ".png")
+      copied <- isTRUE(file.copy(src_png, cached_png, overwrite = TRUE))
+      if (copied) {
+        plot3_last_png(cached_png)
+      }
+      invisible(copied)
+    }
+
+    capture_plot3_recording <- function() {
+      rec <- try(grDevices::recordPlot(), silent = TRUE)
+      if (!inherits(rec, "try-error")) {
+        plot3_last_recorded(rec)
+      }
+      invisible(NULL)
+    }
+    
+    make_plot3_image_result <- function(src_png, alt_text) {
+      capture_plot3_recording()
+      cache_plot3_png(src_png)
+      list(
+        src = src_png,
+        contentType = 'image/png',
+        width = input$width_im,
+        height = input$height_im,
+        alt = alt_text
+      )
+    }
+    
+    output$download_plot3_pdf <- downloadHandler(
+      filename = function() {
+        paste0("plot_card_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".pdf")
+      },
+      content = function(file) {
+        width_px <- suppressWarnings(as.numeric(input$width_im))
+        height_px <- suppressWarnings(as.numeric(input$height_im))
+        if (!is.finite(width_px) || width_px <= 0) width_px <- 800
+        if (!is.finite(height_px) || height_px <= 0) height_px <- 600
+        
+        grDevices::pdf(file = file, width = width_px / 72, height = height_px / 72, onefile = TRUE)
+        on.exit(grDevices::dev.off(), add = TRUE)
+        
+        rec <- plot3_last_recorded()
+        if (!is.null(rec)) {
+          try(grDevices::replayPlot(rec), silent = TRUE)
+          return(invisible(NULL))
+        }
+        
+        src_png <- plot3_last_png()
+        if (is.null(src_png) || !file.exists(src_png)) {
+          showNotification("No image available yet. Render a plot first, then download PDF.", type = "warning", duration = 5)
+          stop("No rendered image available for PDF export.")
+        }
+        
+        img <- try(png::readPNG(src_png), silent = TRUE)
+        if (inherits(img, "try-error")) {
+          stop("Could not read cached image for PDF export.")
+        }
+        
+        grid::grid.newpage()
+        grid::grid.raster(img, x = 0.5, y = 0.5, width = grid::unit(1, "npc"), height = grid::unit(1, "npc"), interpolate = TRUE)
+      }
+    )
     
     #create new overview_peaks_sel object with mean values
     if(is.null(fData(overview_peaks_sel)$mean)) {
@@ -493,13 +567,7 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
           graphics::plot.new()
           graphics::text(0.5, 0.5, "No pixels available after mask/run filtering.")
           dev.off()
-          return(list(
-            src = outfile,
-            contentType = 'image/png',
-            width = input$width_im,
-            height = input$height_im,
-            alt = "No pixels available"
-          ))
+          return(make_plot3_image_result(outfile, "No pixels available"))
         }
         
         vp_orig<-vizi_par()
@@ -537,13 +605,7 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
             graphics::plot.new()
             graphics::text(0.5, 0.5, "Selected pData field is not available.")
             dev.off()
-            return(list(
-              src = outfile,
-              contentType = 'image/png',
-              width = input$width_im,
-              height = input$height_im,
-              alt = "Invalid pData field"
-            ))
+            return(make_plot3_image_result(outfile, "Invalid pData field"))
           }
 
           pdata_vals <- pdata_df[[input$pdata_var_plot]]
@@ -556,13 +618,7 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
             graphics::plot.new()
             graphics::text(0.5, 0.5, "pData length mismatch.")
             dev.off()
-            return(list(
-              src = outfile,
-              contentType = 'image/png',
-              width = input$width_im,
-              height = input$height_im,
-              alt = "pData mismatch"
-            ))
+            return(make_plot3_image_result(outfile, "pData mismatch"))
           }
 
           is_numeric_pdata <- is.numeric(pdata_vals) || is.integer(pdata_vals)
@@ -622,7 +678,7 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
             )
 
             p_plot <- ggplot2::ggplot(plot_df, ggplot2::aes(x = x, y = y, fill = label)) +
-              ggplot2::geom_tile() +
+              ggplot2::geom_raster() +
               ggplot2::facet_wrap(. ~ run) +
               ggplot2::coord_fixed() +
               ggplot2::scale_y_continuous(trans = "reverse") +
@@ -717,6 +773,82 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
           } else {
             ion=as.numeric(mz_viz3())
           }
+
+          mz_axis_all <- suppressWarnings(as.numeric(Cardinal::mz(overview_peaks_sel_masked)))
+          n_pix_masked <- ncol(overview_peaks_sel_masked)
+
+          coerce_spectra_matrix <- function(spec_obj, n_feat_expected, n_pix_expected) {
+            mat <- try(as.matrix(spec_obj), silent = TRUE)
+            if (inherits(mat, "try-error")) return(NULL)
+            if (!is.matrix(mat)) {
+              vec <- suppressWarnings(as.numeric(mat))
+              if (length(vec) != (n_feat_expected * n_pix_expected)) return(NULL)
+              mat <- matrix(vec, nrow = n_feat_expected, ncol = n_pix_expected, byrow = TRUE)
+            }
+            if (nrow(mat) == n_pix_expected && ncol(mat) == n_feat_expected) {
+              mat <- t(mat)
+            }
+            if (nrow(mat) != n_feat_expected || ncol(mat) != n_pix_expected) return(NULL)
+            mat
+          }
+
+          resolve_feature_index_exact <- function(target_mz) {
+            if (!is.finite(target_mz) || length(mz_axis_all) == 0) return(NA_integer_)
+            idx <- tryCatch(Cardinal::features(overview_peaks_sel_masked, mz = target_mz), error = function(e) integer(0))
+            idx <- suppressWarnings(as.integer(idx))
+            idx <- idx[is.finite(idx) & idx >= 1 & idx <= length(mz_axis_all)]
+            if (length(idx) > 0) return(idx[[1]])
+            diffs <- abs(mz_axis_all - target_mz)
+            diffs[!is.finite(diffs)] <- Inf
+            if (!any(is.finite(diffs))) return(NA_integer_)
+            which.min(diffs)
+          }
+
+          extract_exact_ions_matrix_once <- function(target_ions) {
+            target_ions <- suppressWarnings(as.numeric(target_ions))
+            if (length(target_ions) == 0 || any(!is.finite(target_ions))) return(NULL)
+            idx_map <- vapply(target_ions, resolve_feature_index_exact, integer(1))
+            if (any(!is.finite(idx_map)) || any(idx_map < 1)) return(NULL)
+            uniq_idx <- unique(idx_map)
+            spec_obj <- try(Cardinal::spectra(overview_peaks_sel_masked[uniq_idx, ]), silent = TRUE)
+            if (inherits(spec_obj, "try-error")) return(NULL)
+            mat_all <- coerce_spectra_matrix(spec_obj, length(uniq_idx), n_pix_masked)
+            if (is.null(mat_all)) return(NULL)
+            row_map <- match(idx_map, uniq_idx)
+            list(
+              mat = mat_all[row_map, , drop = FALSE],
+              feature_idx = idx_map,
+              ions = target_ions
+            )
+          }
+
+          extract_rgb_channels_once <- function(target_ions, tol) {
+            target_ions <- suppressWarnings(as.numeric(target_ions))
+            if (length(target_ions) == 0 || any(!is.finite(target_ions))) return(NULL)
+            sel_list <- lapply(target_ions, function(target_mz) {
+              which(is.finite(mz_axis_all) & abs(mz_axis_all - target_mz) <= tol)
+            })
+            if (any(lengths(sel_list) == 0)) return(NULL)
+            uniq_idx <- sort(unique(unlist(sel_list, use.names = FALSE)))
+            if (length(uniq_idx) == 0) return(NULL)
+            spec_obj <- try(Cardinal::spectra(overview_peaks_sel_masked[uniq_idx, ]), silent = TRUE)
+            if (inherits(spec_obj, "try-error")) return(NULL)
+            mat_all <- coerce_spectra_matrix(spec_obj, length(uniq_idx), n_pix_masked)
+            if (is.null(mat_all)) return(NULL)
+            channels <- lapply(sel_list, function(idx) {
+              rows <- match(idx, uniq_idx)
+              rows <- rows[is.finite(rows)]
+              if (length(rows) == 0) return(NULL)
+              vals <- mat_all[rows, , drop = FALSE]
+              if (nrow(vals) == 1) {
+                as.numeric(vals[1, ])
+              } else {
+                colMeans(vals, na.rm = TRUE)
+              }
+            })
+            if (any(vapply(channels, is.null, logical(1)))) return(NULL)
+            channels
+          }
           
           
           if(!is.null(input$display_mode) && input$display_mode!="none"){
@@ -744,22 +876,6 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
               contrast_mode <- tolower(trimws(as.character(input$contrast3)[1]))
               if (!contrast_mode %in% c("none", "histogram", "adaptive")) {
                 contrast_mode <- "none"
-              }
-              
-              extract_channel <- function(obj, target_mz, tol) {
-                mz_axis <- as.numeric(Cardinal::mz(obj))
-                sel <- is.finite(mz_axis) & abs(mz_axis - target_mz) <= tol
-                if (!any(sel)) {
-                  return(NULL)
-                }
-                vals <- try(as.matrix(Cardinal::spectra(obj[sel, ])), silent = TRUE)
-                if (inherits(vals, "try-error")) {
-                  return(NULL)
-                }
-                if (nrow(vals) == 1) {
-                  return(as.numeric(vals[1, ]))
-                }
-                colMeans(vals, na.rm = TRUE)
               }
               
               scale01 <- function(x, shared_range = NULL) {
@@ -886,9 +1002,14 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
                 out
               }
               
-              ch_r <- extract_channel(overview_peaks_sel_masked, ion[1], tol_rgb)
-              ch_g <- extract_channel(overview_peaks_sel_masked, ion[2], tol_rgb)
-              ch_b <- if (length(ion) == 3) extract_channel(overview_peaks_sel_masked, ion[3], tol_rgb) else rep(0, ncol(overview_peaks_sel_masked))
+              rgb_channels <- extract_rgb_channels_once(ion[seq_len(min(length(ion), 3))], tol_rgb)
+              ch_r <- if (!is.null(rgb_channels) && length(rgb_channels) >= 1) rgb_channels[[1]] else NULL
+              ch_g <- if (!is.null(rgb_channels) && length(rgb_channels) >= 2) rgb_channels[[2]] else NULL
+              ch_b <- if (length(ion) == 3) {
+                if (!is.null(rgb_channels) && length(rgb_channels) >= 3) rgb_channels[[3]] else NULL
+              } else {
+                rep(0, ncol(overview_peaks_sel_masked))
+              }
               
               if (is.null(ch_r) || is.null(ch_g) || is.null(ch_b)) {
                 showNotification("Could not resolve one or more RGB ions within tolerance. Increase +/- m/z or adjust ion choices.", type = "error")
@@ -950,7 +1071,7 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
               }
               
               p_rgb <- ggplot2::ggplot(rgb_df, ggplot2::aes(x = x, y = y, fill = fill_col)) +
-                ggplot2::geom_tile() +
+                ggplot2::geom_raster() +
                 ggplot2::facet_wrap(. ~ runs) +
                 ggplot2::scale_fill_identity() +
                 ggplot2::coord_equal() +
@@ -1002,8 +1123,14 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
                 message("Exactly two ions required for ratio (mz1/mz2)")
                 return()
               } else {
-                mz1 <- spectra(subsetFeatures(overview_peaks_sel_masked, mz=ion[1]))[1,]
-                mz2 <- spectra(subsetFeatures(overview_peaks_sel_masked, mz=ion[2]))[1,]
+                exact_ion_vals <- extract_exact_ions_matrix_once(ion[1:2])
+                if (is.null(exact_ion_vals) || nrow(exact_ion_vals$mat) < 2) {
+                  showNotification("Unable to extract one or more ions for ratio calculation.", type="error")
+                  message("Unable to extract one or more ions for ratio calculation.")
+                  return()
+                }
+                mz1 <- as.numeric(exact_ion_vals$mat[1, ])
+                mz2 <- as.numeric(exact_ion_vals$mat[2, ])
                 overview_peaks_sel_masked$xic <- (1 + mz1) / (1 + mz2)
                 
                 ion=round(ion, 4)
@@ -1016,8 +1143,14 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
                 message("Exactly two ions required for subtraction (mz1-mz2)")
                 return()
               } else {
-                mz1 <- spectra(subsetFeatures(overview_peaks_sel_masked, mz=ion[1]))[1,]
-                mz2 <- spectra(subsetFeatures(overview_peaks_sel_masked, mz=ion[2]))[1,]
+                exact_ion_vals <- extract_exact_ions_matrix_once(ion[1:2])
+                if (is.null(exact_ion_vals) || nrow(exact_ion_vals$mat) < 2) {
+                  showNotification("Unable to extract one or more ions for subtraction calculation.", type="error")
+                  message("Unable to extract one or more ions for subtraction calculation.")
+                  return()
+                }
+                mz1 <- as.numeric(exact_ion_vals$mat[1, ])
+                mz2 <- as.numeric(exact_ion_vals$mat[2, ])
                 overview_peaks_sel_masked$xic <- (mz1) - (mz2)
                 ion=round(ion, 4)
                 label_txt=paste("difference of",ion[1],"-",ion[2])
@@ -1027,14 +1160,16 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
               
             }else if(input$display_mode=="multiply"){
               nelements=length(ion)
-              xic <- 1+spectra(subsetFeatures(overview_peaks_sel_masked, mz=ion[1]))[1,]
-              
-              for(i in 2:nelements){
-                mz2= 1+spectra(subsetFeatures(overview_peaks_sel_masked, mz=ion[i]))[1,]
-                overview_peaks_sel_masked$xic=(xic) * (mz2)
-                ion=round(ion, 4)
-                label_txt=paste(ion[1],"*",ion[2])
+              exact_ion_vals <- extract_exact_ions_matrix_once(ion)
+              if (is.null(exact_ion_vals) || nrow(exact_ion_vals$mat) < 1) {
+                showNotification("Unable to extract ions for multiply calculation.", type="error")
+                message("Unable to extract ions for multiply calculation.")
+                return()
               }
+              mat_mul <- 1 + exact_ion_vals$mat
+              overview_peaks_sel_masked$xic <- apply(mat_mul, 2, prod)
+              ion=round(ion, 4)
+              label_txt=paste(ion, collapse=" * ")
             }
             
             
@@ -1197,11 +1332,7 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
         dev.off()
         
         # Return a list containing the filename
-        list(src = outfile,
-             contentType = 'image/png',
-             width = input$width_im,
-             height = input$height_im,
-             alt = "This is alternate text")
+        make_plot3_image_result(outfile, "This is alternate text")
       }, deleteFile = TRUE)
     }) 
     
