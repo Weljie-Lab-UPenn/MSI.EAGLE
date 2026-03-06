@@ -77,6 +77,62 @@ HeatmapServer <- function(id,  proc_values) {
       annotation_row = NULL
     )
     
+    output$heatmap_plot_ui <- renderUI({
+      w <- suppressWarnings(as.integer(input$hm_plot_width))
+      h <- suppressWarnings(as.integer(input$hm_plot_height))
+      if (!is.finite(w) || w < 200) w <- 1000L
+      if (!is.finite(h) || h < 200) h <- 700L
+      imageOutput(
+        ns("plot14"),
+        width = paste0(w, "px"),
+        height = paste0(h, "px")
+      )
+    })
+    
+    valid_color_values <- function(vals) {
+      vals <- as.character(vals)
+      ok <- rep(FALSE, length(vals))
+      keep <- !is.na(vals) & nzchar(vals)
+      if (any(keep)) {
+        ok[keep] <- vapply(
+          vals[keep],
+          function(v) {
+            tryCatch({
+              grDevices::col2rgb(v)
+              TRUE
+            }, error = function(e) FALSE)
+          },
+          logical(1)
+        )
+      }
+      ok
+    }
+    
+    make_annotation_color_map <- function(levels_vec) {
+      levels_vec <- as.character(levels_vec)
+      if (length(levels_vec) == 0) {
+        return(setNames(character(0), character(0)))
+      }
+      
+      is_col <- valid_color_values(levels_vec)
+      out <- rep("grey70", length(levels_vec))
+      out[is_col] <- levels_vec[is_col]
+      
+      n_missing <- sum(!is_col)
+      if (n_missing > 0) {
+        fallback <- if (n_missing <= 10) {
+          ggsci::pal_npg()(n_missing)
+        } else if (n_missing <= 26) {
+          pals::alphabet2(n_missing)
+        } else {
+          grDevices::hcl.colors(n_missing, palette = "Dark 3")
+        }
+        out[!is_col] <- fallback
+      }
+      
+      stats::setNames(out, levels_vec)
+    }
+    
     observeEvent(input$action_hmap, {
       if (is.null(proc_values()$x5$data_file_selected)) {
         message("No stats data, please run a stats analysis first")
@@ -163,8 +219,12 @@ HeatmapServer <- function(id,  proc_values) {
       # A temp file to save the output.
       # This file will be removed later by renderImage
       outfile <- tempfile(fileext = '.png')
+      plot_w <- suppressWarnings(as.integer(input$hm_plot_width))
+      plot_h <- suppressWarnings(as.integer(input$hm_plot_height))
+      if (!is.finite(plot_w) || plot_w < 200) plot_w <- 1000L
+      if (!is.finite(plot_h) || plot_h < 200) plot_h <- 700L
       
-      png(outfile, width = 800, height = 600)
+      png(outfile, width = plot_w, height = plot_h)
       
       #library(pheatmap)
       
@@ -293,22 +353,14 @@ HeatmapServer <- function(id,  proc_values) {
           return()
         }
         
-        
-        if (length(levels(as.factor(annotation_col[, 1]))) < 11) {
-          annotation_colors = list()
-          annotation_colors[[1]] = ggsci::pal_npg()(length(levels(as.factor(
-            annotation_col[, proc_values()$x5$phen_cols_stats]
-          ))))
-          names(annotation_colors[[1]]) <-
-            levels(as.factor(annotation_col[, proc_values()$x5$phen_cols_stats]))
-          names(annotation_colors) <-
-            proc_values()$x5$phen_cols_stats
-          
-        } else {
-          print("too many colors to match columns with npg palette, using alphabet")
-          #annotation_col=NA
-          annotation_colors = list(pals::alphabet2())
+        ann_var <- proc_values()$x5$phen_cols_stats
+        ann_levels <- levels(as.factor(annotation_col[, ann_var]))
+        ann_map <- make_annotation_color_map(ann_levels)
+        if (any(valid_color_values(names(ann_map)))) {
+          print("using color-like annotation labels as legend colors where available")
         }
+        annotation_colors <- list()
+        annotation_colors[[ann_var]] <- ann_map
         
         
       } else {
@@ -436,18 +488,23 @@ HeatmapServer <- function(id,  proc_values) {
       list(
         src = outfile,
         contentType = 'image/png',
-        width = 800,
-        height = 600,
+        width = plot_w,
+        height = plot_h,
         alt = "This is alternate text"
       )
     }, deleteFile = TRUE)
     
     output$Export = downloadHandler(
       filename = function() {
-        "heatmap_plot.pdf"
+        paste0("heatmap_plot_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".pdf")
       },
       content = function(file) {
-        pdf(file, onefile = TRUE)
+        req(x6$hmap_plot)
+        plot_w <- suppressWarnings(as.integer(input$hm_plot_width))
+        plot_h <- suppressWarnings(as.integer(input$hm_plot_height))
+        if (!is.finite(plot_w) || plot_w < 200) plot_w <- 1000L
+        if (!is.finite(plot_h) || plot_h < 200) plot_h <- 700L
+        pdf(file, width = plot_w / 72, height = plot_h / 72, onefile = TRUE)
         print(x6$hmap_plot)
         message(
           "writing data to 'heatmap_dat_raw.tsv and heatmap_dat_scaled.tsv; will overwrite existing file!"

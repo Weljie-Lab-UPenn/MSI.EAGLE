@@ -1,0 +1,709 @@
+ID	exact.mass	resolve_note	n_merged	source_ids	mass_min	mass_max	ppm_span
+Homoserine	55.0189		1	Homoserine	55.0189	55.0189	0
+glyoxal	59.0128		1	glyoxal	59.0128	59.0128	0
+Crotonaldehyde	71.0491		1	Crotonaldehyde	71.0491	71.0491	0
+methylglyoxal	73.0284		1	methylglyoxal	73.0284	73.0284	0
+Glycine	76.0393		1	Glycine	76.0393	76.0393	0
+Glycine	76.0398		1	Glycine	76.0398	76.0398	0
+2-Mercaptoethanol	79.0212		1	2-Mercaptoethanol	79.0212	79.0212	0
+Pyruvate	89.0233		1	Pyruvate	89.0233	89.0233	0
+Alanine	90.055		1	Alanine	90.055	90.055	0
+Alanine	90.0556		1	Alanine	90.0556	90.0556	0
+Lactate	91.039		1	Lactate	91.039	91.039	0
+Glycerol	93.0546		1	Glycerol	93.0546	93.0546	0
+Serine	106.0499		1	Serine	106.0499	106.0499	0
+Creatinine	114.0659		1	Creatinine	114.0659	114.0659	0
+Caprolactam	114.0914		1	Caprolactam	114.0914	114.0914	0
+Proline	116.0706		1	Proline	116.0706	116.0706	0
+Guanidoacetic acid	118.0616		1	Guanidoacetic acid	118.0616	118.0616	0
+Valine	118.0868		3	Valine | Betaine	118.0863	118.0869	5.081
+Succinate	119.0339		1	Succinate	119.0339	119.0339	0
+Threonine	120.0654		1	Threonine	120.0654	120.0654	0
+Cysteine	122.027		1	Cysteine	122.027	122.027	0
+Nicotinamide	123.0553		1	Nicotinamide	123.0553	123.0553	0
+Taurine	126.0219		1	Taurine	126.0219	126.0219	0
+5-Methylcytosine	126.0662		1	5-Methylcytosine	126.0662	126.0662	0
+Thymine	127.0502		1	Thymine	127.0502	127.0502	0
+Pipecolinic acid	130.0863		1	Pipecolinic acid	130.0863	130.0863	0
+Aspartic acid	132.0302		1	Aspartic acid	132.0302	132.0302	0
+Creatine	132.0768		1	Creatine	132.0768	132.0768	0
+Isoleucine/Leucine	132.1019		1	Isoleucine/Leucine	132.1019	132.1019	0
+Oxaloacetate	133.0132		1	Oxaloacetate	133.0132	133.0132	0
+Asparagine	133.0608		1	Asparagine	133.0608	133.0608	0
+Aspartate	134.0448		1	Aspartate	134.0448	134.0448	0
+Malate	135.0288		1	Malate	135.0288	135.0288	0
+Allopurinol/Hypoxanthine	137.0458		1	Allopurinol/Hypoxanthine	137.0458	137.0458	0
+Trigonelline	138.055		1	Trigonelline	138.055	138.055	0
+2-Hydroxyquinoline	146.06		1	2-Hydroxyquinoline	146.06	146.06	0
+Alpha-ketoglutarate	147.0288		1	Alpha-ketoglutarate	147.0288	147.0288	0
+Glutamine	147.0764		1	Glutamine	147.0764	147.0764	0
+Lysine	147.1128		1	Lysine	147.1128	147.1128	0
+Glutamate	148.0607		2	Glutamate | O-Acetylserine	148.0604	148.061	4.0524
+Methionine	150.0583		1	Methionine	150.0583	150.0583	0
+Dopamine	154.0863		1	Dopamine	154.0863	154.0863	0
+Histidine	156.0768		1	Histidine	156.0768	156.0768	0
+2-Aminoadipic acid	162.0761		1	2-Aminoadipic acid	162.0761	162.0761	0
+Carnitine	162.1125		1	Carnitine	162.1125	162.1125	0
+Phenylalanine	166.0863		1	Phenylalanine	166.08625	166.08625	0
+N-acetylaspartate	174.0402		1	N-acetylaspartate	174.0402	174.0402	0
+cis-Aconitate	175.0237		1	cis-Aconitate	175.0237	175.0237	0
+Arginine	175.119		1	Arginine	175.119	175.119	0
+Indole-3-acetic acid	176.0706		1	Indole-3-acetic acid	176.0706	176.0706	0
+Citrulline	176.103		1	Citrulline	176.103	176.103	0
+Acylcarnitine C1	176.1281		1	Acylcarnitine C1	176.1281	176.1281	0
+Hippuric acid	180.0655		1	Hippuric acid	180.0655	180.0655	0
+Glucosamine	180.0872		1	Glucosamine	180.0872	180.0872	0
+Tyrosine	182.0815		1	Tyrosine	182.0815	182.0815	0
+Diaminopimelic acid	191.1032		1	Diaminopimelic acid	191.1032	191.1032	0
+5-Hydroxyindole-3-acetic acid	192.0655		1	5-Hydroxyindole-3-acetic acid	192.0655	192.0655	0
+Citrate/Isocitrate	193.0343		1	Citrate/Isocitrate	193.0343	193.0343	0
+Hydroxyhippuric acid	196.0604		1	Hydroxyhippuric acid	196.0604	196.0604	0
+Acylcarnitine C2:0	204.123		1	Acylcarnitine C2:0	204.123	204.123	0
+Tryptophan	205.0972		1	Tryptophan	205.09715	205.09715	0
+N-Acetyl-phenylalanine	208.0968		1	N-Acetyl-phenylalanine	208.0968	208.0968	0
+Acylcarnitine C10:2-Cysteine	217.122		1	Acylcarnitine C10:2-Cysteine	217.122	217.122	0
+Acylcarnitine C3:0	218.1387		1	Acylcarnitine C3:0	218.1387	218.1387	0
+3-HPMA	222.08		1	3-HPMA	222.08	222.08	0
+N-Acetyl-glucosamine	222.0972		1	N-Acetyl-glucosamine	222.0972	222.0972	0
+Acylcarnitine C4:1	230.1387		1	Acylcarnitine C4:1	230.1387	230.1387	0
+Acylcarnitine C4:0	232.1543		1	Acylcarnitine C4:0	232.1543	232.1543	0
+Melatonin	233.1285		1	Melatonin	233.1285	233.1285	0
+N-Acetyl-S-(4-hydroxybutan-2-yl)-L-cysteine (HMPMA)	236.0957		1	N-Acetyl-S-(4-hydroxybutan-2-yl)-L-cysteine (HMPMA)	236.0957	236.0957	0
+Acylcarnitine C3:0+H2O	236.1492		1	Acylcarnitine C3:0+H2O	236.1492	236.1492	0
+Cystine	241.0311		1	Cystine	241.0311	241.0311	0
+Thymidine	243.0975		1	Thymidine	243.0975	243.0975	0
+Cytidine	244.0928		1	Cytidine	244.0928	244.0928	0
+Acylcarnitine C5:1	244.1543		1	Acylcarnitine C5:1	244.1543	244.1543	0
+Acylcarnitine C5:0	246.17		1	Acylcarnitine C5:0	246.17	246.17	0
+Acylcarnitine C3:1-2OH	248.1129		1	Acylcarnitine C3:1-2OH	248.1129	248.1129	0
+Acylcarnitine C4:0-OH	248.1492		1	Acylcarnitine C4:0-OH	248.1492	248.1492	0
+Acylcarnitine C14:3-OH-Cysteine	252.1429		1	Acylcarnitine C14:3-OH-Cysteine	252.1429	252.1429	0
+Acylcarnitine C5:3-OH	256.1179		1	Acylcarnitine C5:3-OH	256.1179	256.1179	0
+Acylcarnitine C16:4-Cysteine	257.1533		1	Acylcarnitine C16:4-Cysteine	257.1533	257.1533	0
+Acylcarnitine C6:1	258.17		1	Acylcarnitine C6:1	258.17	258.17	0
+5-Methyluridine	259.0925		1	5-Methyluridine	259.0925	259.0925	0
+Acylcarnitine C5:1-OH	260.1492		1	Acylcarnitine C5:1-OH	260.1492	260.1492	0
+Acylcarnitine C6:0	260.1856		1	Acylcarnitine C6:0	260.1856	260.1856	0
+Acylcarnitine C4:1-2OH	262.1285		1	Acylcarnitine C4:1-2OH	262.1285	262.1285	0
+Acylcarnitine C5:0-OH	262.1649		1	Acylcarnitine C5:0-OH	262.1649	262.1649	0
+Acylcarnitine C7:4	266.1386		1	Acylcarnitine C7:4	266.1386	266.1386	0
+Adenosine	268.104		1	Adenosine	268.104	268.104	0
+Inosine	269.088		1	Inosine	269.088	269.088	0
+Acylcarnitine C7:2	270.17		1	Acylcarnitine C7:2	270.17	270.17	0
+Acylcarnitine C7:1	272.1856		1	Acylcarnitine C7:1	272.1856	272.1856	0
+Acylcarnitine C6:1-OH	274.1649		1	Acylcarnitine C6:1-OH	274.1649	274.1649	0
+Acylcarnitine C7:0	274.2013		1	Acylcarnitine C7:0	274.2013	274.2013	0
+Acylcarnitine C5:1-2OH	276.1442		1	Acylcarnitine C5:1-2OH	276.1442	276.1442	0
+Acylcarnitine C6:0-OH	276.1805		1	Acylcarnitine C6:0-OH	276.1805	276.1805	0
+Acylcarnitine C8:4	280.1543		1	Acylcarnitine C8:4	280.1543	280.1543	0
+Oleic Acid	281.2481		1	Oleic Acid	281.2481	281.2481	0
+Guanosine	284.0989		1	Guanosine	284.0989	284.0989	0
+Acylcarnitine C8:2	284.1856		1	Acylcarnitine C8:2	284.1856	284.1856	0
+Acylcarnitine C6:3-2OH	286.1285		1	Acylcarnitine C6:3-2OH	286.1285	286.1285	0
+Acylcarnitine C8:1	286.2013		1	Acylcarnitine C8:1	286.2013	286.2013	0
+Acylcarnitine C6:2-2OH	288.1442		1	Acylcarnitine C6:2-2OH	288.1442	288.1442	0
+Acylcarnitine C7:1-OH	288.1805		1	Acylcarnitine C7:1-OH	288.1805	288.1805	0
+Acylcarnitine C8:0	288.2169		1	Acylcarnitine C8:0	288.2169	288.2169	0
+Acylcarnitine C6:1-2OH	290.1598		1	Acylcarnitine C6:1-2OH	290.1598	290.1598	0
+Acylcarnitine C7:0-OH	290.1962		1	Acylcarnitine C7:0-OH	290.1962	290.1962	0
+Argininosuccinic acid	291.1299		1	Argininosuccinic acid	291.1299	291.1299	0
+Acylcarnitine C6:0-SH	292.1577		1	Acylcarnitine C6:0-SH	292.1577	292.1577	0
+Acylcarnitine C9:4	294.17		1	Acylcarnitine C9:4	294.17	294.17	0
+Acylcarnitine C8:4-OH	296.1492		1	Acylcarnitine C8:4-OH	296.1492	296.1492	0
+Acylcarnitine C8:3-OH	298.1649		1	Acylcarnitine C8:3-OH	298.1649	298.1649	0
+Acylcarnitine C9:2	298.2013		1	Acylcarnitine C9:2	298.2013	298.2013	0
+Acylcarnitine C6:4-3OH	300.1078		1	Acylcarnitine C6:4-3OH	300.1078	300.1078	0
+Acylcarnitine C8:2-OH	300.1805		1	Acylcarnitine C8:2-OH	300.1805	300.1805	0
+Acylcarnitine C9:1	300.2169		1	Acylcarnitine C9:1	300.2169	300.2169	0
+Adenosine	302.0656		1	Adenosine	302.0656	302.0656	0
+Acylcarnitine C7:2-2OH	302.1598		1	Acylcarnitine C7:2-2OH	302.1598	302.1598	0
+Acylcarnitine C8:1-OH	302.1962		1	Acylcarnitine C8:1-OH	302.1962	302.1962	0
+Acylcarnitine C9:0	302.2326		1	Acylcarnitine C9:0	302.2326	302.2326	0
+Acylcarnitine C6:2-3OH	304.1391		1	Acylcarnitine C6:2-3OH	304.1391	304.1391	0
+Acylcarnitine C7:1-2OH	304.1755		1	Acylcarnitine C7:1-2OH	304.1755	304.1755	0
+Acylcarnitine C8:0-OH	304.2118		1	Acylcarnitine C8:0-OH	304.2118	304.2118	0
+Acylcarnitine C6:1-3OH	306.1547		1	Acylcarnitine C6:1-3OH	306.1547	306.1547	0
+Acylcarnitine C10:5	306.17		1	Acylcarnitine C10:5	306.17	306.17	0
+Glutathione	308.0911		1	Glutathione	308.0911	308.0911	0
+1,N(6)-Propanodeoxyadenosine	308.1359		1	1,N(6)-Propanodeoxyadenosine	308.1359	308.1359	0
+Acylcarnitine C9:5-OH	308.1492		1	Acylcarnitine C9:5-OH	308.1492	308.1492	0
+Acylcarnitine C6:0-OH-SH	308.1526		1	Acylcarnitine C6:0-OH-SH	308.1526	308.1526	0
+Acylcarnitine C10:4	308.1856		1	Acylcarnitine C10:4	308.1856	308.1856	0
+Acylcarnitine C8:5-2OH	310.1285		1	Acylcarnitine C8:5-2OH	310.1285	310.1285	0
+Acylcarnitine C9:4-OH	310.1649		1	Acylcarnitine C9:4-OH	310.1649	310.1649	0
+Acylcarnitine C10:3	310.2013		1	Acylcarnitine C10:3	310.2013	310.2013	0
+Acylcarnitine C8:4-2OH	312.1442		1	Acylcarnitine C8:4-2OH	312.1442	312.1442	0
+Acylcarnitine C9:3-OH	312.1805		1	Acylcarnitine C9:3-OH	312.1805	312.1805	0
+Acylcarnitine C10:2	312.2169		1	Acylcarnitine C10:2	312.2169	312.2169	0
+Acylcarnitine C8:3-2OH	314.1598		1	Acylcarnitine C8:3-2OH	314.1598	314.1598	0
+Acylcarnitine C9:2-OH	314.1962		1	Acylcarnitine C9:2-OH	314.1962	314.1962	0
+Acylcarnitine C10:1	314.2326		1	Acylcarnitine C10:1	314.2326	314.2326	0
+Acylcarnitine C8:2-2OH	316.1755		1	Acylcarnitine C8:2-2OH	316.1755	316.1755	0
+Acylcarnitine C9:1-OH	316.2118		1	Acylcarnitine C9:1-OH	316.2118	316.2118	0
+Acylcarnitine C10:0	316.2482		1	Acylcarnitine C10:0	316.2482	316.2482	0
+Acylcarnitine C8:1-2OH	318.1911		1	Acylcarnitine C8:1-2OH	318.1911	318.1911	0
+Acylcarnitine C9:0-OH	318.2275		1	Acylcarnitine C9:0-OH	318.2275	318.2275	0
+Acylcarnitine C8:0-2OH	320.2068		1	Acylcarnitine C8:0-2OH	320.2068	320.2068	0
+Acylcarnitine C11:4	322.2013		1	Acylcarnitine C11:4	322.2013	322.2013	0
+Acylcarnitine C9:5-2OH	324.1442		1	Acylcarnitine C9:5-2OH	324.1442	324.1442	0
+Acylcarnitine C10:4-OH	324.1805		1	Acylcarnitine C10:4-OH	324.1805	324.1805	0
+Acylcarnitine C9:4-2OH	326.1598		1	Acylcarnitine C9:4-2OH	326.1598	326.1598	0
+Acylcarnitine C10:3-OH	326.1962		1	Acylcarnitine C10:3-OH	326.1962	326.1962	0
+Acylcarnitine C11:2	326.2326		1	Acylcarnitine C11:2	326.2326	326.2326	0
+Acylcarnitine C8:4-3OH	328.1391		1	Acylcarnitine C8:4-3OH	328.1391	328.1391	0
+Acylcarnitine C10:2-OH	328.2118		1	Acylcarnitine C10:2-OH	328.2118	328.2118	0
+Acylcarnitine C11:1	328.2482		1	Acylcarnitine C11:1	328.2482	328.2482	0
+Acylcarnitine C9:2-2OH	330.1911		1	Acylcarnitine C9:2-2OH	330.1911	330.1911	0
+Acylcarnitine C10:1-OH	330.2275		1	Acylcarnitine C10:1-OH	330.2275	330.2275	0
+Acylcarnitine C11:0	330.2639		1	Acylcarnitine C11:0	330.2639	330.2639	0
+Acylcarnitine C8:2-3OH	332.1704		1	Acylcarnitine C8:2-3OH	332.1704	332.1704	0
+Acylcarnitine C9:1-2OH	332.2068		1	Acylcarnitine C9:1-2OH	332.2068	332.2068	0
+Acylcarnitine C10 :-OH	332.2431		1	Acylcarnitine C10 :-OH	332.2431	332.2431	0
+Acylcarnitine C8:1-3OH	334.186		1	Acylcarnitine C8:1-3OH	334.186	334.186	0
+Acylcarnitine C10:6-2OH	336.1442		1	Acylcarnitine C10:6-2OH	336.1442	336.1442	0
+Acylcarnitine C12:4	336.2169		1	Acylcarnitine C12:4	336.2169	336.2169	0
+Cyclic 1,N(2)-propanodeoxyguanosine	338.1464		1	Cyclic 1,N(2)-propanodeoxyguanosine	338.1464	338.1464	0
+Acylcarnitine C11:4-OH	338.1962		1	Acylcarnitine C11:4-OH	338.1962	338.1962	0
+Acylcarnitine C12:3	338.2326		1	Acylcarnitine C12:3	338.2326	338.2326	0
+Acylcarnitine C10:4-2OH	340.1755		1	Acylcarnitine C10:4-2OH	340.1755	340.1755	0
+Acylcarnitine C12:2	340.2482		1	Acylcarnitine C12:2	340.2482	340.2482	0
+Acylcarnitine CNT-Hex	342.1759		1	Acylcarnitine CNT-Hex	342.1759	342.1759	0
+Acylcarnitine C10:3-2OH	342.1911		1	Acylcarnitine C10:3-2OH	342.1911	342.1911	0
+Acylcarnitine C11:2-OH	342.2274		1	Acylcarnitine C11:2-OH	342.2274	342.2274	0
+Acylcarnitine C12:1	342.2644		1	Acylcarnitine C12:1	342.2644	342.2644	0
+Acylcarnitine C10:2-2OH	344.2068		1	Acylcarnitine C10:2-2OH	344.2068	344.2068	0
+Acylcarnitine C11:1-OH	344.2431		1	Acylcarnitine C11:1-OH	344.2431	344.2431	0
+Acylcarnitine C9:2-3OH	346.186		1	Acylcarnitine C9:2-3OH	346.186	346.186	0
+Acylcarnitine C10:1-2OH	346.2224		1	Acylcarnitine C10:1-2OH	346.2224	346.2224	0
+Acylcarnitine C11:0-OH	346.2588		1	Acylcarnitine C11:0-OH	346.2588	346.2588	0
+Acylcarnitine C11:6-2OH	350.1598		1	Acylcarnitine C11:6-2OH	350.1598	350.1598	0
+Acylcarnitine C12:4-OH	352.2118		1	Acylcarnitine C12:4-OH	352.2118	352.2118	0
+Acylcarnitine C10:5-3OH	354.1547		1	Acylcarnitine C10:5-3OH	354.1547	354.1547	0
+Acylcarnitine C11:4-2OH	354.1911		1	Acylcarnitine C11:4-2OH	354.1911	354.1911	0
+Acylcarnitine C12:3-OH	354.2275		1	Acylcarnitine C12:3-OH	354.2275	354.2275	0
+Acylcarnitine C10:4-3OH	356.1704		1	Acylcarnitine C10:4-3OH	356.1704	356.1704	0
+Acylcarnitine C12:2-OH	356.2431		1	Acylcarnitine C12:2-OH	356.2431	356.2431	0
+Acylcarnitine C13:1	356.2795		1	Acylcarnitine C13:1	356.2795	356.2795	0
+Acylcarnitine C11:2-2OH	358.2224		1	Acylcarnitine C11:2-2OH	358.2224	358.2224	0
+Acylcarnitine C12:1-OH	358.2588		1	Acylcarnitine C12:1-OH	358.2588	358.2588	0
+Acylcarnitine C13:0	358.2952		1	Acylcarnitine C13:0	358.2952	358.2952	0
+Acylcarnitine C10:2-3OH	360.2017		1	Acylcarnitine C10:2-3OH	360.2017	360.2017	0
+Acylcarnitine C11:1-2OH	360.2381		1	Acylcarnitine C11:1-2OH	360.2381	360.2381	0
+Acylcarnitine C12:0-OH	360.2744		1	Acylcarnitine C12:0-OH	360.2744	360.2744	0
+Acylcarnitine C10:1-3OH	362.2173		1	Acylcarnitine C10:1-3OH	362.2173	362.2173	0
+Acylcarnitine C12:6-2OH	364.1755		1	Acylcarnitine C12:6-2OH	364.1755	364.1755	0
+Acylcarnitine C5:1-Cysteine	365.1741		1	Acylcarnitine C5:1-Cysteine	365.1741	365.1741	0
+Acylcarnitine C10:1-OH-HCl	366.2042		1	Acylcarnitine C10:1-OH-HCl	366.2042	366.2042	0
+Acylcarnitine C14:3	366.2639		1	Acylcarnitine C14:3	366.2639	366.2639	0
+Acylcarnitine C12:4-2OH	368.2068		1	Acylcarnitine C12:4-2OH	368.2068	368.2068	0
+Acylcarnitine C14:2	368.2795		1	Acylcarnitine C14:2	368.2795	368.2795	0
+Cholesterol+H-H2O	369.3515		1	Cholesterol+H-H2O	369.3515	369.3515	0
+Acylcarnitine C12:3-2OH	370.2224		1	Acylcarnitine C12:3-2OH	370.2224	370.2224	0
+Acylcarnitine C13:2-OH	370.2588		1	Acylcarnitine C13:2-OH	370.2588	370.2588	0
+Acylcarnitine C12:2-2OH	372.2381		1	Acylcarnitine C12:2-2OH	372.2381	372.2381	0
+Acylcarnitine C13:1-OH	372.2744		1	Acylcarnitine C13:1-OH	372.2744	372.2744	0
+Acylcarnitine C12:1-2OH	374.2537		1	Acylcarnitine C12:1-2OH	374.2537	374.2537	0
+Acylcarnitine C12:0-2OH	376.2694		1	Acylcarnitine C12:0-2OH	376.2694	376.2694	0
+glutathione-crotonaldehyde conjugate	378.1335		1	glutathione-crotonaldehyde conjugate	378.1335	378.1335	0
+glutathione-crotonol conjugate	380.1491		1	glutathione-crotonol conjugate	380.1491	380.1491	0
+Acylcarnitine C14:3-OH	382.2588		1	Acylcarnitine C14:3-OH	382.2588	382.2588	0
+Acylcarnitine C14:2-OH	384.2744		1	Acylcarnitine C14:2-OH	384.2744	384.2744	0
+Acylcarnitine C13:2-2OH	386.2537		1	Acylcarnitine C13:2-2OH	386.2537	386.2537	0
+Acylcarnitine C14:1-OH	386.2901		1	Acylcarnitine C14:1-OH	386.2901	386.2901	0
+Cholesterol+H	387.3621		1	Cholesterol+H	387.3621	387.3621	0
+Acylcarnitine C12:1-3OH	390.2486		1	Acylcarnitine C12:1-3OH	390.2486	390.2486	0
+Acylcarnitine C16:4	392.2795		1	Acylcarnitine C16:4	392.2795	392.2795	0
+glutathione-crotonaldehyde conjugate oxidized	394.1284		1	glutathione-crotonaldehyde conjugate oxidized	394.1284	394.1284	0
+Acylcarnitine C14:3-2OH	398.2537		1	Acylcarnitine C14:3-2OH	398.2537	398.2537	0
+Acylcarnitine C14:2-2OH	400.2694		1	Acylcarnitine C14:2-2OH	400.2694	400.2694	0
+Acylcarnitine 16:0	400.3421		1	Acylcarnitine 16:0	400.3421	400.3421	0
+Acylcarnitine C14:1-2OH	402.285		1	Acylcarnitine C14:1-2OH	402.285	402.285	0
+Acylcarnitine C14:0-2OH	404.3007		1	Acylcarnitine C14:0-2OH	404.3007	404.3007	0
+Acylcarnitine C16:3-OH	410.2901		1	Acylcarnitine C16:3-OH	410.2901	410.2901	0
+Acylcarnitine C14:3-3OH	414.2486		1	Acylcarnitine C14:3-3OH	414.2486	414.2486	0
+Acylcarnitine C14:2-3OH	416.2643		1	Acylcarnitine C14:2-3OH	416.2643	416.2643	0
+Acylcarnitine C14:1-3OH	418.2799		1	Acylcarnitine C14:1-3OH	418.2799	418.2799	0
+Acylcarnitine C16:1-2OH	430.3163		1	Acylcarnitine C16:1-2OH	430.3163	430.3163	0
+Acylcarnitine C10:3-Cysteine	431.221		1	Acylcarnitine C10:3-Cysteine	431.221	431.221	0
+Acylcarnitine C16:2-3OH	444.2956		1	Acylcarnitine C16:2-3OH	444.2956	444.2956	0
+Acylcarnitine C12:6-Cysteine	457.2367		1	Acylcarnitine C12:6-Cysteine	457.2367	457.2367	0
+Acylcarnitine C8:1-HexA	462.2334		1	Acylcarnitine C8:1-HexA	462.2334	462.2334	0
+4-hydroxy Nonenal Glutathione (HNE-GSH)	464.2061		1	4-hydroxy Nonenal Glutathione (HNE-GSH)	464.2061	464.2061	0
+DHN-GSH	466.2223		1	DHN-GSH	466.2223	466.2223	0
+LPC 14:0 (putative)	468.3079		1	LPC 14:0 (putative)	468.3079	468.3079	0
+Acylcarnitine C9:1-HexA	476.249		1	Acylcarnitine C9:1-HexA	476.249	476.249	0
+HNA-GSH	480.2016		1	HNA-GSH	480.2016	480.2016	0
+LPE 18:1 (putative)	480.3087		1	LPE 18:1 (putative)	480.3087	480.3087	0
+LPC 15:1 (putative)	480.3436		1	LPC 15:1 (putative)	480.3436	480.3436	0
+LPC 15:0 (putative)	482.3245		1	LPC 15:0 (putative)	482.3245	482.3245	0
+LPC O-16:0 (putative)	482.3606		1	LPC O-16:0 (putative)	482.3606	482.3606	0
+Acylcarnitine C10:3-HexA	486.2334		1	Acylcarnitine C10:3-HexA	486.2334	486.2334	0
+Acylcarnitine C10:1-HexA	490.2647		1	Acylcarnitine C10:1-HexA	490.2647	490.2647	0
+LPC 16:1 (putative)	494.3243		1	LPC 16:1 (putative)	494.3243	494.3243	0
+LPC 16:0 (putative)	496.3399		1	LPC 16:0 (putative)	496.3399	496.3399	0
+LPE 20:4 (putative)	502.2926		1	LPE 20:4 (putative)	502.2926	502.2926	0
+Acylcarnitine C11:1-HexA	504.2803		1	Acylcarnitine C11:1-HexA	504.2803	504.2803	0
+LPC 17:1 (putative)	508.3758		1	LPC 17:1 (putative)	508.3758	508.3758	0
+LPC O-18:0 (putative)	509.3845		1	LPC O-18:0 (putative)	509.3845	509.3845	0
+LPC 17:0 (putative)	510.3558		1	LPC 17:0 (putative)	510.3558	510.3558	0
+Acylcarnitine C12:1-HexA	518.296		1	Acylcarnitine C12:1-HexA	518.296	518.296	0
+LPC 18:3 (putative)	518.3081		1	LPC 18:3 (putative)	518.3081	518.3081	0
+LPC 18:3 (putative)	518.3246		1	LPC 18:3 (putative)	518.3246	518.3246	0
+LPC 18:2 (putative)	520.3395		1	LPC 18:2 (putative)	520.33955	520.33955	0
+LPC 18:2 (putative)	520.3431		1	LPC 18:2 (putative)	520.3431	520.3431	0
+LPC 18:1 (putative)	522.3538		1	LPC 18:1 (putative)	522.3538	522.3538	0
+LPC 18:1 (putative)	522.3589		1	LPC 18:1 (putative)	522.3589	522.3589	0
+PAF	523.3638		1	PAF	523.3638	523.3638	0
+LPC 18:0 (putative)	524.3726		1	LPC 18:0 (putative)	524.3726	524.3726	0
+LPE 22:5 (putative)	528.3084		1	LPE 22:5 (putative)	528.3084	528.3084	0
+Acylcarnitine C13:1-HexA	532.3116		1	Acylcarnitine C13:1-HexA	532.3116	532.3116	0
+LPC 19:3 (putative)	532.3395		1	LPC 19:3 (putative)	532.3395	532.3395	0
+LPC O-20:2 (putative)	534.3914		1	LPC O-20:2 (putative)	534.3914	534.3914	0
+LPC 19:1 (putative)	536.3705		1	LPC 19:1 (putative)	536.3705	536.3705	0
+LPC O-20:1 (putative)	536.4075		1	LPC O-20:1 (putative)	536.4075	536.4075	0
+LPC 19:0 (putative)	538.3879		1	LPC 19:0 (putative)	538.3879	538.3879	0
+LPC 20:5 (putative)	542.3225		1	LPC 20:5 (putative)	542.3225	542.3225	0
+LPC 20:4 (putative)	544.3421		1	LPC 20:4 (putative)	544.3421	544.3421	0
+LPC 20:3 (putative)	546.3555		1	LPC 20:3 (putative)	546.3555	546.3555	0
+LPC 20:1 (putative)	550.3869		1	LPC 20:1 (putative)	550.3869	550.3869	0
+LPC 20:0 (putative)	552.4025		1	LPC 20:0 (putative)	552.4025	552.4025	0
+DG 30:0 (putative)	558.5094		1	DG 30:0 (putative)	558.5094	558.5094	0
+Acylcarnitine C14:1-OH-HexA	560.3065		1	Acylcarnitine C14:1-OH-HexA	560.3065	560.3065	0
+Acylcarnitine C14:0-OH-HexA	562.3222		1	Acylcarnitine C14:0-OH-HexA	562.3222	562.3222	0
+Cer 36:1 (putative)	564.5361		1	Cer 36:1 (putative)	564.5361	564.5361	0
+LPC O-22:0 (putative)	566.4539		1	LPC O-22:0 (putative)	566.4539	566.4539	0
+LPC 22:6 (putative)	568.3428		1	LPC 22:6 (putative)	568.3428	568.3428	0
+PI 16:0 (putative)	571.2889		1	PI 16:0 (putative)	571.2889	571.2889	0
+LPC 22:1 (putative)	578.418		1	LPC 22:1 (putative)	578.418	578.418	0
+LPC 22:0 (putative)	580.4336		1	LPC 22:0 (putative)	580.4336	580.4336	0
+DG 32:2 (putative)	582.5093		1	DG 32:2 (putative)	582.5093	582.5093	0
+DG 32:1 (putative)	584.5251		1	DG 32:1 (putative)	584.5251	584.5251	0
+DG 32:0 (putative)	586.5408		1	DG 32:0 (putative)	586.5408	586.5408	0
+Cer 38:1 (putative)	594.5819		1	Cer 38:1 (putative)	594.5819	594.5819	0
+LPC 24:1 (putative)	606.4501		1	LPC 24:1 (putative)	606.4501	606.4501	0
+DG 34:4 (putative)	606.5095		1	DG 34:4 (putative)	606.5095	606.5095	0
+DG 34:3 (putative)	608.5248		1	DG 34:3 (putative)	608.5248	608.5248	0
+DG 34:2 (putative)	610.5403		1	DG 34:2 (putative)	610.5403	610.5403	0
+DG 34:1 (putative)	612.5562		1	DG 34:1 (putative)	612.5562	612.5562	0
+Oxidized glutathione (GSSG)	613.1592		1	Oxidized glutathione (GSSG)	613.1592	613.1592	0
+DG 34:0 (putative)	614.5723		1	DG 34:0 (putative)	614.5723	614.5723	0
+Acylcarnitine C18:0-OH-HexA	618.3848		1	Acylcarnitine C18:0-OH-HexA	618.3848	618.3848	0
+Cer 40:2 (putative)	620.5978		1	Cer 40:2 (putative)	620.5978	620.5978	0
+Cer 40:1 (putative)	622.6133		1	Cer 40:1 (putative)	622.6133	622.6133	0
+CE 16:0 (putative)	625.5918		1	CE 16:0 (putative)	625.5918	625.5918	0
+DG 36:5 (putative)	632.5257		1	DG 36:5 (putative)	632.5257	632.5257	0
+DG 36:4 (putative)	634.5407		1	DG 36:4 (putative)	634.5407	634.5407	0
+Cer 41:2 (putative)	634.6133		1	Cer 41:2 (putative)	634.6133	634.6133	0
+DG 36:3 (putative)	636.556		1	DG 36:3 (putative)	636.556	636.556	0
+Cer 41:1 (putative)	636.6295		1	Cer 41:1 (putative)	636.6295	636.6295	0
+DG 36:2 (putative)	638.5712		1	DG 36:2 (putative)	638.5712	638.5712	0
+Cer 41:0 (putative)	638.645		1	Cer 41:0 (putative)	638.645	638.645	0
+DG 36:1 (putative)	640.5872		1	DG 36:1 (putative)	640.5872	640.5872	0
+DG 36:0 (putative)	642.6035		1	DG 36:0 (putative)	642.6035	642.6035	0
+Cer 42:3 (putative)	646.6137	carbon_shift_candidate 40->42: Cer 42:3 (putative)	1	Cer 42:3 (putative)	646.6137	646.6137	0
+SM 30:1 (putative)	647.5124		1	SM 30:1 (putative)	647.5124	647.5124	0
+Cer 42:2 (putative)	648.6292	carbon_shift_candidate 40->42: Cer 42:2 (putative)	1	Cer 42:2 (putative)	648.6292	648.6292	0
+CE 18:2 (putative)	649.5918		1	CE 18:2 (putative)	649.5918	649.5918	0
+Acylcarnitine C18:0-3OH-HexA	650.3746		1	Acylcarnitine C18:0-3OH-HexA	650.3746	650.3746	0
+Cer 42:1 (putative)	650.6445		1	Cer 42:1 (putative)	650.6445	650.6445	0
+CE 18:1 (putative)	651.6075		1	CE 18:1 (putative)	651.6075	651.6075	0
+DG 38:7 (putative)	656.5248		1	DG 38:7 (putative)	656.5248	656.5248	0
+DG 38:6 (putative)	658.5405		1	DG 38:6 (putative)	658.5405	658.5405	0
+DG 38:5 (putative)	660.5562		1	DG 38:5 (putative)	660.5562	660.5562	0
+SM 31:1 (putative)	661.5275		1	SM 31:1 (putative)	661.5275	661.5275	0
+SM 32:7 (putative)	663.4521	carbon_shift_candidate 14->32: SM 32:7 (putative)	1	SM 32:7 (putative)	663.4521	663.4521	0
+NAD+	664.1164		1	NAD+	664.1164	664.1164	0
+PC 27:0 (putative)	664.4935	carbon_shift_candidate 28->27: PC 27:0 (putative)	1	PC 27:0 (putative)	664.4935	664.4935	0
+CE 18:3 (putative)	664.6057		1	CE 18:3 (putative)	664.6057	664.6057	0
+NADH +H	666.132		1	NADH +H	666.132	666.132	0
+CE 18:2 (putative)	666.6193		1	CE 18:2 (putative)	666.6193	666.6193	0
+CE 18:1 (putative)	668.6337		1	CE 18:1 (putative)	668.6337	668.6337	0
+CE 20:5 (putative)	671.5761		1	CE 20:5 (putative)	671.5761	671.5761	0
+PA 34:1 (putative)	673.4808		1	PA 34:1 (putative)	673.4808	673.4808	0
+SM 32:2 (putative)	673.528		1	SM 32:2 (putative)	673.528	673.528	0
+CE 20:4 (putative)	673.5918		1	CE 20:4 (putative)	673.5918	673.5918	0
+PE 31:1 (putative)	674.4761		1	PE 31:1 (putative)	674.4761	674.4761	0
+SM 32:1 (putative)	675.5436	carbon_shift_candidate 14->32: SM 32:1 (putative)	1	SM 32:1 (putative)	675.5436	675.5436	0
+CE 20:3 (putative)	675.6074		1	CE 20:3 (putative)	675.6074	675.6074	0
+SM 32:0 (putative)	677.5595		1	SM 32:0 (putative)	677.5595	677.5595	0
+SM 33:2 (putative)	687.5435		1	SM 33:2 (putative)	687.5435	687.5435	0
+CE 20:5 (putative)	688.6016		1	CE 20:5 (putative)	688.6016	688.6016	0
+SM 33:1 (putative)	689.5592	carbon_shift_candidate 15->33: SM 33:1 (putative)	1	SM 33:1 (putative)	689.5592	689.5592	0
+CE 20:4 (putative)	690.6189		1	CE 20:4 (putative)	690.6189	690.6189	0
+PC O-30:0 (putative)	692.559		1	PC O-30:0 (putative)	692.559	692.559	0
+CE 22:6 (putative)	697.5918		1	CE 22:6 (putative)	697.5918	697.5918	0
+CE 22:5 (putative)	699.6074		1	CE 22:5 (putative)	699.6074	699.6074	0
+Cardiolipin CL(68:5) [M+2H]2+ (putative)	700.4856		1	Cardiolipin CL(68:5) [M+2H]2+ (putative)	700.4856	700.4856	0
+Cardiolipin CL(68:4) [M+2H]2+ (putative)	701.4934		1	Cardiolipin CL(68:4) [M+2H]2+ (putative)	701.4934	701.4934	0
+SM 34:2 (putative)	701.5591	carbon_shift_candidate 16->34: SM 34:2 (putative)	1	SM 34:2 (putative)	701.5591	701.5591	0
+PC 30:2 (putative)	702.5056		1	PC 30:2 (putative)	702.5056	702.5056	0
+Cardiolipin CL(68:2) [M+2H]2+ (putative)	703.509		1	Cardiolipin CL(68:2) [M+2H]2+ (putative)	703.509	703.509	0
+SM 34:1 (putative)	703.5755	carbon_shift_candidate 16->34: SM 34:1 (putative)	1	SM 34:1 (putative)	703.5755	703.5755	0
+PE O-34:1 (putative)	704.5582		1	PE O-34:1 (putative)	704.5582	704.5582	0
+SM 34:0 (putative)	705.5907		1	SM 34:0 (putative)	705.5907	705.5907	0
+PC 30:0 (putative)	706.5381		1	PC 30:0 (putative)	706.5381	706.5381	0
+SM 35:4 (putative)	711.5465	carbon_shift_candidate 17->35: SM 35:4 (putative)	1	SM 35:4 (putative)	711.5465	711.5465	0
+Cardiolipin CL(70:5) [M+2H]2+ (putative)	714.5012		1	Cardiolipin CL(70:5) [M+2H]2+ (putative)	714.5012	714.5012	0
+PE O-35:3 (putative)	714.5433		1	PE O-35:3 (putative)	714.5433	714.5433	0
+CE 22:6 (putative)	714.6185		1	CE 22:6 (putative)	714.6185	714.6185	0
+Cardiolipin CL(70:4) [M+2H]2+ (putative)	715.509		1	Cardiolipin CL(70:4) [M+2H]2+ (putative)	715.509	715.509	0
+SM 35:2 (putative)	715.5753		1	SM 35:2 (putative)	715.5753	715.5753	0
+PC O-32:2 (putative)	716.5593		1	PC O-32:2 (putative)	716.5593	716.5593	0
+SM 35:1 (putative)	717.5906	carbon_shift_candidate 17->35: SM 35:1 (putative)	1	SM 35:1 (putative)	717.59065	717.59065	0
+PC 31:1 (putative)	718.5394		1	PC 31:1 (putative)	718.5394	718.5394	0
+PC O-32:1 (putative)	718.5748		1	PC O-32:1 (putative)	718.5748	718.5748	0
+PC 31:0 (putative)	720.5544		1	PC 31:0 (putative)	720.5544	720.5544	0
+SM 36:5 (putative)	723.5447	carbon_shift_candidate 18->36: SM 36:5 (putative)	1	SM 36:5 (putative)	723.5447	723.5447	0
+PE P-34:2 (putative)	724.5252		1	PE P-34:2 (putative)	724.5252	724.5252	0
+Cardiolipin CL(72:8) [M+2H]2+ (putative)	725.4934		1	Cardiolipin CL(72:8) [M+2H]2+ (putative)	725.4934	725.4934	0
+SM 36:4 (putative)	725.5596	carbon_shift_candidate 18->36: SM 36:4 (putative)	1	SM 36:4 (putative)	725.55965	725.55965	0
+Cardiolipin CL(72:7) [M+2H]2+ (putative)	726.5012		1	Cardiolipin CL(72:7) [M+2H]2+ (putative)	726.5012	726.5012	0
+PE 36:2 (putative)	726.5438		1	PE 36:2 (putative)	726.5438	726.5438	0
+Cardiolipin CL(72:6) [M+2H]2+ (putative)	727.509		1	Cardiolipin CL(72:6) [M+2H]2+ (putative)	727.509	727.509	0
+PA 38:2 (putative)	727.5278		1	PA 38:2 (putative)	727.5278	727.5278	0
+SM 36:3 (putative)	727.5752		1	SM 36:3 (putative)	727.5752	727.5752	0
+NADPH M+H-H2O	728.103		1	NADPH M+H-H2O	728.103	728.103	0
+Cardiolipin CL(72:5) [M+2H]2+ (putative)	728.5169		1	Cardiolipin CL(72:5) [M+2H]2+ (putative)	728.5169	728.5169	0
+PC 32:3 (putative)	728.5228		1	PC 32:3 (putative)	728.5228	728.5228	0
+Cardiolipin CL(72:4) [M+2H]2+ (putative)	729.5247		1	Cardiolipin CL(72:4) [M+2H]2+ (putative)	729.5247	729.5247	0
+SM 36:2 (putative)	729.5915	carbon_shift_candidate 18->36: SM 36:2 (putative)	1	SM 36:2 (putative)	729.5915	729.5915	0
+PC 32:2 (putative)	730.5384		1	PC 32:2 (putative)	730.5384	730.5384	0
+SM 36:1 (putative)	731.6069	carbon_shift_candidate 18->36: SM 36:1 (putative)	1	SM 36:1 (putative)	731.6069	731.6069	0
+PC 32:1 (putative)	732.5538		1	PC 32:1 (putative)	732.5538	732.5538	0
+PC 32:1 (putative)	732.5576		1	PC 32:1 (putative)	732.5576	732.5576	0
+SM 36:0 (putative)	733.6222		1	SM 36:0 (putative)	733.6222	733.6222	0
+PC 32:0 (putative)	734.5706		1	PC 32:0 (putative)	734.5706	734.5706	0
+PC O-33:0 (putative)	734.6068		1	PC O-33:0 (putative)	734.6068	734.6068	0
+Cardiolipin CL(74:9) [M+2H]2+ (putative)	738.5012		1	Cardiolipin CL(74:9) [M+2H]2+ (putative)	738.5012	738.5012	0
+Cardiolipin CL(74:8) [M+2H]2+ (putative)	739.509		1	Cardiolipin CL(74:8) [M+2H]2+ (putative)	739.509	739.509	0
+SM 37:4 (putative)	739.5718		1	SM 37:4 (putative)	739.5718	739.5718	0
+Cardiolipin CL(74:7) [M+2H]2+ (putative)	740.5169		1	Cardiolipin CL(74:7) [M+2H]2+ (putative)	740.5169	740.5169	0
+TG 42:0 (putative)	740.6752		1	TG 42:0 (putative)	740.6752	740.6752	0
+PC 33:3 (putative)	742.5386		1	PC 33:3 (putative)	742.5386	742.5386	0
+PC O-34:3 (putative)	742.5746		1	PC O-34:3 (putative)	742.57455	742.57455	0
+SM 37:1 (putative)	745.6218		1	SM 37:1 (putative)	745.6218	745.6218	0
+PC 33:1 (putative)	746.5694		1	PC 33:1 (putative)	746.5694	746.5694	0
+PC O-34:1 (putative)	746.605		1	PC O-34:1 (putative)	746.605	746.605	0
+PE O-38:7 (putative)	748.5283		1	PE O-38:7 (putative)	748.5283	748.5283	0
+PC 33:0 (putative)	748.5854		1	PC 33:0 (putative)	748.58535	748.58535	0
+PC O-34:0 (putative)	748.6213		1	PC O-34:0 (putative)	748.6213	748.6213	0
+Cardiolipin CL(76:12) [M+2H]2+ (putative)	749.4934		1	Cardiolipin CL(76:12) [M+2H]2+ (putative)	749.4934	749.4934	0
+Cardiolipin CL(76:11) [M+2H]2+ (putative)	750.5012		1	Cardiolipin CL(76:11) [M+2H]2+ (putative)	750.5012	750.5012	0
+PE 38:4 (putative)	750.5438		1	PE 38:4 (putative)	750.5438	750.5438	0
+Cardiolipin CL(76:10) [M+2H]2+ (putative)	751.509		1	Cardiolipin CL(76:10) [M+2H]2+ (putative)	751.509	751.509	0
+SM 38:5 (putative)	751.5771	carbon_shift_candidate 20->38: SM 38:5 (putative)	1	SM 38:5 (putative)	751.5771	751.5771	0
+Cardiolipin CL(76:9) [M+2H]2+ (putative)	752.5169		1	Cardiolipin CL(76:9) [M+2H]2+ (putative)	752.5169	752.5169	0
+PC 34:5 (putative)	752.522		1	PC 34:5 (putative)	752.522	752.522	0
+PE P-36:2 (putative)	752.5565		1	PE P-36:2 (putative)	752.5565	752.5565	0
+SM 36:1 (putative)	753.5881		1	SM 36:1 (putative)	753.5881	753.5881	0
+SM 38:4 (putative)	753.5944	carbon_shift_candidate 20->38: SM 38:4 (putative)	1	SM 38:4 (putative)	753.5944	753.5944	0
+PC 34:4 (putative)	754.5378		1	PC 34:4 (putative)	754.5378	754.5378	0
+PC O-35:4 (putative)	754.5749		2	PE O-38:4 (putative) | PC O-35:4 (putative)	754.5747	754.5751	0.5301
+TG 43:0 (putative)	754.6968		1	TG 43:0 (putative)	754.6968	754.6968	0
+SM 38:3 (putative)	755.6072		1	SM 38:3 (putative)	755.6072	755.6072	0
+PC/PE 32:0 (putative)	756.5524		2	PC/PE 32:0 (putative) | PC 34:3 (putative)	756.5514	756.5535	2.7757
+PC O-35:3 (putative)	756.5909		1	PC O-35:3 (putative)	756.59085	756.59085	0
+SM 38:2 (putative)	757.6225	carbon_shift_candidate 20->38: SM 38:2 (putative)	1	SM 38:2 (putative)	757.6225	757.6225	0
+PC 34:2 (putative)	758.5706		1	PC 34:2 (putative)	758.5706	758.5706	0
+PC O-35:2 (putative)	758.6063		1	PC O-35:2 (putative)	758.6063	758.6063	0
+SM 38:1 (putative)	759.6376	carbon_shift_candidate 20->38: SM 38:1 (putative)	1	SM 38:1 (putative)	759.6376	759.6376	0
+TG 45:3 (putative)	759.6497		1	TG 45:3 (putative)	759.6497	759.6497	0
+PC 34:1 (putative)	760.5882		2	PC 34:1 (putative)	760.5867	760.5896	3.8128
+SM 38:0 (putative)	761.652		1	SM 38:0 (putative)	761.652	761.652	0
+PE 36:4 (putative)	762.5044		1	PE 36:4 (putative)	762.5044	762.5044	0
+PC 34:0 (putative)	762.602		1	PC 34:0 (putative)	762.60195	762.60195	0
+Cardiolipin CL(78:12) [M+2H]2+ (putative)	763.509		1	Cardiolipin CL(78:12) [M+2H]2+ (putative)	763.509	763.509	0
+PC 35:6 (putative)	764.5231		1	PC 35:6 (putative)	764.5231	764.5231	0
+TG 44:2 (putative)	764.6807		1	TG 44:2 (putative)	764.6807	764.6807	0
+PC 35:5 (putative)	766.5383		1	PC 35:5 (putative)	766.53825	766.53825	0
+PC O-36:5 (putative)	766.5751		1	PC O-36:5 (putative)	766.5751	766.5751	0
+TG 44:1 (putative)	766.6937		1	TG 44:1 (putative)	766.6937	766.6937	0
+CoA	768.1225		1	CoA	768.1225	768.1225	0
+PC 35:4 (putative)	768.5553		1	PC 35:4 (putative)	768.5553	768.5553	0
+PC O-36:4 (putative)	768.5771		1	PC O-36:4 (putative)	768.5771	768.5771	0
+PC/PE P-34:1 (putative)	768.5878		1	PC/PE P-34:1 (putative)	768.5878	768.5878	0
+PC 35:3 (putative)	770.5698		1	PC 35:3 (putative)	770.5698	770.5698	0
+PE O-40:9 (putative)	772.5274		1	PE O-40:9 (putative)	772.5274	772.5274	0
+PC 35:2 (putative)	772.5858		1	PC 35:2 (putative)	772.5858	772.5858	0
+PC P-36:2 (putative)	772.6212		2	PC O-36:2 (putative) | PC P-36:2 (putative)	772.6209	772.6215	0.7766
+PG 36:2 (putative)	773.5333		1	PG 36:2 (putative)	773.5333	773.5333	0
+SM 39:1 (putative)	773.6531	carbon_shift_candidate 21->39: SM 39:1 (putative)	1	SM 39:1 (putative)	773.6531	773.6531	0
+Acetyl-CoA	774.1118		1	Acetyl-CoA	774.1118	774.1118	0
+PC 35:1 (putative)	774.6008		1	PC 35:1 (putative)	774.60075	774.60075	0
+PE 40:5 (putative)	776.56		1	PE 40:5 (putative)	776.56	776.56	0
+PC 35:0 (putative)	776.6164		1	PC 35:0 (putative)	776.6164	776.6164	0
+PC 36:6 (putative)	778.5374		1	PC 36:6 (putative)	778.5374	778.5374	0
+PC 36:5 (putative)	780.5523		1	PC 36:5 (putative)	780.5523	780.5523	0
+PC O-37:5 (putative)	780.5905		1	PC O-37:5 (putative)	780.5905	780.5905	0
+Cardiolipin CL(80:8) [M+2H]2+ (putative)	781.556		1	Cardiolipin CL(80:8) [M+2H]2+ (putative)	781.556	781.556	0
+DL-MethylCoA	782.1381		1	DL-MethylCoA	782.1381	782.1381	0
+PC 34:1 (putative)	782.567		1	PC 34:1 (putative)	782.567	782.567	0
+PC 36:4 (putative)	782.5728		2	PC 36:4 (putative)	782.5715	782.574	3.1946
+PC O-37:4 (putative)	782.593		1	PC O-37:4 (putative)	782.593	782.593	0
+TG 45:0 (putative)	782.7242		1	TG 45:0 (putative)	782.7242	782.7242	0
+SM 40:3 (putative)	783.6379		1	SM 40:3 (putative)	783.6379	783.6379	0
+PC 36:3 (putative)	784.5768		1	PC 36:3 (putative)	784.5768	784.5768	0
+PC 34:0 (putative)	784.5834		2	PC 34:0 (putative) | PC 36:3 (putative)	784.5827	784.5841	1.7844
+PC 36:3 (putative)	784.5898		1	PC 36:3 (putative)	784.5898	784.5898	0
+SM 40:2 (putative)	785.6551	carbon_shift_candidate 22->40: SM 40:2 (putative)	2	SM 40:2 (putative)	785.65315	785.657	4.9004
+FAD	786.1644		1	FAD	786.1644	786.1644	0
+PS 36:2 (putative)	786.5285		1	PS 36:2 (putative)	786.5285	786.5285	0
+PC 36:2 (putative)	786.601		1	PC 36:2 (putative)	786.60095	786.60095	0
+PC 36:2 (putative)	786.6052		1	PC 36:2 (putative)	786.6052	786.6052	0
+SM 40:1 (putative)	787.6687	carbon_shift_candidate 22->40: SM 40:1 (putative)	1	SM 40:1 (putative)	787.6687	787.6687	0
+FADH2	788.1801		1	FADH2	788.1801	788.1801	0
+PS 36:1 (putative)	788.5442		1	PS 36:1 (putative)	788.5442	788.5442	0
+PC 36:1 (putative)	788.6165		1	PC 36:1 (putative)	788.6165	788.6165	0
+PA 43:6 (putative)	789.5434		1	PA 43:6 (putative)	789.5434	789.5434	0
+PE 38:2 (putative)	789.6116		1	PE 38:2 (putative)	789.6116	789.6116	0
+SM 40:0 (putative)	789.684		1	SM 40:0 (putative)	789.684	789.684	0
+PE 40:6 (putative)	790.5384		2	PC 37:7 (putative) | PE 40:6 (putative)	790.5381	790.5387	0.759
+PC O-38:7 (putative)	790.5743		1	PC O-38:7 (putative)	790.5743	790.5743	0
+PC 36:0 (putative)	790.6325		1	PC 36:0 (putative)	790.6325	790.6325	0
+TG 46:3 (putative)	790.6967		1	TG 46:3 (putative)	790.6967	790.6967	0
+PC 37:6 (putative)	792.5538		1	PC 37:6 (putative)	792.5538	792.5538	0
+PC O-38:6 (putative)	792.5908		1	PC O-38:6 (putative)	792.5908	792.5908	0
+TG 46:2 (putative)	792.7114		1	TG 46:2 (putative)	792.7114	792.7114	0
+PC 37:5 (putative)	794.5692		1	PC 37:5 (putative)	794.5692	794.5692	0
+PC O-38:5 (putative)	794.606		1	PC O-38:5 (putative)	794.60605	794.60605	0
+TG 46:1 (putative)	794.722		1	TG 46:1 (putative)	794.722	794.722	0
+PC 37:4 (putative)	796.5853		1	PC 37:4 (putative)	796.5853	796.5853	0
+TG 46:0 (putative)	796.7368		1	TG 46:0 (putative)	796.7368	796.7368	0
+PG 38:4 (putative)	797.5333		1	PG 38:4 (putative)	797.5333	797.5333	0
+SM 41:3 (putative)	797.653		1	SM 41:3 (putative)	797.653	797.653	0
+PC 37:3 (putative)	798.6009		1	PC 37:3 (putative)	798.6009	798.6009	0
+PC O-38:3 (putative)	798.6368		1	PC O-38:3 (putative)	798.6368	798.6368	0
+SM 41:2 (putative)	799.6694	carbon_shift_candidate 23->41: SM 41:2 (putative)	2	SM 41:2 (putative)	799.6687	799.6701	1.7507
+PC 37:2 (putative)	800.6164		1	PC 37:2 (putative)	800.6164	800.6164	0
+SM 41:1 (putative)	801.6848	carbon_shift_candidate 23->41: SM 41:1 (putative)	1	SM 41:1 (putative)	801.6848	801.6848	0
+PC 38:8 (putative)	802.5403		1	PC 38:8 (putative)	802.5403	802.5403	0
+PC 37:1 (putative)	802.632		1	PC 37:1 (putative)	802.63205	802.63205	0
+PC 38:7 (putative)	804.5531	carbon_shift_candidate 37->38: PC 38:7 (putative)	1	PC 38:7 (putative)	804.5531	804.5531	0
+PE O-42:7 (putative)	804.5905		1	PE O-42:7 (putative)	804.5905	804.5905	0
+TG 47:3 (putative)	804.7063		1	TG 47:3 (putative)	804.7063	804.7063	0
+PC 38:6 (putative)	806.5672		1	PC 38:6 (putative)	806.5672	806.5672	0
+TG 47:2 (putative)	806.7217		1	TG 47:2 (putative)	806.7217	806.7217	0
+SM 42:5 (putative)	807.6374	carbon_shift_candidate 24->42: SM 42:5 (putative)	1	SM 42:5 (putative)	807.6374	807.6374	0
+PC 36:2 (putative)	808.5834		2	PC 36:2 (putative) | PC 38:5 (putative)	808.5827	808.5841	1.7314
+TG 47:1 (putative)	808.739		1	TG 47:1 (putative)	808.739	808.739	0
+SM 42:4 (putative)	809.6518	carbon_shift_candidate 24->42: SM 42:4 (putative)	1	SM 42:4 (putative)	809.6518	809.6518	0
+AcetylCoA / CoA 2:0	810.133		1	AcetylCoA / CoA 2:0	810.133	810.133	0
+PC 38:4 (putative)	810.6024		2	PC 38:4 (putative)	810.6007	810.60405	4.1327
+GlcCer 42:2 (putative)	810.6817		1	GlcCer 42:2 (putative)	810.6817	810.6817	0
+SM 42:3 (putative)	811.6687	carbon_shift_candidate 24->42: SM 42:3 (putative)	1	SM 42:3 (putative)	811.6687	811.6687	0
+PC 38:3 (putative)	812.6158		1	PC 38:3 (putative)	812.6158	812.6158	0
+GlcCer 42:1 (putative)	812.6974		1	GlcCer 42:1 (putative)	812.6974	812.6974	0
+SM 42:2 (putative)	813.6847	carbon_shift_candidate 24->42: SM 42:2 (putative)	1	SM 42:2 (putative)	813.6847	813.6847	0
+PC O-40:9 (putative)	814.5734		1	PC O-40:9 (putative)	814.5734	814.5734	0
+PC 38:2 (putative)	814.6329		1	PC 38:2 (putative)	814.6329	814.6329	0
+Unknown: NF-L Positive - 815.6347	815.6347		1	Unknown: NF-L Positive - 815.6347	815.6347	815.6347	0
+SM 42:1 (putative)	815.7003	carbon_shift_candidate 24->42: SM 42:1 (putative)	1	SM 42:1 (putative)	815.7003	815.7003	0
+PC O-40:8 (putative)	816.5898		1	PC O-40:8 (putative)	816.5898	816.5898	0
+PC 38:1 (putative)	816.6474		1	PC 38:1 (putative)	816.64745	816.64745	0
+PC 39:7 (putative)	818.5699		1	PC 39:7 (putative)	818.5699	818.5699	0
+PC O-40:7 (putative)	818.6062		1	PC O-40:7 (putative)	818.60615	818.60615	0
+PC 38:0 (putative)	818.6649		1	PC 38:0 (putative)	818.6649	818.6649	0
+TG 48:3 (putative)	818.7245		1	TG 48:3 (putative)	818.7245	818.7245	0
+PC 39:6 (putative)	820.5859		1	PC 39:6 (putative)	820.5859	820.5859	0
+PC O-40:6 (putative)	820.6208		1	PC O-40:6 (putative)	820.6208	820.6208	0
+TG 48:2 (putative)	820.7375		1	TG 48:2 (putative)	820.7375	820.7375	0
+PC 39:5 (putative)	822.6011		1	PC 39:5 (putative)	822.6011	822.6011	0
+PC O-40:5 (putative)	822.6376		1	PC O-40:5 (putative)	822.63765	822.63765	0
+TG 48:1 (putative)	822.7565		1	TG 48:1 (putative)	822.7565	822.7565	0
+SM 43:4 (putative)	823.6712	carbon_shift_candidate 25->43: SM 43:4 (putative)	1	SM 43:4 (putative)	823.6712	823.6712	0
+CoA 3:0	824.1487		1	CoA 3:0	824.1487	824.1487	0
+PC 39:4 (putative)	824.6165		1	PC 39:4 (putative)	824.6165	824.6165	0
+PC O-40:4 (putative)	824.6533		1	PC O-40:4 (putative)	824.65325	824.65325	0
+TG 48:0 (putative)	824.7713		1	TG 48:0 (putative)	824.7713	824.7713	0
+PC 40:10 (putative)	826.5356		1	PC 40:10 (putative)	826.5356	826.5356	0
+PC O-40:3 (putative)	826.6689		1	PC O-40:3 (putative)	826.6689	826.6689	0
+PC O-40:3 (putative)	826.6738		1	PC O-40:3 (putative)	826.6738	826.6738	0
+SM 43:2 (putative)	827.7007		1	SM 43:2 (putative)	827.7007	827.7007	0
+SM 43:2 (putative)	827.7049	carbon_shift_candidate 25->43: SM 43:2 (putative)	1	SM 43:2 (putative)	827.7049	827.7049	0
+PC 38:6 (putative)	828.5528		2	PC 38:6 (putative) | PC 40:9 (putative)	828.5514	828.5542	3.3794
+SM 43:1 (putative)	829.7154	carbon_shift_candidate 25->43: SM 43:1 (putative)	1	SM 43:1 (putative)	829.7154	829.7154	0
+PC 39:1 (putative)	830.6633		1	PC 39:1 (putative)	830.6633	830.6633	0
+PC 40:7 (putative)	832.5835	carbon_shift_candidate 39->40: PC 40:7 (putative)	2	PC 40:7 (putative)	832.5819	832.5852	3.9636
+GlcCer 42:2 (putative)	832.6662		1	GlcCer 42:2 (putative)	832.6662	832.6662	0
+TG 49:3 (putative)	832.744		1	TG 49:3 (putative)	832.744	832.744	0
+SM 44:6 (putative)	833.6518	carbon_shift_candidate 26->44: SM 44:6 (putative)	1	SM 44:6 (putative)	833.6518	833.6518	0
+TG 50:1 (putative)	833.7593		1	TG 50:1 (putative)	833.7593	833.7593	0
+PC 40:6 (putative)	834.6		1	PC 40:6 (putative)	834.6	834.6	0
+TG 49:2 (putative)	834.7592		1	TG 49:2 (putative)	834.7592	834.7592	0
+SM 42:2 (putative)	835.6671	carbon_shift_candidate 26->44: SM 44:5 (putative)	2	SM 42:2 (putative) | SM 44:5 (putative)	835.6663	835.66785	1.8548
+PS 37:2 (putative)	836.5208		1	PS 37:2 (putative)	836.5208	836.5208	0
+PC 40:5 (putative)	836.6119		1	PC 40:5 (putative)	836.6119	836.6119	0
+PC 40:5 (putative)	836.6164		1	PC 40:5 (putative)	836.6164	836.6164	0
+PE/DG 28:0 (putative)	837.5247		1	PE/DG 28:0 (putative)	837.5247	837.5247	0
+Unknown: GFAP positive - 837.6607	837.6607		1	Unknown: GFAP positive - 837.6607	837.6607	837.6607	0
+SM 44:4 (putative)	837.6869	carbon_shift_candidate 26->44: SM 44:4 (putative)	1	SM 44:4 (putative)	837.6869	837.6869	0
+DL-(iso)ButyrylCoA	838.1643		1	DL-(iso)ButyrylCoA	838.1643	838.1643	0
+PC 40:4 (putative)	838.632		1	PC 40:4 (putative)	838.632	838.632	0
+SM 44:3 (putative)	839.7038	carbon_shift_candidate 26->44: SM 44:3 (putative)	1	SM 44:3 (putative)	839.7038	839.7038	0
+PC 40:3 (putative)	840.6478		1	PC 40:3 (putative)	840.6478	840.6478	0
+SM 44:2 (putative)	841.7189	carbon_shift_candidate 26->44: SM 44:2 (putative)	1	SM 44:2 (putative)	841.7189	841.7189	0
+PC 40:2 (putative)	842.6638		1	PC 40:2 (putative)	842.6638	842.6638	0
+TG 50:5 (putative)	842.7266		1	TG 50:5 (putative)	842.7266	842.7266	0
+PC O-42:8 (putative)	844.6209		1	PC O-42:8 (putative)	844.6209	844.6209	0
+TG 50:4 (putative)	844.7397		1	TG 50:4 (putative)	844.7397	844.7397	0
+PC O-42:7 (putative)	846.6367		1	PC O-42:7 (putative)	846.6367	846.6367	0
+TG 50:3 (putative)	846.756		1	TG 50:3 (putative)	846.75605	846.75605	0
+PC O-42:6 (putative)	848.6529		1	PC O-42:6 (putative)	848.6529	848.6529	0
+TG 50:2 (putative)	848.7715		1	TG 50:2 (putative)	848.7715	848.7715	0
+DL-(iso)TiglylCoA	850.1643		1	DL-(iso)TiglylCoA	850.1643	850.1643	0
+PC O-42:5 (putative)	850.6686		1	PC O-42:5 (putative)	850.6686	850.6686	0
+Unknown: NF-L Positive - 850.673	850.673		1	Unknown: NF-L Positive - 850.673	850.673	850.673	0
+TG 50:1 (putative)	850.7871		1	TG 50:1 (putative)	850.7871	850.7871	0
+Acetoacyl-CoA	852.1442		1	Acetoacyl-CoA	852.1442	852.1442	0
+DL-MethylbutyroylCoA	852.18		1	DL-MethylbutyroylCoA	852.18	852.18	0
+PC O-42:4 (putative)	852.6842		1	PC O-42:4 (putative)	852.68425	852.68425	0
+Malonyl-CoA / 3-Hydroxybutanoyl-CoA	854.1229		1	Malonyl-CoA / 3-Hydroxybutanoyl-CoA	854.1229	854.1229	0
+CoA 4:0(OH)	854.1592		1	CoA 4:0(OH)	854.1592	854.1592	0
+PC O-42:3 (putative)	854.7004		1	PC O-42:3 (putative)	854.7004	854.7004	0
+SM 45:2 (putative)	855.7324	carbon_shift_candidate 27->45: SM 45:2 (putative)	1	SM 45:2 (putative)	855.7324	855.7324	0
+TG 52:4 (putative)	855.7436		1	TG 52:4 (putative)	855.7436	855.7436	0
+PC 42:9 (putative)	856.5851		1	PC 42:9 (putative)	856.5851	856.5851	0
+PC O-42:2 (putative)	856.7149		1	PC O-42:2 (putative)	856.7149	856.7149	0
+TG 52:3 (putative)	857.7593		1	TG 52:3 (putative)	857.7593	857.7593	0
+PC 42:8 (putative)	858.6001		1	PC 42:8 (putative)	858.6001	858.6001	0
+TG 51:4 (putative)	858.7546		1	TG 51:4 (putative)	858.7546	858.7546	0
+TG 52:2 (putative)	859.7749		1	TG 52:2 (putative)	859.7749	859.7749	0
+PC 42:7 (putative)	860.6157		1	PC 42:7 (putative)	860.61575	860.61575	0
+TG 51:3 (putative)	860.7722		1	TG 51:3 (putative)	860.7722	860.7722	0
+TG 52:1 (putative)	861.7906		1	TG 52:1 (putative)	861.7906	861.7906	0
+DL-C5H4O3-CoA	862.1279		1	DL-C5H4O3-CoA	862.1279	862.1279	0
+PC 42:6 (putative)	862.6328		1	PC 42:6 (putative)	862.63285	862.63285	0
+TG 51:2 (putative)	862.7913		1	TG 51:2 (putative)	862.7913	862.7913	0
+CoA 6:1	864.18		1	CoA 6:1	864.18	864.18	0
+PC 42:5 (putative)	864.6472		1	PC 42:5 (putative)	864.6472	864.6472	0
+TG 51:1 (putative)	864.8058		1	TG 51:1 (putative)	864.80585	864.80585	0
+DL-C5-oxo-CoA	866.1592		1	DL-C5-oxo-CoA	866.1592	866.1592	0
+PC 42:4 (putative)	866.6638		1	PC 42:4 (putative)	866.6638	866.6638	0
+TG 51:0 (putative)	866.8201		1	TG 51:0 (putative)	866.8201	866.8201	0
+Succinyl-CoA	868.1385		1	Succinyl-CoA	868.1385	868.1385	0
+TG 52:6 (putative)	868.74		1	TG 52:6 (putative)	868.74	868.74	0
+PC O-44:9 (putative)	870.635		1	PC O-44:9 (putative)	870.635	870.635	0
+PC 42:2 (putative)	870.6952		1	PC 42:2 (putative)	870.6952	870.6952	0
+TG 52:5 (putative)	870.7558		1	TG 52:5 (putative)	870.7558	870.7558	0
+DL-BenzoylCoA	872.1486		1	DL-BenzoylCoA	872.1486	872.1486	0
+PC O-44:8 (putative)	872.6536		1	PC O-44:8 (putative)	872.6536	872.6536	0
+PC 42:1 (putative)	872.7103		1	PC 42:1 (putative)	872.7103	872.7103	0
+TG 52:4 (putative)	872.772		1	TG 52:4 (putative)	872.772	872.772	0
+PC O-44:7 (putative)	874.6683		1	PC O-44:7 (putative)	874.66835	874.66835	0
+TG 52:3 (putative)	874.7885		1	TG 52:3 (putative)	874.7885	874.7885	0
+TG 52:2 (putative)	876.8063		1	TG 52:2 (putative)	876.8063	876.8063	0
+DL-C7:1-CoA	878.1956		1	DL-C7:1-CoA	878.1956	878.1956	0
+PC O-44:5 (putative)	878.6985		1	PC O-44:5 (putative)	878.6985	878.6985	0
+TG 52:1 (putative)	878.8224		1	TG 52:1 (putative)	878.8224	878.8224	0
+PC O-44:4 (putative)	880.7154		1	PC O-44:4 (putative)	880.71545	880.71545	0
+TG 52:0 (putative)	880.8375		1	TG 52:0 (putative)	880.8375	880.8375	0
+TG 54:5 (putative)	881.7593		1	TG 54:5 (putative)	881.7593	881.7593	0
+DL-GlutarylCoA	882.1542		1	DL-GlutarylCoA	882.1542	882.1542	0
+TG 54:4 (putative)	883.7749		1	TG 54:4 (putative)	883.7749	883.7749	0
+PI 38:4 (putative)	885.5493		1	PI 38:4 (putative)	885.5493	885.5493	0
+SM 47:1 (putative)	885.7817	carbon_shift_candidate 29->47: SM 47:1 (putative)	1	SM 47:1 (putative)	885.7817	885.7817	0
+TG 54:3 (putative)	885.7906		1	TG 54:3 (putative)	885.7906	885.7906	0
+PI 35:0 (putative)	887.5422		1	PI 35:0 (putative)	887.5422	887.5422	0
+ST 24:1 (putative)	888.6232		2	ST 42:3 (putative) | ST 24:1 (putative)	888.622903	888.6235	0.6714
+TG 53:2 (putative)	890.8201		1	TG 53:2 (putative)	890.8201	890.8201	0
+DL-C6H6O3-CoA	892.1385		1	DL-C6H6O3-CoA	892.1385	892.1385	0
+DL-OctenoylCoA	892.2113		1	DL-OctenoylCoA	892.2113	892.2113	0
+TG 53:1 (putative)	892.8337		1	TG 53:1 (putative)	892.8337	892.8337	0
+SM 48:4 (putative)	893.751	carbon_shift_candidate 30->48: SM 48:4 (putative)	1	SM 48:4 (putative)	893.751	893.751	0
+DL-OctanoylCoA	894.2269		1	DL-OctanoylCoA	894.2269	894.2269	0
+PC 44:4 (putative)	894.6971		1	PC 44:4 (putative)	894.6971	894.6971	0
+TG 54:7 (putative)	894.7515		1	TG 54:7 (putative)	894.7515	894.7515	0
+DL-MethylglutarylCoA	896.1698		1	DL-MethylglutarylCoA	896.1698	896.1698	0
+PC O-46:10 (putative)	896.6501		1	PC O-46:10 (putative)	896.6501	896.6501	0
+PC 44:3 (putative)	896.7118		1	PC 44:3 (putative)	896.7118	896.7118	0
+TG 54:6 (putative)	896.773		1	TG 54:6 (putative)	896.773	896.773	0
+PC 44:2 (putative)	898.7225		1	PC 44:2 (putative)	898.7225	898.7225	0
+TG 54:5 (putative)	898.7861		1	TG 54:5 (putative)	898.7861	898.7861	0
+PC O-46:8 (putative)	900.6853		1	PC O-46:8 (putative)	900.6853	900.6853	0
+PC 44:1 (putative)	900.7373		1	PC 44:1 (putative)	900.7373	900.7373	0
+TG 54:4 (putative)	900.8053		1	TG 54:4 (putative)	900.8053	900.8053	0
+DL-C8H8O3-CoA	902.1592		1	DL-C8H8O3-CoA	902.1592	902.1592	0
+TG 54:3 (putative)	902.8207		1	TG 54:3 (putative)	902.8207	902.8207	0
+PC O-46:6 (putative)	904.7165		1	PC O-46:6 (putative)	904.7165	904.7165	0
+TG 54:2 (putative)	904.8358		1	TG 54:2 (putative)	904.8358	904.8358	0
+DL-C9:1-CoA	906.2269		1	DL-C9:1-CoA	906.2269	906.2269	0
+TG 54:1 (putative)	906.8511		1	TG 54:1 (putative)	906.8511	906.8511	0
+CoA 8:1(OH)	908.2062		1	CoA 8:1(OH)	908.2062	908.2062	0
+DL-(iso)NonanoylCoA	908.2426		1	DL-(iso)NonanoylCoA	908.2426	908.2426	0
+PC 42:2 (putative)	908.6495		1	PC 42:2 (putative)	908.6495	908.6495	0
+TG 54:0 (putative)	908.8682		1	TG 54:0 (putative)	908.8682	908.8682	0
+TG 56:5 (putative)	909.7906		1	TG 56:5 (putative)	909.7906	909.7906	0
+DL-PimelylCoA	910.1855		1	DL-PimelylCoA	910.1855	910.1855	0
+DL-HydroxyoctanoylCoA	910.2218		1	DL-HydroxyoctanoylCoA	910.2218	910.2218	0
+DL-C10H12O2-CoA	914.1956		1	DL-C10H12O2-CoA	914.1956	914.1956	0
+DL-C10H14O2-CoA	916.2113		1	DL-C10H14O2-CoA	916.2113	916.2113	0
+TG 55:3 (putative)	916.8366		1	TG 55:3 (putative)	916.8366	916.8366	0
+DL-DecadienoylCoA	918.2269		1	DL-DecadienoylCoA	918.2269	918.2269	0
+TG 55:2 (putative)	918.8494		1	TG 55:2 (putative)	918.8494	918.8494	0
+DL-DecenoylCoA	920.2426		1	DL-DecenoylCoA	920.2426	920.2426	0
+TG 56:8 (putative)	920.7708		1	TG 56:8 (putative)	920.7708	920.7708	0
+TG 55:1 (putative)	920.869		1	TG 55:1 (putative)	920.869	920.869	0
+DL-C8:1-diC-CoA	922.1855		1	DL-C8:1-diC-CoA	922.1855	922.1855	0
+DL-C9:1-OH-CoA (HNEA-CoA)	922.2218		1	DL-C9:1-OH-CoA (HNEA-CoA)	922.2218	922.2218	0
+CoA 10:0	922.2582		1	CoA 10:0	922.2582	922.2582	0
+TG 56:7 (putative)	922.7908		1	TG 56:7 (putative)	922.7908	922.7908	0
+DL-(iso-)C8-diC-CoA	924.2011		1	DL-(iso-)C8-diC-CoA	924.2011	924.2011	0
+C9:0-OH-CoA (HNA-CoA)	924.2381		1	C9:0-OH-CoA (HNA-CoA)	924.2381	924.2381	0
+PC 46:3 (putative)	924.7462		1	PC 46:3 (putative)	924.7462	924.7462	0
+TG 56:6 (putative)	924.8026		1	TG 56:6 (putative)	924.8026	924.8026	0
+TG 56:5 (putative)	926.8182		1	TG 56:5 (putative)	926.8182	926.8182	0
+PC 46:1 (putative)	928.769		1	PC 46:1 (putative)	928.769	928.769	0
+TG 56:4 (putative)	928.8317		1	TG 56:4 (putative)	928.8317	928.8317	0
+TG 56:3 (putative)	930.8494		1	TG 56:3 (putative)	930.8494	930.8494	0
+TG 56:2 (putative)	932.86		1	TG 56:2 (putative)	932.86	932.86	0
+P-GHB-CoA	934.1262		1	P-GHB-CoA	934.1262	934.1262	0
+TG 56:1 (putative)	934.8801		1	TG 56:1 (putative)	934.8801	934.8801	0
+CoA 11:0	936.2739		1	CoA 11:0	936.2739	936.2739	0
+DL-(iso-)C9-diC-CoA	938.2168		1	DL-(iso-)C9-diC-CoA	938.2168	938.2168	0
+TG 58:10 (putative)	944.7735		1	TG 58:10 (putative)	944.7735	944.7735	0
+DL-DihydroferuloylCoA	946.1855		1	DL-DihydroferuloylCoA	946.1855	946.1855	0
+TG 58:9 (putative)	946.7879		1	TG 58:9 (putative)	946.7879	946.7879	0
+TG 57:2 (putative)	946.8836		1	TG 57:2 (putative)	946.8836	946.8836	0
+P-GHP-CoA	948.1414		1	P-GHP-CoA	948.1414	948.1414	0
+DL-C11:2-OH-CoA	948.2374		1	DL-C11:2-OH-CoA	948.2374	948.2374	0
+TG 57:1 (putative)	948.9012		1	TG 57:1 (putative)	948.9012	948.9012	0
+CoA 12:0	950.2901		1	CoA 12:0	950.2901	950.2901	0
+TG 58:6 (putative)	952.8344		1	TG 58:6 (putative)	952.8344	952.8344	0
+TG 58:4 (putative)	956.8646		1	TG 58:4 (putative)	956.8646	956.8646	0
+TG 58:3 (putative)	958.8865		1	TG 58:3 (putative)	958.8865	958.8865	0
+TG 58:2 (putative)	960.8916		1	TG 58:2 (putative)	960.8916	960.8916	0
+DL-C12:1-oxo-CoA/DL-C12:2-OH-CoA	962.2531		1	DL-C12:1-oxo-CoA/DL-C12:2-OH-CoA	962.2531	962.2531	0
+DL-C12-oxo-CoA	964.2688		1	DL-C12-oxo-CoA	964.2688	964.2688	0
+LacCer 18:1 (putative)	972.7346		1	LacCer 18:1 (putative)	972.7346	972.7346	0
+CoA 14:1	976.3052		1	CoA 14:1	976.3052	976.3052	0
+TG 59:1 (putative)	976.9298		1	TG 59:1 (putative)	976.9298	976.9298	0
+DL-C12:1-diC-CoA	978.2481		1	DL-C12:1-diC-CoA	978.2481	978.2481	0
+CoA 14:0	978.3208		1	CoA 14:0	978.3208	978.3208	0
+TG 59:0 (putative)	978.9465		1	TG 59:0 (putative)	978.9465	978.9465	0
+DL-C14:3-OH-CoA	988.2688		1	DL-C14:3-OH-CoA	988.2688	988.2688	0
+TG 60:2 (putative)	988.9258		1	TG 60:2 (putative)	988.9258	988.9258	0
+DL-HydroxytetradecadienCoA	990.2844		1	DL-HydroxytetradecadienCoA	990.2844	990.2844	0
+TG 60:1 (putative)	990.9436		1	TG 60:1 (putative)	990.9436	990.9436	0
+DL-C12-diC-oxo-CoA	994.243		1	DL-C12-diC-oxo-CoA	994.243	994.243	0
+CoA 16:0	1006.3522		1	CoA 16:0	1006.3522	1006.3522	0
+TG 62:3 (putative)	1014.9415		1	TG 62:3 (putative)	1014.9415	1014.9415	0
+TG 62:2 (putative)	1016.9623		1	TG 62:2 (putative)	1016.9623	1016.9623	0
+Cardiolipin CL(68:5) [M+H]+ (putative)	1399.9639		1	Cardiolipin CL(68:5) [M+H]+ (putative)	1399.963924	1399.963924	0
+Cardiolipin CL(68:4) [M+H]+ (putative)	1401.9795		1	Cardiolipin CL(68:4) [M+H]+ (putative)	1401.979524	1401.979524	0
+Cardiolipin CL(68:2) [M+H]+ (putative)	1406.0107		1	Cardiolipin CL(68:2) [M+H]+ (putative)	1406.010724	1406.010724	0
+Cardiolipin CL(70:5) [M+H]+ (putative)	1427.9952		1	Cardiolipin CL(70:5) [M+H]+ (putative)	1427.9952	1427.9952	0
+Cardiolipin CL(70:4) [M+H]+ (putative)	1430.0108		1	Cardiolipin CL(70:4) [M+H]+ (putative)	1430.0108	1430.0108	0
+Cardiolipin CL(72:8) [M+H]+ (putative)	1449.9795		1	Cardiolipin CL(72:8) [M+H]+ (putative)	1449.9795	1449.9795	0
+Cardiolipin CL(72:7) [M+H]+ (putative)	1451.9952		1	Cardiolipin CL(72:7) [M+H]+ (putative)	1451.9952	1451.9952	0
+Cardiolipin CL(72:6) [M+H]+ (putative)	1454.0108		1	Cardiolipin CL(72:6) [M+H]+ (putative)	1454.0108	1454.0108	0
+Cardiolipin CL(72:5) [M+H]+ (putative)	1456.0265		1	Cardiolipin CL(72:5) [M+H]+ (putative)	1456.0265	1456.0265	0
+Cardiolipin CL(72:4) [M+H]+ (putative)	1458.0421		1	Cardiolipin CL(72:4) [M+H]+ (putative)	1458.0421	1458.0421	0
+Cardiolipin CL(74:9) [M+H]+ (putative)	1475.9952		1	Cardiolipin CL(74:9) [M+H]+ (putative)	1475.9952	1475.9952	0
+Cardiolipin CL(74:8) [M+H]+ (putative)	1478.0108		1	Cardiolipin CL(74:8) [M+H]+ (putative)	1478.0108	1478.0108	0
+Cardiolipin CL(74:7) [M+H]+ (putative)	1480.0265		1	Cardiolipin CL(74:7) [M+H]+ (putative)	1480.026524	1480.026524	0
+Cardiolipin CL(76:12) [M+H]+ (putative)	1497.9795		1	Cardiolipin CL(76:12) [M+H]+ (putative)	1497.9795	1497.9795	0
+Cardiolipin CL(76:11) [M+H]+ (putative)	1499.9952		1	Cardiolipin CL(76:11) [M+H]+ (putative)	1499.9952	1499.9952	0
+Cardiolipin CL(76:10) [M+H]+ (putative)	1502.0108		1	Cardiolipin CL(76:10) [M+H]+ (putative)	1502.0108	1502.0108	0
+Cardiolipin CL(76:9) [M+H]+ (putative)	1504.0265		1	Cardiolipin CL(76:9) [M+H]+ (putative)	1504.0265	1504.0265	0
+Cardiolipin CL(78:12) [M+H]+ (putative)	1526.0108		1	Cardiolipin CL(78:12) [M+H]+ (putative)	1526.0108	1526.0108	0
+Cardiolipin CL(80:8) [M+H]+ (putative)	1562.1047		1	Cardiolipin CL(80:8) [M+H]+ (putative)	1562.1047	1562.1047	0

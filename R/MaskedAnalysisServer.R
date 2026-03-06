@@ -43,6 +43,98 @@ MaskedAnalysisServer <- function(id,  setup_values) {
       if (grepl("^(/|[A-Za-z]:[\\\\/])", path)) return(path)
       file.path(setup_values()[["wd"]], path)
     }
+
+    extract_imzml_template_pdata <- function(seg_path) {
+      parsed <- try(CardinalIO::parseImzML(seg_path), silent = TRUE)
+      if (inherits(parsed, "try-error")) {
+        stop(sprintf("parseImzML failed: %s", as.character(parsed)))
+      }
+
+      pos <- try(as.data.frame(parsed$run$spectrumList$positions, stringsAsFactors = FALSE), silent = TRUE)
+      if (inherits(pos, "try-error") || nrow(pos) == 0L) {
+        stop("No position metadata found in imzML run/spectrumList.")
+      }
+
+      pos_names <- names(pos)
+      x_col <- pos_names[grep("position\\s*x|^x$", pos_names, ignore.case = TRUE)][1]
+      y_col <- pos_names[grep("position\\s*y|^y$", pos_names, ignore.case = TRUE)][1]
+      z_col <- pos_names[grep("position\\s*z|^z$", pos_names, ignore.case = TRUE)][1]
+      if (!is.character(x_col) || !nzchar(x_col) || !is.character(y_col) || !nzchar(y_col)) {
+        stop("Could not identify X/Y coordinate columns in imzML position metadata.")
+      }
+
+      coord_df <- data.frame(
+        x = suppressWarnings(as.integer(pos[[x_col]])),
+        y = suppressWarnings(as.integer(pos[[y_col]])),
+        stringsAsFactors = FALSE
+      )
+      if (is.character(z_col) && nzchar(z_col)) {
+        z_vals <- suppressWarnings(as.integer(pos[[z_col]]))
+        if (any(is.finite(z_vals))) {
+          coord_df$z <- z_vals
+        }
+      }
+
+      n_pix <- nrow(coord_df)
+      base_run <- tools::file_path_sans_ext(basename(seg_path))
+      run_vec <- rep(base_run, n_pix)
+
+      pdata_sidecar_path <- sub("\\.imzML$", ".pdata", seg_path, ignore.case = TRUE)
+      extra_df <- NULL
+      if (file.exists(pdata_sidecar_path)) {
+        sidecar <- try(read.delim(pdata_sidecar_path, sep = "", stringsAsFactors = FALSE, check.names = FALSE), silent = TRUE)
+        if (!inherits(sidecar, "try-error") && nrow(sidecar) == n_pix) {
+          sidecar <- as.data.frame(sidecar, stringsAsFactors = FALSE, check.names = FALSE)
+          if (!is.null(rownames(sidecar)) && !is.null(rownames(pos)) &&
+              all(rownames(pos) %in% rownames(sidecar))) {
+            sidecar <- sidecar[rownames(pos), , drop = FALSE]
+          }
+          if ("run" %in% names(sidecar)) {
+            rv <- as.character(sidecar$run)
+            rv[is.na(rv) | !nzchar(rv)] <- base_run
+            run_vec <- rv
+          }
+          drop_cols <- names(sidecar) %in% c("x", "y", "z", "run", x_col, y_col, z_col)
+          extra_df <- sidecar[, !drop_cols, drop = FALSE]
+        }
+      }
+
+      pdat_args <- list(coord = coord_df, run = run_vec, row.names = FALSE)
+      if (!is.null(extra_df) && ncol(extra_df) > 0) {
+        pdat_args <- c(pdat_args, as.list(extra_df))
+      }
+      pdat <- do.call(Cardinal::PositionDataFrame, pdat_args)
+      pdat
+    }
+
+    extract_template_pdata <- function(seg_path) {
+      if (grepl("\\.imzML$", basename(seg_path), ignore.case = TRUE)) {
+        # Fast path: parse XML + .pdata metadata only; do not load spectra intensities.
+        return(extract_imzml_template_pdata(seg_path))
+      }
+      if (grepl("\\.rds$", basename(seg_path), ignore.case = TRUE)) {
+        obj <- readRDS(seg_path)
+        if (inherits(obj, "MSImagingArrays")) {
+          obj <- convertMSImagingArrays2Experiment(obj)
+        }
+        if (inherits(obj, "MSImagingExperiment")) {
+          return(pData(obj))
+        }
+        if (inherits(obj, "PositionDataFrame")) {
+          return(obj)
+        }
+        if (is.data.frame(obj) && all(c("x", "y") %in% names(obj))) {
+          run_vec <- if ("run" %in% names(obj)) as.character(obj$run) else rep("run0", nrow(obj))
+          extra_df <- obj[, !(names(obj) %in% c("x", "y", "z", "run")), drop = FALSE]
+          coord_df <- obj[, c("x", "y", intersect("z", names(obj))), drop = FALSE]
+          pdat_args <- list(coord = coord_df, run = run_vec, row.names = FALSE)
+          if (ncol(extra_df) > 0) pdat_args <- c(pdat_args, as.list(extra_df))
+          return(do.call(Cardinal::PositionDataFrame, pdat_args))
+        }
+        stop("Selected .rds file does not contain an MSI object or coordinate table.")
+      }
+      stop("Please select a valid .imzML or .rds file.")
+    }
     
     # any time the reactive changes, update the selectInput
 
@@ -67,6 +159,7 @@ MaskedAnalysisServer <- function(id,  setup_values) {
     #Setup and values for the Masked processing tab
     x4 <- reactiveValues(
       seg_file = NULL,
+      seg_pdata = NULL,
       seg_filename = NULL,
       #to keep record of what file is used for coordinates
       masked_peaks = NULL,
@@ -181,40 +274,35 @@ MaskedAnalysisServer <- function(id,  setup_values) {
       }
       
       seg_path <- resolve_wd_path(input$segmentation_file)
-      if (grepl("\\.rds$", basename(input$segmentation_file), ignore.case = TRUE)) {
-        x4$seg_file <- readRDS(seg_path)
-      } else if (grepl("\\.imzML$", basename(input$segmentation_file), ignore.case = TRUE)) {
-        x4$seg_file <- readImzML(seg_path)
-      } else {
-        showNotification("Please select a valid .imzML or .rds file.", type = "error", duration = 8)
+      x4$seg_pdata <- try(extract_template_pdata(seg_path), silent = TRUE)
+      if (inherits(x4$seg_pdata, "try-error") || is.null(x4$seg_pdata) || nrow(x4$seg_pdata) == 0L) {
+        showNotification("Could not extract coordinate template from selected file.", type = "error", duration = 8)
+        message("MaskedAnalysis template extraction failed: ", as.character(x4$seg_pdata))
+        x4$seg_pdata <- NULL
         return()
       }
-      if (inherits(x4$seg_file, "MSImagingArrays")) {
-        x4$seg_file <- convertMSImagingArrays2Experiment(x4$seg_file)
-      }
-      if (!inherits(x4$seg_file, "MSImagingExperiment")) {
-        showNotification("Selected file does not contain a valid MSI imaging object.", type = "error", duration = 8)
-        return()
-      }
-      print(x4$seg_file)
+      print(sprintf(
+        "[MaskedAnalysis] Loaded coordinate template: pixels=%d runs=%d",
+        nrow(x4$seg_pdata), length(unique(as.character(Cardinal::run(x4$seg_pdata))))
+      ))
       x4$seg_filename = input$segmentation_file
       
       
       
-      if (is.null(x1$raw_list) | is.null(x4$seg_file)) {
+      if (is.null(x1$raw_list) | is.null(x4$seg_pdata)) {
         print(
           "Please choose raw data in Data Setup Tab and input segmentation tempate first for peakpicking"
         )
         return(NULL)
         
-      } else if (length(paste0(runNames(x4$seg_file), ".imzML")) ==1 &&  length(names(x1$raw_list)) == 1) {
+      } else if (length(unique(as.character(Cardinal::run(x4$seg_pdata)))) == 1 &&  length(names(x1$raw_list)) == 1) {
         message("only one run in segmented file and one in raw file list, will proceed")
         message("Ensure correct datasets being used.")
         
-      } else if (sum(paste0(runNames(x4$seg_file), ".imzML") %in% names(x1$raw_list)) < 1) {
+      } else if (sum(unique(as.character(Cardinal::run(x4$seg_pdata))) %in% names(x1$raw_list)) < 1) {
         
         print("no raw file compatible with dataset")
-        print("runNames(x4$seg_file)")
+        print("run names in template coordinate file")
         print(names(x1$raw_list))
         
         x4$seg_filename = "Choose a file compatible with the raw dataset"
@@ -235,7 +323,7 @@ MaskedAnalysisServer <- function(id,  setup_values) {
     })
     
     observeEvent(input$action_seg_run, {
-      if (is.null(x4$seg_file)) {
+      if (is.null(x4$seg_pdata)) {
         message("Require template coordinate file first, please select and press")
         message("'Read file with coordinates' button")
         showNotification(
@@ -254,7 +342,7 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                    detail = "using existing coordinates",
                    value = 0.2,
                    {
-                     req(x4$seg_file)
+                     req(x4$seg_pdata)
                      
                      message("setting up coordinates and extracting pixels from raw data")
                      
@@ -272,17 +360,20 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                      names(x1$raw_list) <- gsub("\\.imzML$", "", names(x1$raw_list), ignore.case = TRUE)
                      
                      #check to make sure names in x4$seg_file are in names of x1$raw_list
-                     if (sum(runNames(x4$seg_file) %in% names(x1$raw_list)) < 1) {
+                     if (sum(unique(as.character(Cardinal::run(x4$seg_pdata))) %in% names(x1$raw_list)) < 1) {
                        
-                         #if there is only one runName in seg_file and one in raw_list, this will continue with a warning
-                         if (length(runNames(x4$seg_file)) == 1 & length(names(x1$raw_list)) == 1) {
+                         #if there is only one run in coordinate template and one in raw_list, continue with warning
+                         if (length(unique(as.character(Cardinal::run(x4$seg_pdata)))) == 1 & length(names(x1$raw_list)) == 1) {
                            message("only one run in segmented file and one in raw file list, will proceed")
                            showNotification(
                              "only one run in segmented file and one in raw file list, will proceed. Ensure correct datasets being used.",
                              type = "warning"
                            )
                            
-                           run(x4$seg_file) <- names(x1$raw_list)
+                           Cardinal::run(x4$seg_pdata) <- factor(
+                             rep(names(x1$raw_list), nrow(x4$seg_pdata)),
+                             levels = names(x1$raw_list)
+                           )
                            
                            
   
@@ -291,20 +382,31 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                          
                          message("no raw file compatible with dataset, names shown below:")
                          showNotification("no raw file compatible with dataset", type = "error")
-                         print(runNames(x4$seg_file))
+                         print(unique(as.character(Cardinal::run(x4$seg_pdata))))
                          print(names(x1$raw_list))
                          return()
                        }
                      } 
                      
-                     seg_file_trimmed<- Cardinal::subsetPixels(x4$seg_file, run %in% names(x1$raw_list))
+                     seg_file_trimmed <- x4$seg_pdata[as.character(Cardinal::run(x4$seg_pdata)) %in% names(x1$raw_list), ]
                      
                      
                      x4$seg_file_trimmed<-seg_file_trimmed
                      
                      #reorder raw list to match file names in segmented file
+                     seg_runs <- unique(as.character(Cardinal::run(seg_file_trimmed)))
                      raw_list_ord <-
-                       x1$raw_list[runNames(seg_file_trimmed)]
+                       x1$raw_list[seg_runs]
+
+                     # Keep only runs that were actually found in the raw list.
+                     is_valid_raw <- sapply(raw_list_ord, function(z) !is.null(z))
+                     valid_raw_idx <- which(!is.na(names(raw_list_ord)) & is_valid_raw)
+                     if (length(valid_raw_idx) < 1) {
+                       showNotification("No valid raw runs matched the coordinate template after filtering.", type = "error")
+                       return()
+                     }
+                     raw_list_ord <- raw_list_ord[valid_raw_idx]
+                     seg_runs <- names(raw_list_ord)
                      
                      # seg_file_ord<-lapply(1:length(runNames(x4$seg_file)),
                      #                      function(x) x4$seg_file[,run(x4$seg_file)%in%names(x1$raw_list)[x]])
@@ -316,14 +418,18 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                      
                      #get coordinates from coordinate dataset
                      coord_list_segmented <-
-                       lapply(runNames(seg_file_ord), function(x)
-                         coord(seg_file_ord)[Cardinal::run(seg_file_ord) %in% x,])
+                       lapply(seg_runs, function(x)
+                         coord(seg_file_ord)[as.character(Cardinal::run(seg_file_ord)) %in% x,])
                      #sum(unlist(lapply(1:16, function(x) dim(coord_list_segmented[[x]])[1])))  # check how many pixels selected
                      names(coord_list_segmented) <-
-                       runNames(seg_file_ord)
+                       seg_runs
                      
                      #if only using a subset of the masked coordinates, reduce to those only in the coordinate set
                      coord_list_segmented <- coord_list_segmented[names(coord_list_segmented) %in% names(raw_list_ord)]
+                     if (length(coord_list_segmented) < 1) {
+                       showNotification("Coordinate template has no runs overlapping with the selected raw data.", type = "error")
+                       return()
+                     }
                      
                      
                      
@@ -346,12 +452,12 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                          coord_list_segmented <-
                            coord_list_segmented[!is.na(names(raw_list_ord))]
                          raw_list_ord <-
-                           x1$raw_list[runNames(seg_file_trimmed)]
+                           x1$raw_list[unique(as.character(Cardinal::run(seg_file_trimmed)))]
                          raw_list_ord <-
                            raw_list_ord[sapply(raw_list_ord, function(i)
                              ! is.null(i))]
                          seg_file_ord <-
-                           seg_file_ord %>% subsetPixels(run %in% names(raw_list_ord))
+                           seg_file_ord[as.character(Cardinal::run(seg_file_ord)) %in% names(raw_list_ord), ]
                          
                        } else {
                          message(
@@ -381,6 +487,8 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                        select_ratio=input$pix_for_peak_picking2
                      }
                      
+                     coord_map_ptm <- proc.time()
+
                      #get coordinates from downsampling
                      coord_list_reduced <-
                        lapply(1:length(coord_list_segmented), function(x)
@@ -405,50 +513,108 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                      
                      select_pix <-
                        function(index, raw_list, coord_set) {
-                         raw_list[[index]][!is.na(prodlim::row.match(as.data.frame(coord(
-                           raw_list[[index]]
-                         )), as.data.frame(coord_set[[index]])))]
+                         raw_img <- raw_list[[index]]
+                         raw_coord <- as.data.frame(coord(raw_img))
+                         target_coord <- as.data.frame(coord_set[[index]])
+
+                         if (nrow(raw_coord) == nrow(target_coord)) {
+                           same_xy <- suppressWarnings(
+                             all(raw_coord$x == target_coord$x & raw_coord$y == target_coord$y, na.rm = FALSE)
+                           )
+                           if (isTRUE(same_xy)) {
+                             return(raw_img)
+                           }
+                         }
+
+                         idx <- prodlim::row.match(raw_coord, target_coord)
+                         raw_img[!is.na(idx)]
                        }
                      
                      
                      #most likely point of failure here....
-                     
-                     if (length(x1$raw_list) == 1) {
-                       test_raw_reduced <-
-                         select_pix(1, raw_list_ord[runNames(x1$raw_list[[1]])], coord_list_reduced)
-                       tmp_seg_coord_list<-list(test_raw_reduced)
-                     } else if (length(x1$raw_list) > 1) {
-                       tmp_seg_coord_list<-try( bplapply(1:length(raw_list_ord), function(x)
+                     get_pixel_count <- function(obj) {
+                       if (is.null(obj)) return(NA_integer_)
+
+                       n_try <- suppressWarnings(try(as.integer(ncol(obj)), silent = TRUE))
+                       if (!inherits(n_try, "try-error") && length(n_try) == 1 && is.finite(n_try)) {
+                         return(n_try)
+                       }
+
+                       n_try <- suppressWarnings(try(as.integer(length(obj)), silent = TRUE))
+                       if (!inherits(n_try, "try-error") && length(n_try) == 1 && is.finite(n_try)) {
+                         return(n_try)
+                       }
+
+                       c_try <- suppressWarnings(try(as.data.frame(coord(obj)), silent = TRUE))
+                       if (!inherits(c_try, "try-error")) {
+                         return(as.integer(nrow(c_try)))
+                       }
+
+                       NA_integer_
+                     }
+
+                     raw_npix <- vapply(raw_list_ord, get_pixel_count, integer(1))
+                     coord_npix <- vapply(coord_list_reduced, function(obj) {
+                       suppressWarnings(as.integer(nrow(obj)))
+                     }, integer(1))
+
+                     message(sprintf(
+                       "[MaskedAnalysis] Raw object classes: %s | raw_npix=%s | coord_npix=%s",
+                       paste(vapply(raw_list_ord, function(z) class(z)[1], character(1)), collapse = ","),
+                       paste(raw_npix, collapse = ","),
+                       paste(coord_npix, collapse = ",")
+                     ))
+
+                     full_cover <- isTRUE(select_ratio >= 100) &&
+                       length(raw_list_ord) == length(coord_list_reduced) &&
+                       length(raw_npix) > 0 &&
+                       all(is.finite(raw_npix)) &&
+                       all(is.finite(coord_npix)) &&
+                       all(raw_npix == coord_npix)
+
+                     if (full_cover) {
+                       message("[MaskedAnalysis] Coordinate template matches full raw pixel coverage; skipping row-match remap.")
+                       tmp_seg_coord_list <- raw_list_ord
+                     } else if (length(raw_list_ord) == 1) {
+                       tmp_seg_coord_list <- list(select_pix(1, raw_list_ord, coord_list_reduced))
+                     } else if (length(raw_list_ord) > 1) {
+                       tmp_seg_coord_list <- try(bplapply(seq_along(raw_list_ord), function(x)
                          select_pix(x, raw_list_ord, coord_list_reduced)))
-                       
-                       if(class(tmp_seg_coord_list) %in% "try-error") {
+                       if (inherits(tmp_seg_coord_list, "try-error")) {
                          message("setting coordinate list failed, check names")
                          showNotification("setting coordinate list failed, check names")
                          return()
                        }
-                       
-                       i=1
-                       
-                         tmp_names<-unlist(lapply(tmp_seg_coord_list, runNames))
-                         names(tmp_seg_coord_list) <- tmp_names
-                         test_raw_reduced<-convertMSImagingExperiment2Arrays(tmp_seg_coord_list[[1]])
+                     } else {
+                       tmp_seg_coord_list <- NULL
+                     }
 
-                         
-                         while(i< (length(tmp_seg_coord_list))){
-                           k=i+1
-                           tmp<-convertMSImagingExperiment2Arrays(tmp_seg_coord_list[[k]])
-                           test_raw_reduced<-try(combine(test_raw_reduced, tmp))
-                           
-                           if(class(test_raw_reduced) %in% "try-error"){
+                     if (!is.null(tmp_seg_coord_list) && !inherits(tmp_seg_coord_list, "try-error")) {
+                       tmp_names <- unlist(lapply(tmp_seg_coord_list, runNames))
+                       if (length(tmp_names) == length(tmp_seg_coord_list)) {
+                         names(tmp_seg_coord_list) <- tmp_names
+                       }
+                     }
+
+                     if (!is.null(tmp_seg_coord_list) && !inherits(tmp_seg_coord_list, "try-error") && length(tmp_seg_coord_list) >= 1) {
+                       test_raw_reduced <- convertMSImagingExperiment2Arrays(tmp_seg_coord_list[[1]])
+                       if (length(tmp_seg_coord_list) > 1) {
+                         i <- 1
+                         while (i < length(tmp_seg_coord_list)) {
+                           k <- i + 1
+                           tmp <- convertMSImagingExperiment2Arrays(tmp_seg_coord_list[[k]])
+                           test_raw_reduced <- try(combine(test_raw_reduced, tmp))
+
+                           if (inherits(test_raw_reduced, "try-error")) {
                              message("combining imagesets failed, check data files")
-                             showNotification("combining imagesets failed, check data files", type="error")
+                             showNotification("combining imagesets failed, check data files", type = "error")
                              return()
                            }
-                           
-                           i=i+1
+                           i <- i + 1
                          }
-                       
-                      
+                       }
+                     } else {
+                       test_raw_reduced <- NULL
                      }
                      
                      if (is.null(test_raw_reduced)) {
@@ -461,6 +627,9 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                        )
                        return(NULL)
                      }
+
+                     coord_map_elapsed <- proc.time() - coord_map_ptm
+                     message(sprintf("[MaskedAnalysis] Coordinate mapping stage elapsed: %.2fs", unname(coord_map_elapsed["elapsed"])))
                      #px_found<-unlist(lapply(1:length(runNames(test_raw_reduced)), function(x) dim(test_raw_reduced[,run(test_raw_reduced)%in%runNames(test_raw_reduced)[x]])[2]))
                      #raw_reduced<-combine(bplapply(1:length(raw_list), function(x) select_pix(x,raw_list, coord_list_reduced)))
                      #browser()
@@ -649,12 +818,15 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                        #           tolerance = input$tol2,
                        #           units = "ppm") %>% process()
                        gc()
+                       targeted_ptm <- proc.time()
                        tmp.img<-try(test_raw_reduced |> normalize() |> peakProcess( 
                                                 ref=neg_ref_mz,
                                                 #SN=input$SNR,
                                                 type="area",
-                                                tolerance=setup_values()[["tol"]], units="ppm") %>% process() %>% summarizeFeatures()
+                                                tolerance=input$tol2, units="ppm") %>% process() %>% summarizeFeatures()
                        )
+                       targeted_elapsed <- proc.time() - targeted_ptm
+                       message(sprintf("[MaskedAnalysis] Targeted binning stage elapsed: %.2fs", unname(targeted_elapsed["elapsed"])))
                        
                        
                        
@@ -701,22 +873,24 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                        #pdat<-pData(seg_file_ord)
                        
                        
-                       df1<-coord(pdat)
-                       df2<-coord(msddf)
+                       df1 <- as.data.frame(coord(pdat))
+                       df2 <- as.data.frame(coord(msddf))
                        
-                       df1$run<-run(pdat)
-                       df2$run<-run(msddf)
+                       df1$run <- as.character(run(pdat))
+                       df2$run <- as.character(run(msddf))
                        
-                       
-                       # Add a row number to df2 to preserve the original order
-                       df2$index <- 1:nrow(df2)
-                       
-                       # Merge df1 with df2 on 'x' and 'y'
-                       merged_df <- merge(df1, df2, by = c("run", "x", "y"))
-                       
-                       # Sort df1 based on the order of df2
-                       ord_vec<-order(match(paste(df1$run, df1$x, df1$y), paste(df2$run, df2$x, df2$y)))
-                       
+                       key1 <- paste(df1$run, df1$x, df1$y, sep = "\r")
+                       key2 <- paste(df2$run, df2$x, df2$y, sep = "\r")
+                       ord_vec <- match(key2, key1)
+                       if (anyNA(ord_vec)) {
+                         message(sprintf(
+                           "[MaskedAnalysis] pData remap: %d/%d coordinates did not match template; preserving original row order for unmatched entries.",
+                           sum(is.na(ord_vec)), length(ord_vec)
+                         ))
+                         fallback <- seq_len(nrow(df2))
+                         fallback[!is.na(ord_vec)] <- ord_vec[!is.na(ord_vec)]
+                         ord_vec <- fallback
+                       }
                        sorted_pdat1 <- pdat[ord_vec, ]
                        
                        return(sorted_pdat1)
@@ -724,7 +898,22 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                      }
                      
                      
-                     ordered_pdat<-pdat_match(pdat=pData(seg_file_ord), msddf=x4$seg_pp_file)
+                     pdat_ptm <- proc.time()
+                     template_pdat <- NULL
+                     if (is(seg_file_ord, "PositionDataFrame")) {
+                       template_pdat <- seg_file_ord
+                     } else {
+                       template_pdat <- try(pData(seg_file_ord), silent = TRUE)
+                     }
+                     if (inherits(template_pdat, "try-error") || is.null(template_pdat)) {
+                       showNotification("Could not recover template pData for remapping after masked processing.", type = "error")
+                       message("[MaskedAnalysis] template_pdata recovery failed")
+                       return()
+                     }
+
+                     ordered_pdat <- pdat_match(pdat = template_pdat, msddf = x4$seg_pp_file)
+                     pdat_elapsed <- proc.time() - pdat_ptm
+                     message(sprintf("[MaskedAnalysis] pData remap stage elapsed: %.2fs", unname(pdat_elapsed["elapsed"])))
                      
                      pData(x4$seg_pp_file) <- ordered_pdat
                      

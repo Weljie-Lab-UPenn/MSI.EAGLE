@@ -1,0 +1,932 @@
+ID	exact.mass
+C1:0	44.9977
+Glyoxal	56.9982
+Acetone	57.034
+D-Beta-hydroxybutyrate (fragment)	59.0124
+FA 2:0 (putative)	59.0133
+Crotonaldehyde	69.0346
+MDA	71.0133
+MDA / methylglyoxal / Pyruvaldehyde	71.0139
+FA 3:0 (putative)	73.029
+Threonine	74.0248
+Pyruvate	87.0082
+DL-(iso)Butyrate / C4:0	87.0446
+Alanine	88.0404
+Lactate	89.0239
+Hydroxypyridine	94.0298
+DL-(iso)Tiglate	99.0446
+Acetoacetate	100.016
+DL-Methylbutyroate / C5:0	101.0603
+Propanedioic acid	103.0022
+D-Beta-hydroxybutyrate	103.0387
+FA 4:0;O (putative)	103.0395
+2-hydroxybutanoic acid / 3-hydroxybutyric acid	103.0401
+Serine	104.0348
+Glyceric acid	105.0188
+Cytosine	110.036
+DL-C5H4O3-FA	111.0082
+Uracil	111.02
+C6:2	111.0446
+FA 6:1;O (putative)	113.0603
+Maleic acid	115.0029
+Fumarate	115.0037
+DL-C5-oxo-FA	115.0395
+C6:0	115.0759
+N-Acetyl-glycine	116.0349
+Valine	116.0717
+Succinate	117.0186
+2-Hydroxy-3-methylbutyric acid	117.056
+Benzoate	121.0292
+Isonicotinic acid / Nicotinic acid	122.0248
+Taurine	124.008
+C7:2	125.0603
+2-Oxo-hexenoic acid	127.0401
+DL-C7:1-FA / C7:1	127.0759
+Cyanuric acid	128.0102
+Pyroglutamic acid	128.0348
+Pyroglutamic acid	128.036
+Pipecolic acid	128.0717
+Mesaconic acid	129.0193
+FA 6:1;O (putative)	129.0555
+C7:0	129.0916
+4-Hydroxyproline	130.0499
+Isoleucine / Aminocaproate	130.0874
+Oxaloacetate	130.998
+DL-Glutarate	131.0345
+FA 6:0;O (putative)	131.0714
+Aspartate	132.031
+Malate	133.0143
+Threonic acid	135.0306
+2-Amino benzoic acid	136.0397
+Anthranilate	136.0404
+Salicylic acid	137.0239
+3-Hydroxypicolinic acid	138.02
+C8:2	139.0759
+nonenal	139.1128
+2,3-Methylenesuccinate / DL-C6H6O3-FA	141.0188
+Hydroxymethyluracil	141.0306
+DL-Octenoate / C8:1	141.0916
+DL-Octanoate / C8:0	143.1072
+4-Guanidinobutyric acid	144.077
+2-Oxoglutaric acid	145.0142
+DL-Methylglutarate	145.0501
+Glutamine	145.062
+Glutamate	146.0456
+2-Hydroxyglutarate	147.03
+trans-cinnamic acid	147.0452
+Methionine	148.0438
+3-Methyladenine	148.0618
+Arabinose / Xylose	149.0455
+Xanthine	151.026
+DL-C8H8O3-FA	151.0398
+Dopamine	152.0717
+4-oxo-nonenal (ONE)	153.0916
+Orotic acid	155.0098
+C9:1 / DL-C9:1-FA / HNE	155.1072
+Benzenesulfonate	156.9965
+Allantoin	157.0367
+FA 8:1;O (putative)	157.0865
+DL-(iso)Nonanoate	157.1229
+FA 9:0 (putative)	157.124
+Indole-3-acetaldehyde	158.0611
+2-oxoadipic acid	159.0299
+DL-Pimelate	159.0661
+DL-Hydroxyoctanoate	159.1021
+Indole-3-carboxylic acid	160.0404
+m-Coumaric acid	163.0401
+Fucose	163.0612
+DL-C10H12O2-FA / C10:4	163.0759
+Phenylalanine	164.0717
+Phenyllactate	165.0557
+DL-C10H14O2-FA/ C10:3	165.0916
+4-nitrobenzoic acid	166.0146
+Pyridoxal	166.051
+Phosphoenolpyruvic acid	166.9746
+Uric acid	167.0211
+Vanillic acid	167.035
+DL-Decadienoate / C10:2	167.1072
+Cysteic acid	167.9972
+DHAP/G3P	168.9905
+Gallic acid	169.0142
+C9:2	169.0865
+DL-Decenoate / C10:1	169.1229
+Glycerol 3-phosphate	171.0059
+DL-C8:1-diC-FA	171.0658
+DL-C9:1-OH-FA / HNEA	171.1021
+FA 10:0 (putative)	171.1385
+Acetyl-leucine	172.0979
+trans-aconitate	173.0089
+DL-(iso-)C8-diC-FA	173.0814
+4-hydroxy-nonanoic acid	173.1183
+N-acetylaspartic acid	174.041
+Ascorbic acid	175.024
+Ascorbic acid	175.025
+N-Formylmethionine	176.0382
+Hippurate	178.051
+Aspirin / Caffeic acid	179.035
+Fructose/Glucose	179.0559
+Dimethylxanthine	179.0574
+Tyrosine	180.0666
+hypoxanthine / 7-methyluric acid	181.0367
+Hydroxyphenyllactic acid	181.0501
+4-pyridoxic acid	182.0459
+3-phosphoglycerate	184.9855
+FA 11:0 (putative)	185.1542
+Azelaic acid	187.0974
+Kynurenic acid	188.0353
+5-hydroxyindoleacetate	190.051
+Citrate/Isocitrate	191.019
+Methylhippurate	192.0666
+Glucuronate / Galacturonate	193.0354
+Isoferulic acid	193.0506
+Gluconic acid	195.051
+1,7-dimethyluric acid	195.0524
+DL-Dihydroferuloate	195.0658
+5-acetylamino-6-formylamino-3-methyluracil	197.068
+DL-C11:2-OH-FA	197.1177
+C12:1	197.1542
+Erythrose-4-phosphate	199.0008
+C12:0	199.1701
+Citric acid	201.0208
+Sebacic acid	201.1132
+Dimethylallylaminopurine	202.1098
+Glucuronic acid	203.0331
+3,4-dimethoxycinnamic acid	207.0663
+1,3,7-trimethyluric acid	209.068
+Ketoprofen	209.0972
+DL-C12:1-oxo-FA/DL-C12:2-OH-FA	211.1334
+DL-C12-oxo-FA	213.1491
+C13:0	213.1854
+Glycerophosphoethanolamine	214.048
+Hexose	215.033
+N-Acetylarginine	215.115
+Methyltryptophan	217.0983
+3-HPMA	220.0644
+N-Acetyl-tyrosine	222.0772
+D-Glucose [M+FA-H]	225.0605
+C14:1	225.1855
+Phosphatidic acid	226.996
+2-Deoxyuridine	227.0673
+cis-resveratrol / trans-resveratrol	227.0714
+DL-C12:1-diC-FA	227.1284
+FA 14:0 (putative)	227.2018
+Xylulose-5-phosphate	229.009
+Ribulose-5-phosphate	229.0117
+Dodecanedioic acid	229.1445
+Methoxytryptophan	233.0932
+N-Acetyl-S-(4-hydroxybutan-2-yl)-L-cysteine (HMPMA)	234.08
+DL-C14:3-OH-FA	237.1491
+Dihydrobiopterin	238.0946
+DL-HydroxytetradecadienFA	239.1647
+FA 15:0 (putative)	241.2173
+Cytidine	242.0782
+Uridine	243.0623
+Biotin	243.0809
+DL-C12-diC-oxo-FA	243.1233
+Leucyl-leucine	243.1714
+Glycerophosphoglycerol	245.043
+3,4-dehydroinosine	247.0473
+2-deoxyinosine	251.0786
+C16:2	251.2011
+DL-(iso-)C14:2-diC-	253.144
+FA 16:1 (putative)	253.2173
+DL-(iso-)C14:1-diC-	255.1597
+FA 16:0 (putative)	255.2334
+6-phosphogluconolactone	257.0062
+DL-(iso-)C14-diC-	257.1753
+G6P/F6P	259.0219
+Glyceric acid 1,3-biphosphate	264.9514
+tetranor 12-HETE	265.1809
+FA 17:1 (putative)	267.233
+Estrone	269.1547
+FA 16:1;O (putative)	269.2122
+FA 17:0 (putative)	269.2487
+_-estradiol	271.1704
+FA 16:0;O (putative)	271.228
+6-phosphogluconate	275.0168
+FA 18:4 (putative)	275.2017
+FA 18:3 (putative)	277.2173
+12-HHTrE	279.1966
+FA 18:2 (putative)	279.233
+FA 18:1 (putative)	281.2484
+FA 18:0 (putative)	283.2637
+FA 18:0 (putative)	283.2652
+Kaempferol	285.0405
+Estriol / 2-Hydroxyestradiol	287.1653
+Sedoheptulose-7-phosphate	289.0325
+9-OxoOTrE (9-KOTrE)	291.1966
+Aspartame	293.1143
+FA 18:3 (putative)	293.2122
+Diclofenac	294.0094
+17_-ethinyl estradiol	295.1704
+FA 18:2 (putative)	295.2274
+FA 19:1 (putative)	295.2643
+C20:7	297.1854
+FA 18:1;O (putative)	297.2435
+FA 19:0 (putative)	297.2799
+8-hydroxyguanosine	298.0793
+C20:6	299.2011
+FA 18:0;O (putative)	299.2592
+C20:5	301.2172
+C20:4	303.2328
+C20:3	305.248
+Glutathione (GSH)	306.0763
+1,N(6)-Propanodeoxyadenosine	306.1202
+C20:2	307.2637
+N-Acetylneuraminic acid	308.0982
+EKODE	309.2071
+C20:1	309.2798
+C20:0	311.2954
+Octadecanedioic acid	313.2378
+Isorhamnetin	315.051
+15d-D12,14-PGJ2/J3	315.1966
+FA 18:2 (putative)	315.209
+Myricetin	317.0303
+FA 20:5 (putative)	317.2122
+FA 18:1 (putative)	317.225
+HNE-mercapturic acid (HNE-MA)	318.1375
+FA 20:4;O (putative)	319.2279
+FA 18:0 (putative)	319.241
+DHN-MA (reduced HNE-MA)	320.1532
+FA 20:3;O (putative)	321.2435
+C21:2	321.2793
+11-HEDE / 15-HEDE	323.2592
+C21:1	323.295
+2,3 dinor 11b PGF2a / 2,3-dinor PGE1	325.202
+C22:7	325.2167
+C21:0	325.3106
+tetranor-PGEM	327.1449
+2,3-dinor-5,6-dihydro-15-F2t-IsoP (urinary product)	327.2172
+C22:6	327.2327
+cAMP	328.0452
+9,10,13-TriHOME / 9,12,13-TriHOME	329.2333
+C22:5	329.2482
+C22:4	331.264
+FA 20:5 (putative)	333.2071
+C22:3	333.2793
+S-formylglutathione	334.0714
+FA 20:4 (putative)	335.2228
+C22:2	335.295
+S-(hydroxymethyl)glutathione	336.0871
+Cyclic 1,N(2)-propanodeoxyguanosine	336.1308
+FA 20:3 (putative)	337.2384
+C22:1	337.3106
+S-sulfanylglutathione	338.0486
+Fructose 1,6-bisphosphate	338.9636
+Fructose 1,6-bisphosphate	338.9888
+FA 20:4 (putative)	339.209
+C22:0	339.3267
+Maltose	341.1089
+Sucrose	341.1109
+2,3-dinor-6-oxoprostaglandin F1alpha / 2,3-dinor TXB2	341.197
+FA 22:6;O (putative)	343.2279
+AMP	346.0561
+FA 20:5 (putative)	349.202
+FA 20:4 (putative)	351.2177
+C23:1	351.3263
+FA 20:3 (putative)	353.2334
+C23:0	353.3419
+PGF1a / 13,14dh-PGE1	355.249
+C24:6	355.2637
+Indomethacin	356.0695
+C24:5	357.2793
+FA 22:6 (putative)	359.2228
+C24:4	359.295
+dihydroxy_docosapentaenoic acid	361.2384
+C24:3	361.3106
+Guanosine monophosphate	362.0496
+N-palmitoyl taurine	362.2371
+C24:2	363.3263
+20-COOH LTB4	365.197
+FA 16:0 (putative)	365.246
+C24:1	365.3422
+Dehydroepiandrostero_ne sulfate	367.1585
+FA 20:4 (putative)	367.2126
+FA 22:4 (putative)	367.242
+C24:0	367.3576
+2_-Deoxycytidine diphosphate (dCDP) M-H20-H	367.9919
+N-oleoyl-Serine	368.2806
+FA 20:3 (putative)	369.2283
+Oleoyl ethanolamide	370.2963
+TXB1	371.2439
+Lithocholenic acid	373.2748
+Riboflavin	375.131
+FA 22:6 (putative)	375.2177
+glutathione-crotonaldehyde conjugate	376.1178
+F4-neuroprostane series	377.2333
+S-Lactoylglutathione	378.0976
+glutathione-crotonol conjugate	378.1335
+Sphingosine-1-phosphate (d18:1)	378.2415
+FA 25:1 (putative)	379.357
+Sphinganine-1-phosphate (d18:0)	380.2571
+dihomo PGF2a	381.2646
+C25:0	381.3731
+S-adenosylmethionine	383.1143
+FA 24:0;O (putative)	383.353
+FA 26:5 (putative)	385.311
+FA 26:4 (putative)	387.326
+FA 26:3 (putative)	389.342
+Eicosapentanoyl ethanolamide	390.265
+N-stearoyl taurine	390.2684
+FA 18:0 (putative)	391.262
+Chenodeoxycholic acid (CDCA) / Deoxycholic acid (DCA) / Ursodeoxycholic acid (UDCA) / LCA	391.2854
+FA 26:2 (putative)	391.358
+glutathione-crotonaldehyde conjugate oxidized	392.1128
+Arachidonoyl ethanolamide	392.2806
+C26:1	393.3731
+1-hexadecyl lysophosphatidic acid	395.2568
+C26:0	395.3884
+S-adenosylhomocysteine	397.13
+Palmitoylcarnitine	398.3276
+Roflumilast	401.0277
+Ketocholanic acid	401.2333
+Cholic acid (CA) / _MCA / _MCA / _MCA	407.2803
+Ezetimibe	408.1417
+Inosine 5_-diphosphate (IDP) M-H20-H	409.0069
+Xanthurenic acid 2M-H	409.064
+FA 16:0 (putative)	409.2356
+C27:0	409.4045
+PE 12:0 (putative)	410.1773
+N-arachidonoyl taurine	410.2371
+Palmitoylserotonin	413.3174
+Docosahexaenoyl ethanolamide	416.2806
+Glycocholanic Acid	416.317
+Finasteride	417.2759
+C28:2	419.3889
+2beta,7alpha,12alpha-Trihydroxy-3-oxo-5beta-cholan-24-oic Acid (etc) / Lovastatin hydroxyacid	421.2596
+C28:1	421.4045
+S-(1,2-dicarboxyethyl)glutathione	422.0875
+Thiamin diphosphate M-H	423.0217
+MG(0:0/20:5(7Z,9Z,11E,13E,17Z)-3OH(5,6,15)/0:0) / Pravastatin	423.2388
+FA 18:0 (putative)	423.2881
+C28:0	423.4202
+Cysteine-glutathione disulfide (CySSG)	425.0806
+ADP	426.0222
+2-Oxo-3-hydroxy-4-phosphobutanoic acid 2M-H	426.9508
+GLCA	432.3119
+FA 18:2 (putative)	433.2363
+FA 18:1 (putative)	435.2518
+FA 16:0 (putative)	436.2828
+Dexamethasone	437.1981
+FA 22:6 (putative)	437.246
+FA 18:0 (putative)	437.2681
+C29:0	437.4358
+LTE4	438.232
+LPE 16:0 (putative)	438.2985
+Folate	440.1324
+Arachidonoylcarnitine	446.3276
+17-beta-estradiol-3-glucuronide	447.2024
+C30:2	447.4202
+GUDCA / GCDCA / GDCA	448.3068
+tripeptide family (e.g. Arg-Ile-Tyr) / Lovastatin	449.2545
+Norselic acid A	451.286
+C30:0	451.4515
+LPE 16:0 (putative)	452.2779
+Phe-Ala-Phe-Ala	453.2143
+DG 24:0 (putative)	455.376
+FA 20:4 (putative)	457.2363
+FA 20:3 (putative)	459.2506
+4-hydroxy Nonenal Glutathione (HNE-GSH)	462.191
+LPE O-18:2 (putative)	462.2985
+Simvastatin	463.2701
+DHN-GSH	464.2067
+LPE 18:1 (putative)	464.2777
+GCA	464.3018
+FA 18:1 (putative)	464.3153
+Cholesterol sulfate	465.3044
+Taurocholanic acid	466.2997
+LPE 18:0 (putative)	466.3298
+Cromolyn	467.062
+N-nervonoyl taurine	472.3466
+Retinoyl b-glucuronide / Budesonide	475.2337
+C32:2	475.4515
+LPE 18:2 (putative)	476.2788
+HNA-GSH	478.1859
+FA 18:1 (putative)	478.2944
+C32:0	479.4828
+FA 18:0 (putative)	480.3085
+FA 22:6 (putative)	481.2359
+TLCA	482.2946
+FA 16:0 (putative)	483.273
+Inosine triphosphate (ITP) M-H20-H	488.9788
+LPE O-20:1 (putative)	492.3449
+LTD4	495.2534
+taurochenodeoxycholic acid (TCDCA) / TUDCA / TDCA	498.2895
+FA 20:4 (putative)	500.2793
+LPE 20:3 (putative)	502.2933
+Methymycin	504.272
+ATP	505.988
+Cardiolipin (putative)	506.1184
+PE 18:1 (putative)	506.288
+ITP M-H	506.9934
+FA 18:2 (putative)	507.272
+FA 18:1 (putative)	509.2884
+LPC 14:0 (putative)	512.2994
+taurocholic acid (TCA) / epimers of tauromuricholic acid (_-, _-, _-, or _-TMCA)	514.2844
+FA 18:1 (putative)	522.2827
+FA 18:0 (putative)	524.2999
+LPE 22:5 (putative)	526.2947
+LPC 15:0 (putative)	526.3149
+LPC O-16:1 (putative)	526.3521
+FA 12:0 (putative)	526.4477
+PE 21:4 (putative)	528.273
+LPE 22:4 (putative)	528.3096
+taurotetrahydroxycholic acid (TTHBA)	530.2788
+PE 21:3 (putative)	530.291
+PA 24:0 (putative)	535.3405
+LPC 16:1 (putative)	538.3154
+NAD+ [M-nicotinamide-2H]	540.0509
+FA 16:0 (putative)	540.3307
+2-O-methyl PAF C-16	540.3671
+Cer 18:1 (putative)	544.4496
+Cer 18:0 (putative)	546.4653
+LPC 17:1 (putative)	552.3314
+LPC O-18:1 (putative)	552.3669
+LPC 17:0 (putative)	554.3463
+2-O-ethyl PAF C-16	554.383
+FA 14:0 (putative)	554.479
+FA 22:6 (putative)	555.274
+PI 14:0 (putative)	557.2457
+FA 15:0 (putative)	557.273
+FA 16:0 (putative)	557.309
+Cer 33:1 (putative)	558.466
+LPC 18:2 (putative)	564.3304
+UDP-Glucose	565.0478
+LPC 18:1 (putative)	566.3463
+FA 18:0 (putative)	568.362
+Cer 34:2 (putative)	570.466
+FA 16:0 (putative)	571.29
+Cer 18:1 (putative)	572.4809
+Zafirlukast	574.2017
+Cer 18:0 (putative)	574.4966
+PE 24:0 (putative)	578.3827
+LPC 19:0 (putative)	582.376
+Cardiolipin CL(52:2) (putative)	582.3797
+LPC O-20:0 (putative)	582.4139
+FA 16:0 (putative)	582.5103
+FA 16:0 (putative)	584.5259
+LPC 20:4 (putative)	588.33
+LPC 20:3 (putative)	590.3467
+PA 28:0 (putative)	591.4031
+LPC 20:2 (putative)	592.3622
+Cardiolipin CL(54:5) (putative)	593.3715
+LPC 20:1 (putative)	594.3771
+Cardiolipin CL(54:3) (putative)	595.3872
+PAF C-18 / Butanoyl-PAF	596.3932
+FA 18:1 (putative)	597.304
+Cer 36:2 (putative)	598.496
+FA 18:0 (putative)	599.3202
+Cer 36:1 (putative)	600.512
+DG 32:1 (putative)	601.459
+Sphinganine 2M-H	601.603
+DG 32:0 (putative)	603.476
+N-Acetylaspartylglutamic acid 2M-H	607.1778
+PC (putative)	608.3569
+FA 18:1 (putative)	608.5259
+PG 24:0 (putative)	609.3773
+PC 20:0 (putative)	610.3726
+FA 18:0 (putative)	610.5416
+oxidized glutathione / glutathione disufide (GSSG)	611.1447
+LPC 22:6 (putative)	612.331
+LPC 22:5 (putative)	614.3459
+heme B	615.1695
+LPC 22:4 (putative)	616.3627
+FA 16:0 (putative)	616.471
+FA 16:0 (putative)	618.4863
+PI 20:4 (putative)	619.29
+NADP+ [M-nicotinamide-2H]	620.0176
+PS 24:0 (putative)	622.3726
+LTC4	624.296
+DG 34:3 (putative)	625.459
+DG 34:2 (putative)	627.475
+DG 34:1 (putative)	629.491
+PE 28:0 (putative)	634.4455
+LPC O-24:1 (putative)	636.4618
+PC (putative)	638.3675
+FA 20:0 (putative)	638.5729
+Cer 40:1 (putative)	640.58
+PA 32:0 (putative)	647.464
+DG 36:4 (putative)	651.475
+LPC 24:0 (putative)	652.4555
+DG 36:3 (putative)	653.492
+Heptanoyl thio-phosphatidylcholine	654.4174
+Cer 18:1 (putative)	654.5592
+DG 36:2 (putative)	655.508
+Cer 18:0 (putative)	656.5748
+DG 36:1 (putative)	657.523
+Cer 18:0 (putative)	658.5905
+PA O-34:1 (putative)	659.5016
+NAD+ [M-2H]	662.0986
+NADH [M-H]	664.1147
+PG 28:0 (putative)	665.4399
+PC 24:0 (putative)	666.4352
+Cer 42:2 (putative)	666.597
+FA 22:0 (putative)	666.6042
+Cer 41:2 (putative)	668.577
+Cer 42:1 (putative)	668.611
+Cer 41:1 (putative)	670.59
+PA 34:2 (putative)	671.4467
+PA 24:2 (putative)	671.464
+PA 34:1 (putative)	673.5079
+trihydroxycholanoyltaurine	674.198
+mono-glucuronides of dihydroxycholanoyltaurine	674.3216
+Cer 40:0 (putative)	674.587
+DG 38:6 (putative)	675.475
+DG 38:5 (putative)	677.49
+DG 38:4 (putative)	679.509
+Cer 42:3 (putative)	680.575
+Cer 18:1 (putative)	682.5905
+NAD+ [M+Na-3H]	684.0809
+Cer 18:0 (putative)	684.6061
+NADH [M+Na-2H]	686.0961
+Cer 42:0 (putative)	686.622
+PA O-36:1 (putative)	687.5329
+PE/Cer 36:1 (putative)	687.545
+FA 12:0 (putative)	688.5005
+PE 32:0 (putative)	690.5079
+SM 30:1 (putative)	691.5032
+FA 24:1 (putative)	692.6198
+FA 24:0 (putative)	694.6355
+PA 36:4 (putative)	695.464
+PA 36:4 (putative)	695.4916
+Cer 44:1 (putative)	696.641
+FA 24:0 (putative)	696.6511
+PA 36:3 (putative)	697.4621
+PA 36:3 (putative)	697.48
+Cardiolipin CL(68:5) (putative)	698.472
+PE O-34:3 (putative)	698.5139
+Cer 43:1 (putative)	698.622
+DG 40:8 (putative)	699.4728
+PA 36:2 (putative)	699.495
+PE O-34:2 (putative)	700.528
+DG 40:7 (putative)	701.49
+PE O-34:1 (putative)	702.5438
+DG 40:6 (putative)	703.506
+PA 36:0 (putative)	703.5283
+DG 40:5 (putative)	705.523
+SM 18:1 (putative)	709.5051
+Cardiolipin CL(70:7) (putative)	710.47
+Cer 44:2 (putative)	710.624
+Cardiolipin CL(70:6) (putative)	711.476
+FA 14:0 (putative)	711.5208
+Cardiolipin CL(70:5) (putative)	712.4854
+Cer 44:1 (putative)	712.638
+Cardiolipin CL(70:4) (putative)	713.4944
+PE 34:2 (putative)	714.5075
+PE 34:1 (putative)	716.5232
+1-palmitoyl-2-(4-keto-dodec-3-ene-dioyl)phosphatidylcholine	718.4301
+PE 34:0 (putative)	718.538
+PG (putative)	719.4869
+PE O-36:6 (putative)	720.4961
+PG (putative)	721.5025
+Cardiolipin CL(72:9) (putative)	722.4709
+PC 28:0 (putative)	722.4978
+PE O-36:5 (putative)	722.5122
+Cardiolipin CL(72:8) (putative)	723.4789
+SM 18:1 (putative)	723.5208
+NADP M-H20-H	724.0817
+Cardiolipin CL(72:7) (putative)	724.4866
+PE O-36:4 (putative)	724.5276
+Cardiolipin CL(72:6) (putative)	725.4942
+FA 15:0 (putative)	725.5364
+Cardiolipin CL(72:5) (putative)	726.5021
+PE O-36:3 (putative)	726.5444
+FA 24:1 (putative)	726.5802
+Cardiolipin CL(72:4) (putative)	727.5093
+PE 18:0 (putative)	728.5586
+FA 24:1 (putative)	728.5958
+PE 35:1 (putative)	730.537
+PE 18:0 (putative)	730.5742
+PS P-33:0 (putative)	732.517
+GlcCer 34:1 (putative)	734.532
+Cardiolipin CL(74:10) (putative)	735.4784
+SM 18:1 (putative)	735.5208
+Cardiolipin/SM 74:9 (putative)	736.4866
+PE O-37:5 (putative)	736.527
+Cardiolipin CL(74:8) (putative)	737.4944
+SM 18:1 (putative)	737.5362
+Cardiolipin CL(74:7) (putative)	738.5019
+PE 36:4 (putative)	738.5074
+Cardiolipin CL(72:8) (putative)	739.4738
+Cardiolipin CL(74:6) (putative)	739.5099
+FA 16:0 (putative)	739.5521
+PC 30:0 (putative)	740.4997
+PE 36:3 (putative)	740.522
+NADP+ [M-2H]	742.065
+PE 36:2 (putative)	742.5385
+PG (putative)	743.486
+Cervonoyl ethanolamide 2M-H	743.5331
+NADPH [M-H]	744.0805
+PS P-34:1 (putative)	744.518
+PE 36:1 (putative)	744.5546
+FA 16:0 (putative)	744.5622
+PG (putative)	745.5022
+PE O-38:7 (putative)	746.5131
+PE 36:0 (putative)	746.5705
+Cardiolipin CL(76:12) (putative)	747.4786
+PG (putative)	747.5182
+SM 34:1 (putative)	747.5658
+Cardiolipin CL(76:11) (putative)	748.4866
+PE O-38:6 (putative)	748.5268
+Cardiolipin CL(76:10) (putative)	749.4944
+ST 18:1 (putative)	750.4826
+Cardiolipin CL(76:9) (putative)	750.5021
+PC 30:0 (putative)	750.5283
+PE O-38:5 (putative)	750.5432
+Cardiolipin CL(76:8) (putative)	751.509
+FA 14:0 (putative)	752.4983
+PE O-38:4 (putative)	752.5592
+FA 17:0 (putative)	753.5677
+Cardiolipin (putative)	753.979
+PC 31:0 (putative)	754.5154
+PE O-38:3 (putative)	754.5761
+Diadenosine triphosphate M-H	755.0968
+Cardiolipin CL(72:8) (putative)	755.4687
+PG P-26:2 (putative)	757.539
+FA 16:0 (putative)	757.9159
+FA 16:0 (putative)	758.923
+PG P-36:1 (putative)	759.553
+PS 34:1 (putative)	760.515
+Cardiolipin CL(74:8) (putative)	761.4866
+Cardiolipin CL(78:12) [M-2H]2- (putative)	761.4945
+PG (putative)	761.5338
+PE 38:6 (putative)	762.504
+PE 38:6 (putative)	762.5079
+PC O-32:1 (putative)	762.5646
+NADP+ [M+Na-3H]	764.0472
+PE 38:5 (putative)	764.5228
+PC O-32:0 (putative)	764.5797
+SM 18:1 (putative)	765.5677
+NADPH [M+Na-2H]	766.0626
+PC 32:1 (putative)	766.5154
+PE 38:4 (putative)	766.5384
+PG (putative)	767.4869
+FA 18:0 (putative)	767.5834
+PS P-36:4 (putative)	768.521
+PC 32:0 (putative)	768.531
+PE 38:3 (putative)	768.557
+PG (putative)	769.5012
+PS 35:3 (putative)	770.4987
+PS P-36:2 (putative)	770.532
+PE 38:2 (putative)	770.566
+FA 18:1 (putative)	770.5788
+FA 18:1 (putative)	770.9239
+PG (putative)	771.5191
+FA 18:0 (putative)	771.9309
+PE O-40:8 (putative)	772.5282
+PS P-36:2 (putative)	772.549
+PE 38:1 (putative)	772.585
+FA 18:0 (putative)	772.5944
+PG (putative)	773.5338
+SM 36:2 (putative)	773.5814
+Cardiolipin CL(76:9) (putative)	774.4944
+PC 32:2 (putative)	774.5281
+PE O-40:7 (putative)	774.5437
+Cardiolipin CL(76:8) (putative)	775.5022
+PG (putative)	775.5495
+SM 36:1 (putative)	775.5971
+PE 39:6 (putative)	776.522
+PC 32:1 (putative)	776.5436
+PE O-40:6 (putative)	776.5594
+PG 36:0 (putative)	777.565
+ST 18:1 (putative)	778.514
+PE 39:5 (putative)	778.538
+PC 32:0 (putative)	778.5604
+PE O-40:5 (putative)	778.5755
+Cardiolipin CL(80:8) [M-2H]2- (putative)	779.5414
+PC (putative)	779.5742
+FA 16:0 (putative)	780.5296
+PC O-34:0 (putative)	780.5674
+PS 36:4 (putative)	782.496
+PS 36:3 (putative)	784.513
+Cardiolipin CL(74:8) (putative)	785.4789
+FA 18:0 (putative)	785.9444
+PS 36:2 (putative)	786.528
+PC O-34:3 (putative)	786.5646
+PC 33:2 (putative)	788.5443
+PC O-34:2 (putative)	788.5808
+Cardiolipin CL(76:10) (putative)	789.4815
+Cardiolipin CL(76:9) (putative)	790.4893
+PE 40:6 (putative)	790.5392
+PC O-34:1 (putative)	790.5949
+PG 38:7 (putative)	791.485
+PC 34:2 (putative)	792.531
+PE 40:5 (putative)	792.555
+PG (putative)	793.5025
+PC 34:1 (putative)	794.5454
+PE 40:4 (putative)	794.571
+PG (putative)	795.5182
+PS P-38:4 (putative)	796.547
+PG (putative)	797.5338
+PC 34:4 (putative)	798.5273
+PG 38:3 (putative)	799.547
+PC 34:3 (putative)	800.5433
+HexCer 38:1-O2	800.6254
+PG 38:2 (putative)	801.564
+PC 34:2 (putative)	802.5609
+1,2-Diphytanoyl-sn-glycero-3-phophoethanolamine	802.6331
+ST 36:2 (putative)	804.53
+PC 34:1 (putative)	804.5758
+PS (putative)	806.4978
+ST 36:1 (putative)	806.545
+PC O-36:2 (putative)	806.583
+PC 34:0 (putative)	806.5911
+GlcCer 43:1 (putative)	806.7036
+PI (putative)	807.5027
+Acetyl-CoA	808.1185
+PI 32:0 (putative)	809.514
+PS (putative)	810.5283
+Eicosapentaenoyl PAF C-16	810.5652
+PC 35:4 (putative)	812.5438
+Arachidonoyl PAF C-16	812.5809
+FA 24:1 (putative)	813.9779
+PS 38:2 (putative)	814.558
+PC O-36:3 (putative)	814.5947
+PG (putative)	815.4864
+PC 36:4 (putative)	816.531
+PC 35:2 (putative)	816.5747
+PC O-36:2 (putative)	816.6114
+PG (putative)	817.5025
+PC 36:3 (putative)	818.5467
+PS O-39:0 (putative)	818.626
+PG (putative)	819.5182
+SM 18:1 (putative)	819.6147
+ST 18:1 (putative)	820.524
+PC 36:2 (putative)	820.5612
+2_-Deoxyadenosine 5_-diphosphate 2M-H	821.0534
+PG (putative)	821.5338
+PI 34:1 (putative)	821.545
+SM 18:1 (putative)	821.6303
+PC 36:6 (putative)	822.5289
+ST 18:1 (putative)	822.54
+PC 36:1 (putative)	822.578
+PG (putative)	823.5495
+FA 22:0 (putative)	823.646
+PC 36:5 (putative)	824.5433
+PS P-40:4 (putative)	824.581
+PG (putative)	825.5651
+PC 36:4 (putative)	826.5587
+PS 39:3 (putative)	826.563
+PI 15:0 (putative)	828.5625
+PC 36:3 (putative)	828.5737
+HexCer 40:1-O2	828.6566
+PC 36:2 (putative)	830.5916
+PI (putative)	831.5029
+FA 16:0 (putative)	831.9519
+PC 36:1 (putative)	832.6069
+PI (putative)	833.5186
+PS (putative)	834.5291
+PC O-38:7 (putative)	834.5637
+ST 38:1 (putative)	834.576
+PC 36:0 (putative)	834.623
+PI (putative)	835.5348
+SM 18:1 (putative)	835.646
+PS (putative)	836.5441
+Docosahexaenoyl PAF C-16	836.5808
+PS (putative)	838.5592
+PC O-38:5 (putative)	838.5955
+PC O-38:4 (putative)	840.611
+PI P-33:2 (putative)	841.501
+PC 38:5 (putative)	842.5467
+PC 37:3 (putative)	842.5911
+PG 42:9 (putative)	843.515
+PC 38:4 (putative)	844.5623
+PC 37:2 (putative)	844.6066
+PI O-23:0 (putative)	845.532
+SM 18:1 (putative)	845.6303
+PS O-41:0 (putative)	846.658
+PG 42:7 (putative)	847.546
+SM 18:1 (putative)	847.646
+PC 38:7 (putative)	848.5438
+PI 25:1 (putative)	849.552
+FA 24:1 (putative)	849.6616
+Acetoacetyl-CoA	850.1293
+FA 12:0 (putative)	850.5533
+PC 38:6 (putative)	850.5593
+ST 18:1 (putative)	850.571
+Malonyl-CoA	852.1083
+PC 38:5 (putative)	852.5745
+PC 38:4 (putative)	854.5904
+PI (putative)	855.5029
+PC 38:3 (putative)	856.6069
+PI (putative)	857.518
+PC 38:2 (putative)	858.622
+PI (putative)	859.5333
+SM 42:1 (putative)	859.691
+PI (putative)	861.5502
+PS (putative)	862.5604
+ST 40:1 (putative)	862.608
+PI (putative)	863.5649
+PC 39:6 (putative)	864.575
+PC O-40:6 (putative)	864.6101
+PG 44:12 (putative)	865.5
+Succinyl-CoA	866.124
+PC O-40:5 (putative)	866.6277
+PI P-35:2 (putative)	867.516
+PS 42:3 (putative)	868.603
+PC O-40:4 (putative)	868.6436
+PI P-35:2 (putative)	869.531
+PS 42:2 (putative)	870.622
+PI 37:4 (putative)	871.533
+PS 42:1 (putative)	872.637
+GlcCer 34:2 (putative)	872.676
+PI 37:3 (putative)	873.551
+PC 40:8 (putative)	874.5613
+GlcCer 34:1 (putative)	874.687
+PC 40:7 (putative)	876.5743
+PC 40:6 (putative)	878.5897
+ST 18:1 (putative)	878.602
+PI 38:7 (putative)	879.5002
+PC 40:5 (putative)	880.6063
+PI (putative)	881.5178
+PC 40:4 (putative)	882.6227
+PI 38:5 (putative)	883.5346
+PI (putative)	885.55
+FA 24:1 (putative)	887.0067
+PI 38:3 (putative)	887.565
+ST 18:1 (putative)	888.623
+FA 24:1 (putative)	890.639
+PC 40:0 (putative)	890.6856
+PC O-42:5 (putative)	894.6594
+PC 42:10 (putative)	898.5605
+LacCer 18:0 (putative)	898.6022
+PI 39:4 (putative)	899.563
+Bradykinin	902.453
+ST 18:1 (putative)	902.602
+ST 18:1 (putative)	904.618
+FA 16:0 (putative)	906.6159
+ST 18:1 (putative)	906.634
+PI (putative)	909.5488
+HMG-CoA	910.1502
+PI (putative)	911.5655
+PI (putative)	913.5812
+FA 14:0 (putative)	914.551
+PI (putative)	915.5968
+ST 44:2 (putative)	916.654
+ST 44:1 (putative)	918.67
+PC O-44:6 (putative)	920.6752
+PC O-44:5 (putative)	922.6912
+ST 18:1 (putative)	932.649
+PI 39:4 (putative)	935.544
+HWESASXX	940.4534
+FA 16:0 (putative)	940.567
+FA 16:0 (putative)	942.5824
+Cardiolipin CL(36:4) (putative)	959.482
+LacCer 18:0 (putative)	982.6961
+LacCer 18:0 (putative)	1008.7118
+LacCer 18:0 (putative)	1010.7274
+FA 24:1 (putative)	1016.7255
+FA 24:0 (putative)	1018.7411
+FA 22:0 (putative)	1024.6606
+FA 24:1 (putative)	1050.6763
+FA 24:1 (putative)	1052.6919
+FA 16:0 (putative)	1060.6551
+FA 16:0 (putative)	1153.721
+Cardiolipin CL(52:2) (putative)	1165.7666
+FA 24:1 (putative)	1170.7646
+Cardiolipin CL(54:5) (putative)	1187.7504
+Cardiolipin CL(54:3) (putative)	1191.7817
+FA 24:1 (putative)	1263.8305
+FA 18:0 (putative)	1382.818
+Cardiolipin CL(70:5) (putative)	1425.9803
+Cardiolipin CL(70:4) (putative)	1427.9961
+Cardiolipin CL(72:9) (putative)	1445.949
+Cardiolipin CL(72:8) (putative)	1447.9645
+Cardiolipin CL(72:7) (putative)	1449.9803
+Cardiolipin CL(72:6) (putative)	1451.9956
+Cardiolipin CL(72:5) (putative)	1454.0114
+Cardiolipin CL(72:4) (putative)	1456.0273
+Cardiolipin CL(74:11) (putative)	1469.949
+Cardiolipin CL(74:10) (putative)	1471.964
+Cardiolipin CL(74:9) (putative)	1473.9803
+Cardiolipin CL(74:8) (putative)	1475.9961
+Cardiolipin CL(74:7) (putative)	1478.011
+Cardiolipin CL(72:8) (putative)	1479.9548
+Cardiolipin CL(74:6) (putative)	1480.027
+Cardiolipin CL(76:12) (putative)	1495.9645
+Cardiolipin CL(76:11) (putative)	1497.9803
+Cardiolipin CL(76:10) (putative)	1499.9961
+Cardiolipin CL(76:9) (putative)	1502.0114
+Cardiolipin CL(72:8) (putative)	1511.9446
+FA 16:0 (putative)	1516.839
+FA 16:0 (putative)	1518.8532
+Cardiolipin CL(74:8) (putative)	1523.9805
+Cardiolipin CL(78:12) [M-H]- (putative)	1523.9963
+FA 18:1 (putative)	1542.855
+FA 18:0 (putative)	1544.869
+Cardiolipin CL(76:9) (putative)	1549.9961
+Cardiolipin CL(76:8) (putative)	1552.0118
+Cardiolipin CL(80:8) [M-H]- (putative)	1560.0902
+Cardiolipin CL(74:8) (putative)	1571.9652
+FA 18:0 (putative)	1572.896
+Cardiolipin CL(76:10) (putative)	1579.9703
+Cardiolipin CL(76:9) (putative)	1581.9859
+FA 24:1 (putative)	1628.9627
+FA 16:0 (putative)	1664.9111
+FA 24:1 (putative)	1775.0206
+FA 18:0 (putative)	1817.953
+FA 18:1 (putative)	1842.969
+FA 18:0 (putative)	1845.981
+FA 18:0 (putative)	1857.94
+FA 18:0 (putative)	1882.892
+FA 18:0 (putative)	1953.964

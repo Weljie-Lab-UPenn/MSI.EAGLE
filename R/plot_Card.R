@@ -133,13 +133,19 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
         grDevices::pdf(file = file, width = width_px / 72, height = height_px / 72, onefile = TRUE)
         on.exit(grDevices::dev.off(), add = TRUE)
         
-        rec <- plot3_last_recorded()
+        rec <- isolate(plot3_last_recorded())
+        replay_ok <- FALSE
         if (!is.null(rec)) {
-          try(grDevices::replayPlot(rec), silent = TRUE)
+          replay_ok <- isTRUE(tryCatch({
+            grDevices::replayPlot(rec)
+            TRUE
+          }, error = function(e) FALSE))
+        }
+        if (replay_ok) {
           return(invisible(NULL))
         }
         
-        src_png <- plot3_last_png()
+        src_png <- isolate(plot3_last_png())
         if (is.null(src_png) || !file.exists(src_png)) {
           showNotification("No image available yet. Render a plot first, then download PDF.", type = "warning", duration = 5)
           stop("No rendered image available for PDF export.")

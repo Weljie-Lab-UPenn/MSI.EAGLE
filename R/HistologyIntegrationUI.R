@@ -382,6 +382,15 @@ HistologyIntegrationUI <- function(id) {
                     4,
                     textInput(ns("polygon_cluster_pdata_col"), "Clustered pData column name", value = "polygon_cluster_class"),
                     tags$div(style = "margin-top: 24px;", actionButton(ns("run_polygon_clustering"), "Run polygon clustering")),
+                    fluidRow(
+                      column(6, numericInput(ns("polygon_cluster_outlier_sd"), "Outlier SD threshold", value = 2, min = 0.5, max = 10, step = 0.25)),
+                      column(6, tags$div(style = "margin-top: 25px;", actionButton(ns("remove_polygon_cluster_outliers"), "Remove PCA outliers")))
+                    ),
+                    fluidRow(
+                      column(6, numericInput(ns("polygon_cluster_profile_top_n"), "Top defining features/cluster", value = 10, min = 1, max = 100, step = 1)),
+                      column(6, tags$div(style = "margin-top: 25px;", actionButton(ns("summarize_polygon_clusters"), "Summarize cluster features")))
+                    ),
+                    tags$div(style = "margin-top: 6px;", downloadButton(ns("download_polygon_cluster_profile"), "Download summary (.csv)")),
                     tags$div(style = "margin-top: 8px;", actionButton(ns("use_polygon_clusters_for_labels"), "Use clusters for overlay/mapping")),
                     tags$small("Then set overlay to polygon + color-by-label, or use the existing polygon mapping button to write clustered labels into pData."),
                     tags$br(), tags$br(),
@@ -392,7 +401,9 @@ HistologyIntegrationUI <- function(id) {
                   column(6, plotOutput(ns("polygon_cluster_plot"), height = "260px")),
                   column(6, DT::dataTableOutput(ns("polygon_cluster_counts_table")))
                 ),
-                DT::dataTableOutput(ns("polygon_cluster_preview_table"))
+                DT::dataTableOutput(ns("polygon_cluster_preview_table")),
+                tags$h5("Cluster-defining feature summary"),
+                DT::dataTableOutput(ns("polygon_cluster_profile_table"))
               )
             ),
             fluidRow(

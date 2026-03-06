@@ -103,17 +103,37 @@ HeatmapUI <- function(id) {
           )
           
         ),
+        fluidRow(
+          column(
+            6,
+            numericInput(
+              ns("hm_plot_width"),
+              label = "Plot width (px)",
+              value = 1000,
+              min = 400,
+              step = 100
+            )
+          ),
+          column(
+            6,
+            numericInput(
+              ns("hm_plot_height"),
+              label = "Plot height (px)",
+              value = 700,
+              min = 300,
+              step = 100
+            )
+          )
+        ),
         
         uiOutput(ns('hm_sig_select'), label = "Select statistics result for filtering"),
         actionButton(ns("action_hmap"), "Generate heatmap"),
-        downloadButton(ns('Export'))
+        downloadButton(ns('Export'), "Download heatmap (PDF)")
       ),
       
       
       mainPanel(
-        imageOutput(
-          ns("plot14"), width = "800px", height = "600px"
-        )
+        uiOutput(ns("heatmap_plot_ui"))
       )
       
       
