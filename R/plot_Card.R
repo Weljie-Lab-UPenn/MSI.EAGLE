@@ -230,6 +230,27 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
       }
       ok
     }
+
+    discrete_fallback_colors <- function(n) {
+      n <- suppressWarnings(as.integer(n))
+      if (!is.finite(n) || n <= 0) return(character(0))
+      # Prefer Alphabet family for categorical pData defaults.
+      # On some R builds, Alphabet is available via palette.colors() but not hcl.colors().
+      pal_try <- function(name) {
+        tryCatch(grDevices::palette.colors(n, palette = name), error = function(e) character(0))
+      }
+      cols <- pal_try("Alphabet")
+      if (length(cols) != n) {
+        cols <- pal_try("Alphabet2")
+      }
+      if (length(cols) != n) {
+        cols <- tryCatch(grDevices::hcl.colors(n, palette = "Dark 3"), error = function(e) character(0))
+      }
+      if (length(cols) != n) {
+        cols <- grDevices::rainbow(n)
+      }
+      as.character(cols)
+    }
     
     # NEW: Add UI for pixel masking options
     observe({
@@ -663,7 +684,7 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
               col_map[valid_col] <- levels_lab[valid_col]
             }
             if (any(!valid_col)) {
-              fallback_cols <- grDevices::hcl.colors(sum(!valid_col), palette = "Dark 3")
+              fallback_cols <- discrete_fallback_colors(sum(!valid_col))
               col_map[!valid_col] <- fallback_cols
             }
 

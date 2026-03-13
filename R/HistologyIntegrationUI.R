@@ -52,6 +52,12 @@ HistologyIntegrationUI <- function(id) {
               "Polygon file (.geojson/.json)",
               accept = c(".geojson", ".json")
             ),
+            fileInput(
+              ns("nucleus_polygon_file"),
+              "Nucleus polygon file (optional)",
+              accept = c(".geojson", ".json")
+            ),
+            tags$small("If provided, polygon mapping will also annotate nucleus-versus-cytoplasm pixels in pData."),
             selectInput(
               ns("msi_plot_mode"),
               "MSI display mode",
@@ -85,8 +91,8 @@ HistologyIntegrationUI <- function(id) {
             selectInput(
               ns("cluster_palette"),
               "Discrete palette",
-              choices = c("Set 2", "Dark 3", "Dynamic", "Warm", "Cold", "Harmonic"),
-              selected = "Set 2"
+              choices = c("Alphabet", "Set 2", "Dark 3", "Dynamic", "Warm", "Cold", "Harmonic"),
+              selected = "Alphabet"
             ),
             checkboxInput(ns("enhance_contrast"), "Enhance contrast", value = TRUE),
             checkboxInput(ns("gaussian_smooth"), "Gaussian smoothing", value = TRUE),
@@ -192,7 +198,90 @@ HistologyIntegrationUI <- function(id) {
             tabsetPanel(
               id = ns("registration_fit_tabs"),
               type = "tabs",
-              selected = "stat_fit",
+              selected = "histology_fit",
+              tabPanel(
+                "Histology Fit",
+                value = "histology_fit",
+                tags$small("Local XY refinement using the transformed histology image against the current MSI spatial signal. Current scale and rotation are held fixed."),
+                fluidRow(
+                  column(2, numericInput(ns("histology_fit_range"), "Range", value = 30, min = 1, max = 500, step = 1)),
+                  column(2, numericInput(ns("histology_fit_step"), "Step", value = 2, min = 1, max = 50, step = 1)),
+                  column(
+                    3,
+                    selectInput(
+                      ns("histology_feature_mode"),
+                      "Histology feature",
+                      choices = c(
+                        "Hematoxylin-like + darkness" = "hematoxylin",
+                        "Darkness / tissue density" = "darkness",
+                        "Purple chromatin emphasis" = "purple"
+                      ),
+                      selected = "purple"
+                    )
+                  ),
+                  column(
+                    3,
+                    selectInput(
+                      ns("histology_fit_signal_source"),
+                      "MSI target signal",
+                      choices = c(
+                        "Current MSI display" = "current",
+                        "Fused MSI (top spatial ions, default)" = "multi",
+                        "PCA component (self-contained)" = "pca",
+                        "pData field (numeric or categorical)" = "pdata"
+                      ),
+                      selected = "multi"
+                    )
+                  ),
+                  column(
+                    2,
+                    tags$div(
+                      style = "margin-top: 24px;",
+                      actionButton(ns("run_histology_fit"), "Run Histology Fit")
+                    )
+                  )
+                ),
+                fluidRow(
+                  column(4, uiOutput(ns("histology_fit_pdata_field_ui"))),
+                  column(
+                    2,
+                    selectInput(
+                      ns("histology_fit_intensity_relation"),
+                      "Intensity relation",
+                      choices = c(
+                        "Either / unsigned (recommended)" = "either",
+                        "Inverse" = "inverse",
+                        "Direct" = "direct"
+                      ),
+                      selected = "inverse"
+                    )
+                  ),
+                  column(4, uiOutput(ns("histology_fit_preview_ui"))),
+                  column(
+                    2,
+                    tags$div(
+                      style = "margin-top: 24px;",
+                      actionButton(ns("apply_histology_fit_choice"), "Apply selected")
+                    )
+                  )
+                ),
+                conditionalPanel(
+                  condition = sprintf("input['%s']", ns("show_fit_info")),
+                  fluidRow(
+                    column(6, uiOutput(ns("histology_fit_heatmap_ui"))),
+                    column(6, plotOutput(ns("histology_fit_contour"), height = "240px"))
+                  ),
+                  fluidRow(
+                    column(8, plotOutput(ns("histology_fit_target_plot"), height = "240px")),
+                    column(
+                      4,
+                      uiOutput(ns("histology_fit_target_info_ui")),
+                      tags$div(style = "margin-top: 8px;", downloadButton(ns("download_histology_fit_target_png"), "Download target (.png)"))
+                    )
+                  ),
+                  verbatimTextOutput(ns("histology_fit_summary"))
+                )
+              ),
               tabPanel(
                 "Stat Fit",
                 value = "stat_fit",

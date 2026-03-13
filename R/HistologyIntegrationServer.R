@@ -19,6 +19,14 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       stat_fit_grid = NULL,
       stat_fit_candidates = NULL,
       stat_fit_summary = NULL,
+      histology_fit_grid = NULL,
+      histology_fit_candidates = NULL,
+      histology_fit_summary = NULL,
+      histology_fit_signature = NULL,
+      histology_fit_target_info = NULL,
+      histology_fit_relation_auto = TRUE,
+      histology_fit_relation_last_default = NULL,
+      histology_fit_relation_updating = FALSE,
       polygon_cluster_result = NULL,
       polygon_cluster_profile_table = NULL,
       polygon_label_field_before_cluster = NULL
@@ -127,8 +135,11 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         if (is.null(cols) || length(cols) == 0) {
           return(tags$small("No pData fields available in current MSI object."))
         }
+        cur_field <- isolate(input$overlay_pdata_field)
         restore_field <- isolate(xh$restore_overlay_pdata_field)
-        default_col <- if (!is.null(restore_field) && restore_field %in% cols) {
+        default_col <- if (!is.null(cur_field) && length(cur_field) > 0L && !is.na(cur_field[1]) && nzchar(cur_field[1]) && cur_field[1] %in% cols) {
+          cur_field[1]
+        } else if (!is.null(restore_field) && restore_field %in% cols) {
           restore_field
         } else if ("histo_cluster" %in% cols) {
           "histo_cluster"
@@ -159,7 +170,12 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         tagList(
           uiOutput(ns("polygon_label_field_ui")),
           textInput(ns("polygon_pdata_col"), "pData column name", value = "polygon_region"),
-          selectInput(ns("polygon_overlap_rule"), "If multiple polygons hit one pixel", choices = c("First match" = "first", "All matches (semicolon-separated)" = "all"), selected = "first")
+          selectInput(ns("polygon_overlap_rule"), "If multiple polygons hit one pixel", choices = c("First match" = "first", "All matches (semicolon-separated)" = "all"), selected = "first"),
+          if (!is.null(input$nucleus_polygon_file) && nzchar(input$nucleus_polygon_file$name)) {
+            tags$small("Nucleus GeoJSON detected: mapping will also write nucleus/cytoplasm companion columns.")
+          } else {
+            tags$small("Optional: upload a nucleus GeoJSON to annotate nucleus-versus-cytoplasm pixels during mapping.")
+          }
         )
       }
     })
@@ -466,6 +482,14 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       poly
     })
 
+    nucleus_polygon_data <- reactive({
+      req(input$nucleus_polygon_file)
+      validate(need(requireNamespace("sf", quietly = TRUE), "Package 'sf' is required for polygon mapping."))
+      poly <- try(sf::st_read(input$nucleus_polygon_file$datapath, quiet = TRUE), silent = TRUE)
+      validate(need(!inherits(poly, "try-error"), "Could not read nucleus polygon file. Please provide a valid GeoJSON."))
+      poly
+    })
+
     output$polygon_label_field_ui <- renderUI({
       req(input$mapping_source)
       if (!identical(input$mapping_source, "polygon")) return(NULL)
@@ -507,6 +531,82 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
       selectInput(ns("edge_fit_pdata_field"), "pData field for Edge Fit optimization", choices = cols, selected = default)
     })
+
+    output$histology_fit_pdata_field_ui <- renderUI({
+      req(input$histology_fit_signal_source)
+      source_mode <- tolower(trimws(as.character(input$histology_fit_signal_source)[1]))
+      if (identical(source_mode, "multi")) {
+        cur_n <- suppressWarnings(as.integer(isolate(input$histology_fit_multi_n)))
+        if (length(cur_n) != 1L || !isTRUE(is.finite(cur_n)) || cur_n < 2L) cur_n <- 12L
+        return(tagList(
+          numericInput(ns("histology_fit_multi_n"), "Top ions for fused target", value = clamp(cur_n, 2L, 64L), min = 2, max = 64, step = 1),
+          tags$small("Build a fused MSI target from the top spatially informative ions rather than the current single-ion display.")
+        ))
+      }
+      if (identical(source_mode, "pca")) {
+        cur_component <- suppressWarnings(as.integer(isolate(input$histology_fit_pca_component)))
+        cur_n_components <- suppressWarnings(as.integer(isolate(input$histology_fit_pca_n_components)))
+        cur_n_features <- suppressWarnings(as.integer(isolate(input$histology_fit_pca_n_features)))
+        if (length(cur_component) != 1L || !isTRUE(is.finite(cur_component)) || cur_component < 1L) cur_component <- 1L
+        if (length(cur_n_components) != 1L || !isTRUE(is.finite(cur_n_components)) || cur_n_components < 1L) cur_n_components <- 1L
+        if (length(cur_n_features) != 1L || !isTRUE(is.finite(cur_n_features)) || cur_n_features < 4L) cur_n_features <- 32L
+        return(tagList(
+          numericInput(ns("histology_fit_pca_component"), "PCA component", value = clamp(cur_component, 1L, 64L), min = 1, max = 64, step = 1),
+          numericInput(ns("histology_fit_pca_n_components"), "PCs to combine", value = clamp(cur_n_components, 1L, 8L), min = 1, max = 8, step = 1),
+          numericInput(ns("histology_fit_pca_n_features"), "Informative ions for PCA", value = clamp(cur_n_features, 4L, 128L), min = 4, max = 128, step = 4),
+          tags$small("Build a self-contained MSI target from one or more low-order PCA components computed on a bounded set of informative ions.")
+        ))
+      }
+      if (!identical(source_mode, "pdata")) return(NULL)
+      obj <- try(msi_for_pdata(), silent = TRUE)
+      if (inherits(obj, "try-error") || is.null(obj)) {
+        return(tags$small("Load MSI data to choose a pData field for Histology Fit."))
+      }
+      pd <- try(as.data.frame(Cardinal::pData(obj)), silent = TRUE)
+      if (inherits(pd, "try-error") || is.null(pd) || ncol(pd) == 0L) {
+        return(tags$small("No pData fields available in current MSI object."))
+      }
+      cols <- colnames(pd)
+      cur <- isolate(input$histology_fit_pdata_field)
+      default <- if (!is.null(cur) && cur %in% cols) {
+        cur
+      } else if ("polygon_is_cell" %in% cols) {
+        "polygon_is_cell"
+      } else if ("polygon_region" %in% cols) {
+        "polygon_region"
+      } else {
+        cols[1]
+      }
+      selectInput(ns("histology_fit_pdata_field"), "pData field for Histology Fit", choices = cols, selected = default)
+    })
+
+    observeEvent(list(input$histology_fit_signal_source, input$msi_plot_mode), {
+      rel_default <- default_histology_fit_relation(
+        source_mode = input$histology_fit_signal_source,
+        msi_mode = input$msi_plot_mode
+      )
+      prev_default <- isolate(xh$histology_fit_relation_last_default)
+      cur_rel <- resolve_histology_intensity_relation(input$histology_fit_intensity_relation)
+      should_apply <- isTRUE(xh$histology_fit_relation_auto) ||
+        is.null(prev_default) ||
+        identical(cur_rel, prev_default)
+
+      if (isTRUE(should_apply) && !identical(cur_rel, rel_default)) {
+        xh$histology_fit_relation_updating <- TRUE
+        updateSelectInput(session, "histology_fit_intensity_relation", selected = rel_default)
+      }
+      xh$histology_fit_relation_auto <- isTRUE(should_apply)
+      xh$histology_fit_relation_last_default <- rel_default
+    }, ignoreInit = FALSE)
+
+    observeEvent(input$histology_fit_intensity_relation, {
+      if (isTRUE(xh$histology_fit_relation_updating)) {
+        xh$histology_fit_relation_updating <- FALSE
+        return()
+      }
+      cur_rel <- resolve_histology_intensity_relation(input$histology_fit_intensity_relation)
+      xh$histology_fit_relation_auto <- identical(cur_rel, isolate(xh$histology_fit_relation_last_default))
+    }, ignoreInit = TRUE)
 
     parse_stat_fit_group_field <- function(sel = NULL) {
       s <- sel
@@ -1744,6 +1844,172 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       x
     }
 
+    build_numeric_signal_matrix <- function(
+      vals,
+      msi_obj,
+      intensity_transform = "none",
+      apply_transform = TRUE,
+      gaussian_smooth = FALSE,
+      smooth_sigma = 1,
+      enhance = FALSE
+    ) {
+      ny <- as.integer(msi_obj$ny)
+      nx <- as.integer(msi_obj$nx)
+      row_idx <- as.integer(msi_obj$row_idx)
+      x_norm <- as.integer(msi_obj$x_norm)
+
+      vals <- as.numeric(vals)
+      if (isTRUE(apply_transform)) {
+        vals <- transform_intensity(vals, intensity_transform)
+      }
+
+      mat <- matrix(NA_real_, nrow = ny, ncol = nx)
+      mat[cbind(row_idx, x_norm)] <- vals
+      valid_mat <- is.finite(mat)
+
+      if (!is.finite(smooth_sigma) || smooth_sigma <= 0) smooth_sigma <- 1
+      if (isTRUE(gaussian_smooth)) {
+        mat <- gaussian_smooth_matrix(mat, smooth_sigma)
+      }
+
+      sig <- matrix(
+        rescale01(as.vector(mat), enhance = isTRUE(enhance)),
+        nrow = ny,
+        ncol = nx
+      )
+      sig[!is.finite(sig)] <- 0
+      list(signal = sig, valid = valid_mat)
+    }
+
+    score_spatial_signal_map <- function(signal, valid_mask = NULL) {
+      if (is.null(signal) || !is.matrix(signal) || nrow(signal) < 2L || ncol(signal) < 2L) {
+        return(-Inf)
+      }
+      sig <- suppressWarnings(matrix(as.numeric(signal), nrow = nrow(signal), ncol = ncol(signal)))
+      sig[!is.finite(sig)] <- 0
+      if (is.null(valid_mask)) {
+        valid <- is.finite(signal)
+      } else {
+        valid <- matrix(as.logical(valid_mask), nrow = nrow(signal), ncol = ncol(signal))
+      }
+      valid[!is.finite(valid)] <- FALSE
+
+      vals <- sig[valid & is.finite(sig)]
+      if (length(vals) < 25L) return(-Inf)
+
+      right_grad <- abs(sig[, -1, drop = FALSE] - sig[, -ncol(sig), drop = FALSE])
+      down_grad <- abs(sig[-1, , drop = FALSE] - sig[-nrow(sig), , drop = FALSE])
+      right_valid <- valid[, -1, drop = FALSE] & valid[, -ncol(valid), drop = FALSE]
+      down_valid <- valid[-1, , drop = FALSE] & valid[-nrow(valid), , drop = FALSE]
+      grad_vals <- c(right_grad[right_valid], down_grad[down_valid])
+      grad_vals <- grad_vals[is.finite(grad_vals)]
+      if (length(grad_vals) < 10L) return(-Inf)
+
+      qv <- suppressWarnings(stats::quantile(vals, probs = c(0.50, 0.90, 0.99), na.rm = TRUE, names = FALSE, type = 8))
+      qg <- suppressWarnings(stats::quantile(grad_vals, probs = c(0.75, 0.95), na.rm = TRUE, names = FALSE, type = 8))
+      if (!all(is.finite(qv)) || !all(is.finite(qg))) return(-Inf)
+
+      contrast_score <- (qv[2] - qv[1]) + 0.5 * (qv[3] - qv[2])
+      edge_score <- qg[2] + 0.5 * qg[1]
+      score <- 0.60 * edge_score + 0.40 * contrast_score
+      if (!is.finite(score)) return(-Inf)
+      score
+    }
+
+    suggest_histology_fusion_indices <- function(
+      obj,
+      n_features = 12L,
+      candidate_pool = NULL,
+      max_cells = 1.5e7,
+      intensity_transform = "none"
+    ) {
+      n_features <- suppressWarnings(as.integer(n_features))
+      if (!is.finite(n_features) || n_features < 2L) n_features <- 12L
+      n_features <- as.integer(min(64L, max(2L, n_features)))
+
+      mz_axis <- suppressWarnings(as.numeric(Cardinal::mz(obj)))
+      n_feat <- length(mz_axis)
+      n_pix <- ncol(obj)
+      if (n_feat < 2L || n_pix < 2L) return(integer(0))
+
+      candidate_pool <- suppressWarnings(as.integer(candidate_pool))
+      if (!is.finite(candidate_pool) || candidate_pool < n_features) {
+        candidate_pool <- max(24L, 4L * n_features)
+      }
+      candidate_pool <- as.integer(min(n_feat, max(n_features, candidate_pool)))
+
+      max_cells <- suppressWarnings(as.numeric(max_cells))
+      if (!is.finite(max_cells) || max_cells <= 1e6) max_cells <- 1.5e7
+
+      sample_pix <- floor(max_cells / max(1L, n_feat))
+      sample_pix <- max(200L, sample_pix)
+      sample_pix <- min(n_pix, sample_pix)
+      if (sample_pix < 2L) sample_pix <- min(n_pix, 2L)
+
+      pix_idx <- if (sample_pix < n_pix) sort(sample.int(n_pix, sample_pix)) else seq_len(n_pix)
+      sp <- try(as.matrix(Cardinal::spectra(obj)[, pix_idx, drop = FALSE]), silent = TRUE)
+      if (inherits(sp, "try-error") || nrow(sp) < 2L || ncol(sp) < 2L) return(integer(0))
+
+      storage.mode(sp) <- "double"
+      sp[!is.finite(sp)] <- NA_real_
+      if (!identical(intensity_transform, "none")) {
+        sp <- transform_intensity(sp, intensity_transform)
+      }
+
+      score <- apply(sp, 1, stats::sd, na.rm = TRUE)
+      nz <- rowMeans(is.finite(sp) & (abs(sp) > 0), na.rm = TRUE)
+      score[!is.finite(score)] <- 0
+      nz[!is.finite(nz)] <- 0
+      score <- score * (0.25 + 0.75 * pmin(1, nz * 2))
+
+      if (length(mz_axis) >= length(score)) {
+        valid_mz <- is.finite(mz_axis[seq_len(length(score))])
+        score[!valid_mz] <- -Inf
+      }
+
+      ord <- order(score, decreasing = TRUE, na.last = NA)
+      ord <- ord[is.finite(score[ord]) & score[ord] > 0]
+      if (length(ord) == 0L) {
+        ord <- which(is.finite(score))
+        ord <- ord[order(score[ord], decreasing = TRUE)]
+      }
+      if (length(ord) == 0L) return(integer(0))
+      if (length(ord) <= candidate_pool) return(ord)
+
+      cand_k <- min(length(ord), max(candidate_pool, as.integer(ceiling(sqrt(length(ord)) * 6))))
+      cand <- ord[seq_len(cand_k)]
+      cand_mat <- sp[cand, , drop = FALSE]
+      keep <- rowSums(is.finite(cand_mat)) >= 5L
+      cand <- cand[keep]
+      cand_mat <- cand_mat[keep, , drop = FALSE]
+      if (length(cand) <= candidate_pool || nrow(cand_mat) <= 1L) {
+        return(cand[seq_len(min(length(cand), candidate_pool))])
+      }
+
+      corr <- suppressWarnings(stats::cor(t(cand_mat), use = "pairwise.complete.obs"))
+      if (is.null(dim(corr))) {
+        return(cand[seq_len(min(length(cand), candidate_pool))])
+      }
+      corr[!is.finite(corr)] <- 1
+      diag(corr) <- 1
+
+      cand_score <- score[cand]
+      selected <- cand[which.max(cand_score)]
+      while (length(selected) < candidate_pool && length(selected) < length(cand)) {
+        sel_pos <- match(selected, cand)
+        diversity <- 1 - rowMeans(abs(corr[, sel_pos, drop = FALSE]), na.rm = TRUE)
+        diversity[!is.finite(diversity)] <- 0
+        rank_score <- cand_score * pmax(0, diversity)
+        rank_score[sel_pos] <- -Inf
+        next_pos <- which.max(rank_score)
+        if (!is.finite(rank_score[next_pos]) || rank_score[next_pos] == -Inf) break
+        selected <- c(selected, cand[next_pos])
+      }
+
+      selected <- unique(selected)
+      selected[seq_len(min(length(selected), candidate_pool))]
+    }
+
     clamp <- function(x, lo, hi) {
       pmax(lo, pmin(hi, x))
     }
@@ -1758,6 +2024,76 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       if (!is.finite(tx)) tx <- 0
       if (!is.finite(ty)) ty <- 0
       list(tx = tx, ty = ty)
+    }
+
+    sig_chr <- function(x) {
+      if (is.null(x) || length(x) == 0L) return("")
+      vals <- trimws(as.character(x))
+      vals <- vals[!is.na(vals) & nzchar(vals)]
+      if (length(vals) == 0L) "" else paste(vals, collapse = "|")
+    }
+
+    sig_num <- function(x, digits = 6L) {
+      val <- suppressWarnings(as.numeric(x)[1])
+      if (!is.finite(val)) return(NA_real_)
+      round(val, digits = digits)
+    }
+
+    current_histology_fit_signature <- function() {
+      txy <- current_translate_xy()
+      hist_name <- ""
+      if (!is.null(input$histology_upload) && !is.null(input$histology_upload$name)) {
+        hist_name <- sig_chr(input$histology_upload$name)
+      }
+      source_mode <- sig_chr(input$histology_fit_signal_source)
+      sig <- list(
+        translate_x = sig_num(txy$tx),
+        translate_y = sig_num(txy$ty),
+        rotate_deg = sig_num(input$rotate_deg),
+        scale_x = sig_num(input$scale_x),
+        scale_y = sig_num(input$scale_y),
+        overlay_scale_mode = sig_chr(input$overlay_scale_mode),
+        flip_histology_y = isTRUE(input$flip_histology_y),
+        histology_feature_mode = sig_chr(input$histology_feature_mode),
+        histology_fit_signal_source = source_mode,
+        histology_fit_intensity_relation = sig_chr(input$histology_fit_intensity_relation),
+        histology_fit_range = sig_num(input$histology_fit_range, digits = 0L),
+        histology_fit_step = sig_num(input$histology_fit_step, digits = 0L),
+        histology_upload = hist_name,
+        intensity_transform = sig_chr(input$intensity_transform),
+        gaussian_smooth = isTRUE(input$gaussian_smooth),
+        gaussian_sigma = sig_num(input$gaussian_sigma, digits = 4L)
+      )
+      if (identical(source_mode, "pdata")) {
+        sig$histology_fit_pdata_field <- sig_chr(input$histology_fit_pdata_field)
+      }
+      if (identical(source_mode, "multi")) {
+        sig$histology_fit_multi_n <- sig_num(input$histology_fit_multi_n, digits = 0L)
+      }
+      if (identical(source_mode, "pca")) {
+        sig$histology_fit_pca_component <- sig_num(input$histology_fit_pca_component, digits = 0L)
+        sig$histology_fit_pca_n_components <- sig_num(input$histology_fit_pca_n_components, digits = 0L)
+        sig$histology_fit_pca_n_features <- sig_num(input$histology_fit_pca_n_features, digits = 0L)
+      }
+      if (identical(source_mode, "current")) {
+        mode_now <- sig_chr(input$msi_plot_mode)
+        sig$msi_plot_mode <- mode_now
+        if (identical(mode_now, "pdata")) {
+          sig$overlay_pdata_field <- sig_chr(input$overlay_pdata_field)
+        } else if (identical(mode_now, "rgb")) {
+          rgb_applied <- isolate(xh$rgb_mz_applied)
+          sig$rgb_mz_select <- if (!is.null(rgb_applied) && length(rgb_applied) > 0L) {
+            sig_chr(rgb_applied)
+          } else {
+            sig_chr(input$rgb_mz_select)
+          }
+          sig$rgb_render_mode <- sig_chr(input$rgb_render_mode)
+          sig$rgb_bg_cutoff <- sig_num(input$rgb_bg_cutoff, digits = 4L)
+        } else {
+          sig$mz_select <- sig_chr(input$mz_select)
+        }
+      }
+      sig
     }
 
     parse_numeric_tokens <- function(x) {
@@ -1880,13 +2216,52 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
     }
 
+    signal_matrix_to_raster <- function(signal, palette_name = NULL) {
+      if (is.null(signal) || !is.matrix(signal) || nrow(signal) == 0L || ncol(signal) == 0L) {
+        return(NULL)
+      }
+      mat <- suppressWarnings(matrix(as.numeric(signal), nrow = nrow(signal), ncol = ncol(signal)))
+      valid <- is.finite(mat)
+      if (!any(valid)) {
+        return(as.raster(matrix("#00000000", nrow = nrow(mat), ncol = ncol(mat))))
+      }
+      mat01 <- matrix(rescale01(as.vector(mat), enhance = FALSE), nrow = nrow(mat), ncol = ncol(mat))
+      pal <- get_msi_palette(if (is.null(palette_name)) input$msi_palette else palette_name)
+      bin <- pmax(1L, pmin(256L, as.integer(mat01 * 255) + 1L))
+      col_mat <- matrix(pal[bin], nrow = nrow(mat01), ncol = ncol(mat01))
+      col_mat[!valid] <- "#00000000"
+      as.raster(col_mat)
+    }
+
     get_discrete_palette <- function(n, name) {
       if (n <= 0) return(character(0))
-      pal <- try(grDevices::hcl.colors(max(n, 3), name), silent = TRUE)
+      name_chr <- trimws(if (is.null(name) || length(name) == 0) "Alphabet" else as.character(name[[1]]))
+      if (tolower(name_chr) == "alphabet") {
+        base_n <- max(26L, n)
+        hues <- seq(15, 375, length.out = base_n + 1L)[seq_len(base_n)]
+        # Use alternating luminance so adjacent categories stay distinguishable.
+        l_vals <- rep(c(62, 74), length.out = base_n)
+        c_vals <- rep(c(85, 70), length.out = base_n)
+        pal <- grDevices::hcl(h = hues, c = c_vals, l = l_vals)
+      } else {
+        pal <- try(grDevices::hcl.colors(max(n, 3), name_chr), silent = TRUE)
+      }
       if (inherits(pal, "try-error") || length(pal) < n) {
         pal <- grDevices::hcl.colors(max(n, 3), "Set 2")
       }
       pal[seq_len(n)]
+    }
+
+    pdata_values_are_categorical <- function(vals, max_levels = 128L) {
+      vals_num <- suppressWarnings(as.numeric(vals))
+      is_num <- is.numeric(vals) || is.integer(vals)
+      if (is.logical(vals)) return(TRUE)
+      if (!is_num) return(TRUE)
+      max_levels <- suppressWarnings(as.integer(max_levels))
+      if (!is.finite(max_levels) || max_levels < 2L) max_levels <- 128L
+      unique_n <- length(unique(vals[!is.na(vals)]))
+      integer_like <- all(is.na(vals_num) | abs(vals_num - round(vals_num)) < 1e-8)
+      isTRUE(integer_like) && isTRUE(unique_n <= max_levels)
     }
 
     resolve_polygon_axis_mode <- function(poly_sf, mode = "auto", hist_img = NULL) {
@@ -1955,11 +2330,51 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       default
     }
 
+    wrap_rotation_deg <- function(deg) {
+      deg <- suppressWarnings(as.numeric(deg))
+      if (!is.finite(deg)) return(NA_real_)
+      out <- ((deg + 180) %% 360) - 180
+      if (isTRUE(all.equal(out, -180))) out <- 180
+      out
+    }
+
+    current_msi_coord_frame <- function(obj = NULL) {
+      if (is.null(obj)) {
+        obj <- try(msi_for_pdata(), silent = TRUE)
+      }
+      if (inherits(obj, "try-error") || is.null(obj)) return(NULL)
+      cd <- try(as.data.frame(Cardinal::coord(obj)), silent = TRUE)
+      if (inherits(cd, "try-error") || !is.data.frame(cd) || nrow(cd) == 0L || !all(c("x", "y") %in% names(cd))) {
+        return(NULL)
+      }
+      x <- suppressWarnings(as.numeric(cd$x))
+      y <- suppressWarnings(as.numeric(cd$y))
+      if (!any(is.finite(x)) || !any(is.finite(y))) return(NULL)
+      xmin <- suppressWarnings(min(x, na.rm = TRUE))
+      xmax <- suppressWarnings(max(x, na.rm = TRUE))
+      ymin <- suppressWarnings(min(y, na.rm = TRUE))
+      ymax <- suppressWarnings(max(y, na.rm = TRUE))
+      if (!all(is.finite(c(xmin, xmax, ymin, ymax)))) return(NULL)
+      nx <- suppressWarnings(as.integer(round(xmax - xmin + 1)))
+      ny <- suppressWarnings(as.integer(round(ymax - ymin + 1)))
+      if (!is.finite(nx) || nx < 1L || !is.finite(ny) || ny < 1L) return(NULL)
+      list(
+        xmin = xmin,
+        xmax = xmax,
+        ymin = ymin,
+        ymax = ymax,
+        nx = nx,
+        ny = ny
+      )
+    }
+
     current_registration_params <- reactive({
       obj <- try(msi_for_pdata(), silent = TRUE)
       mz_axis <- numeric(0)
+      coord_frame <- NULL
       if (!inherits(obj, "try-error")) {
         mz_axis <- suppressWarnings(as.numeric(Cardinal::mz(obj)))
+        coord_frame <- current_msi_coord_frame(obj)
       }
 
       mz_sel_idx <- suppressWarnings(as.integer(input$mz_select))
@@ -1976,6 +2391,16 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       rgb_sel_vals <- if (length(rgb_sel_idx) > 0) mz_axis[rgb_sel_idx] else numeric(0)
 
       list(
+        registration_rotation_convention = "shared_overlay_rotation_v2",
+        registration_translation_frame = "relative_to_saved_msi_canvas_center_v2",
+        registration_saved_overlay_layer = input$overlay_layer,
+        msi_coord_frame = if (!is.null(coord_frame)) "absolute_cardinal_coords_v1" else NA_character_,
+        msi_coord_xmin = if (!is.null(coord_frame)) coord_frame$xmin else NA_real_,
+        msi_coord_xmax = if (!is.null(coord_frame)) coord_frame$xmax else NA_real_,
+        msi_coord_ymin = if (!is.null(coord_frame)) coord_frame$ymin else NA_real_,
+        msi_coord_ymax = if (!is.null(coord_frame)) coord_frame$ymax else NA_real_,
+        msi_canvas_nx = if (!is.null(coord_frame)) coord_frame$nx else NA_integer_,
+        msi_canvas_ny = if (!is.null(coord_frame)) coord_frame$ny else NA_integer_,
         msi_plot_mode = input$msi_plot_mode,
         mz_select = input$mz_select,
         mz_value = mz_sel_val,
@@ -2005,6 +2430,16 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         rgb_render_mode = input$rgb_render_mode,
         rgb_bg_cutoff = input$rgb_bg_cutoff,
         optimize_edge_band = input$optimize_edge_band,
+        histology_fit_range = input$histology_fit_range,
+        histology_fit_step = input$histology_fit_step,
+        histology_feature_mode = input$histology_feature_mode,
+        histology_fit_signal_source = input$histology_fit_signal_source,
+        histology_fit_pdata_field = input$histology_fit_pdata_field,
+        histology_fit_multi_n = input$histology_fit_multi_n,
+        histology_fit_pca_component = input$histology_fit_pca_component,
+        histology_fit_pca_n_components = input$histology_fit_pca_n_components,
+        histology_fit_pca_n_features = input$histology_fit_pca_n_features,
+        histology_fit_intensity_relation = input$histology_fit_intensity_relation,
         stat_fit_metric_mode = input$stat_fit_metric_mode,
         stat_fit_group_field = input$stat_fit_group_field,
         stat_fit_outside_mode = input$stat_fit_outside_mode,
@@ -2190,8 +2625,9 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         field <- as.character(input$overlay_pdata_field)[1]
         if (!is.null(field) && length(field) > 0 && !is.na(field) && nzchar(field) && field %in% colnames(pd)) {
           vals <- pd[[field]]
+          use_categorical <- pdata_values_are_categorical(vals)
 
-          if (is.numeric(vals) || is.integer(vals)) {
+          if (!isTRUE(use_categorical)) {
             ras <- build_numeric_raster(vals, apply_transform = FALSE)
             sig_opt <- build_numeric_signal(vals, apply_transform = FALSE, apply_enhance = FALSE)
             return(list(
@@ -2314,6 +2750,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       vals <- try(as.numeric(Cardinal::spectra(obj)[idx, ]), silent = TRUE)
       validate(need(!inherits(vals, "try-error"), "Could not extract MSI intensities for selected m/z."))
       ras <- build_numeric_raster(vals, apply_transform = TRUE)
+      sig_opt <- build_numeric_signal(vals, apply_transform = TRUE, apply_enhance = FALSE)
 
       list(
         raster = ras,
@@ -2326,7 +2763,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         mode = "mz",
         mode_requested = mode_req,
         display_label = sprintf("m/z %.5f", mzv[idx]),
-        opt_signal = NULL,
+        opt_signal = sig_opt,
         x_norm = x_norm,
         y_norm = y_norm,
         row_idx = row_idx
@@ -2385,8 +2822,9 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         img_work <- magick::image_resize(img_work, paste0(target_w, "x", target_h, "!"))
       }
       img_work <- magick::image_background(img_work, "none")
-      if (!is.null(input$rotate_deg) && is.finite(input$rotate_deg) && input$rotate_deg != 0) {
-        img_work <- magick::image_rotate(img_work, input$rotate_deg)
+      rot_deg <- effective_overlay_rotate_deg()
+      if (is.finite(rot_deg) && rot_deg != 0) {
+        img_work <- magick::image_rotate(img_work, rot_deg)
       }
 
       ras <- image_to_raster_rgba(img_work, alpha_scale = alpha_scale)
@@ -2401,10 +2839,17 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       )
     }
 
-    effective_polygon_rotate_deg <- function() {
+    effective_overlay_rotate_deg <- function() {
       deg <- suppressWarnings(as.numeric(input$rotate_deg))
       if (!is.finite(deg)) deg <- 0
+      # Histology-family overlays and polygon exports share the same 90-degree
+      # source-frame offset, so keep the user-facing rotate_deg in a shared
+      # registration space and apply the source offset internally.
       deg + 90
+    }
+
+    effective_polygon_rotate_deg <- function() {
+      effective_overlay_rotate_deg()
     }
 
     transformed_overlay <- reactive({
@@ -2461,6 +2906,304 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       out$layer <- "histology"
       out
     })
+
+    sample_transformed_overlay_to_msi <- function(msi_obj, tr, tx, ty) {
+      nx <- as.integer(msi_obj$nx)
+      ny <- as.integer(msi_obj$ny)
+      w <- as.integer(tr$width)
+      h <- as.integer(tr$height)
+      validate(need(is.finite(w) && w > 0 && is.finite(h) && h > 0, "Invalid transformed overlay dimensions."))
+
+      cx <- (nx / 2) + as.numeric(tx)
+      cy <- (ny / 2) + as.numeric(ty)
+      xleft <- cx - w / 2
+      xright <- cx + w / 2
+      ybottom <- cy - h / 2
+      ytop <- cy + h / 2
+
+      xpix <- as.numeric(msi_obj$x_norm)
+      ypix <- as.numeric(msi_obj$y_norm)
+
+      u <- (xpix - xleft) / (xright - xleft)
+      v <- (ytop - ypix) / (ytop - ybottom)
+      inside <- is.finite(u) & is.finite(v) & u >= 0 & u <= 1 & v >= 0 & v <= 1
+
+      col_idx <- pmin(w, pmax(1L, as.integer(floor(u * (w - 1L)) + 1L)))
+      row_idx <- pmin(h, pmax(1L, as.integer(floor(v * (h - 1L)) + 1L)))
+
+      col_mat <- as.matrix(tr$raster)
+      sampled <- rep(NA_character_, length(xpix))
+      sampled[inside] <- col_mat[cbind(row_idx[inside], col_idx[inside])]
+
+      list(
+        sampled_rgba = sampled,
+        inside = inside,
+        width = w,
+        height = h
+      )
+    }
+
+    decode_rgba_hex <- function(rgba_hex) {
+      rgba_hex <- as.character(rgba_hex)
+      n <- length(rgba_hex)
+      out <- list(
+        r = rep(0, n),
+        g = rep(0, n),
+        b = rep(0, n),
+        a = rep(0, n)
+      )
+      keep <- !is.na(rgba_hex) & nchar(rgba_hex) >= 7
+      if (!any(keep)) return(out)
+
+      rr <- suppressWarnings(strtoi(substr(rgba_hex[keep], 2, 3), base = 16L))
+      gg <- suppressWarnings(strtoi(substr(rgba_hex[keep], 4, 5), base = 16L))
+      bb <- suppressWarnings(strtoi(substr(rgba_hex[keep], 6, 7), base = 16L))
+      aa <- rep(255L, sum(keep))
+      has_alpha <- nchar(rgba_hex[keep]) >= 9
+      aa[has_alpha] <- suppressWarnings(strtoi(substr(rgba_hex[keep][has_alpha], 8, 9), base = 16L))
+
+      rr[!is.finite(rr)] <- 0L
+      gg[!is.finite(gg)] <- 0L
+      bb[!is.finite(bb)] <- 0L
+      aa[!is.finite(aa)] <- 255L
+
+      out$r[keep] <- rr / 255
+      out$g[keep] <- gg / 255
+      out$b[keep] <- bb / 255
+      out$a[keep] <- aa / 255
+      out
+    }
+
+    build_histology_feature_from_sampled <- function(sampled_rgba, msi_obj, feature_mode = "hematoxylin", gaussian_smooth = FALSE, smooth_sigma = 1) {
+      ny <- as.integer(msi_obj$ny)
+      nx <- as.integer(msi_obj$nx)
+      feat_mode <- tolower(trimws(as.character(feature_mode)[1]))
+      if (!feat_mode %in% c("hematoxylin", "darkness", "purple")) feat_mode <- "hematoxylin"
+
+      ch <- decode_rgba_hex(sampled_rgba)
+      valid_vec <- !is.na(sampled_rgba) & is.finite(ch$a) & ch$a > 0
+      if (!any(valid_vec)) {
+        return(list(signal = matrix(0, nrow = ny, ncol = nx), valid = matrix(FALSE, nrow = ny, ncol = nx)))
+      }
+
+      lum <- 0.2126 * ch$r + 0.7152 * ch$g + 0.0722 * ch$b
+      dark <- pmax(0, 1 - lum)
+      purple <- pmax(0, ((ch$r + ch$b) / 2) - ch$g)
+
+      feat <- switch(
+        feat_mode,
+        darkness = dark,
+        purple = 0.80 * purple + 0.20 * dark,
+        0.65 * dark + 0.35 * purple
+      )
+      feat[!valid_vec] <- 0
+
+      mat <- matrix(0, nrow = ny, ncol = nx)
+      mat[cbind(as.integer(msi_obj$row_idx), as.integer(msi_obj$x_norm))] <- feat
+
+      valid_mat <- matrix(FALSE, nrow = ny, ncol = nx)
+      valid_mat[cbind(as.integer(msi_obj$row_idx), as.integer(msi_obj$x_norm))] <- valid_vec
+
+      if (!is.finite(smooth_sigma) || smooth_sigma <= 0) smooth_sigma <- 1
+      if (isTRUE(gaussian_smooth)) {
+        mat <- gaussian_smooth_matrix(mat, smooth_sigma)
+      }
+
+      sig <- matrix(
+        rescale01(as.vector(mat), enhance = FALSE),
+        nrow = ny,
+        ncol = nx
+      )
+      sig[!is.finite(sig)] <- 0
+
+      list(signal = sig, valid = valid_mat)
+    }
+
+    build_edge_mask <- function(signal, q = 0.85, valid_mask = NULL) {
+      ny <- nrow(signal)
+      nx <- ncol(signal)
+      if (!is.finite(ny) || !is.finite(nx) || ny < 2 || nx < 2) {
+        return(NULL)
+      }
+
+      sig <- suppressWarnings(matrix(as.numeric(signal), nrow = ny, ncol = nx))
+      sig[!is.finite(sig)] <- 0
+      if (is.null(valid_mask)) {
+        valid <- is.finite(signal)
+      } else {
+        valid <- matrix(as.logical(valid_mask), nrow = ny, ncol = nx)
+      }
+      valid[!is.finite(valid)] <- FALSE
+
+      right <- cbind(sig[, -1, drop = FALSE], sig[, nx, drop = FALSE])
+      down <- rbind(sig[-1, , drop = FALSE], sig[ny, , drop = FALSE])
+      right_valid <- cbind(valid[, -1, drop = FALSE], FALSE)
+      down_valid <- rbind(valid[-1, , drop = FALSE], rep(FALSE, nx))
+
+      grad <- abs(right - sig) + abs(down - sig)
+      grad[!(valid & right_valid & down_valid)] <- 0
+      grad[!is.finite(grad)] <- 0
+
+      g_ok <- grad[valid & is.finite(grad) & grad > 0]
+      if (length(g_ok) < 10L) return(NULL)
+      thr <- suppressWarnings(stats::quantile(g_ok, probs = q, na.rm = TRUE, names = FALSE, type = 8))
+      if (!is.finite(thr)) {
+        thr <- suppressWarnings(mean(g_ok, na.rm = TRUE))
+      }
+      if (!is.finite(thr)) return(NULL)
+
+      edge <- grad >= thr
+      edge[!valid] <- FALSE
+      n_edge <- suppressWarnings(sum(edge, na.rm = TRUE))
+      if (!is.finite(n_edge) || n_edge < 5L) return(NULL)
+      list(edge = edge, n_edge = as.integer(n_edge), threshold = thr)
+    }
+
+    normalized_mutual_information <- function(x, y, nbins = 24L) {
+      x <- as.numeric(x)
+      y <- as.numeric(y)
+      keep <- is.finite(x) & is.finite(y)
+      if (sum(keep) < 20L) return(NA_real_)
+
+      xk <- x[keep]
+      yk <- y[keep]
+      xr <- range(xk, na.rm = TRUE)
+      yr <- range(yk, na.rm = TRUE)
+      if (!all(is.finite(xr)) || !all(is.finite(yr)) || diff(xr) <= 1e-8 || diff(yr) <= 1e-8) {
+        return(NA_real_)
+      }
+
+      nbins <- suppressWarnings(as.integer(nbins))
+      if (!is.finite(nbins) || nbins < 4L) nbins <- 24L
+      nbins <- as.integer(min(64L, max(4L, nbins)))
+
+      bx <- pmin(nbins, pmax(1L, as.integer(floor((xk - xr[1]) / max(1e-8, diff(xr)) * nbins) + 1L)))
+      by <- pmin(nbins, pmax(1L, as.integer(floor((yk - yr[1]) / max(1e-8, diff(yr)) * nbins) + 1L)))
+
+      joint <- table(bx, by)
+      pxy <- joint / sum(joint)
+      px <- rowSums(pxy)
+      py <- colSums(pxy)
+
+      nz <- which(pxy > 0, arr.ind = TRUE)
+      if (nrow(nz) == 0L) return(NA_real_)
+      mi <- sum(pxy[nz] * log(pxy[nz] / (px[nz[, 1]] * py[nz[, 2]])))
+      hx <- -sum(px[px > 0] * log(px[px > 0]))
+      hy <- -sum(py[py > 0] * log(py[py > 0]))
+      den <- hx + hy
+      if (!is.finite(mi) || !is.finite(den) || den <= 0) return(NA_real_)
+      2 * mi / den
+    }
+
+    signed_rank_correlation <- function(x, y) {
+      x <- as.numeric(x)
+      y <- as.numeric(y)
+      keep <- is.finite(x) & is.finite(y)
+      if (sum(keep) < 20L) return(NA_real_)
+
+      xk <- x[keep]
+      yk <- y[keep]
+      xr <- range(xk, na.rm = TRUE)
+      yr <- range(yk, na.rm = TRUE)
+      if (!all(is.finite(xr)) || !all(is.finite(yr)) || diff(xr) <= 1e-8 || diff(yr) <= 1e-8) {
+        return(NA_real_)
+      }
+
+      sc <- suppressWarnings(stats::cor(xk, yk, method = "spearman"))
+      if (!is.finite(sc)) return(NA_real_)
+      max(-1, min(1, as.numeric(sc)))
+    }
+
+    categorical_signal_association <- function(x, labels, min_group_n = 5L) {
+      x <- as.numeric(x)
+      labs <- trimws(as.character(labels))
+      keep <- is.finite(x) & !is.na(labs) & nzchar(labs)
+      if (sum(keep) < 25L) return(NA_real_)
+
+      xk <- x[keep]
+      lk <- labs[keep]
+      group_n <- table(lk)
+      min_group_n <- suppressWarnings(as.integer(min_group_n))
+      if (!is.finite(min_group_n) || min_group_n < 2L) min_group_n <- 5L
+      keep_groups <- names(group_n[group_n >= min_group_n])
+      if (length(keep_groups) < 2L) return(NA_real_)
+
+      group_keep <- lk %in% keep_groups
+      xk <- xk[group_keep]
+      lk <- lk[group_keep]
+      if (length(xk) < 25L) return(NA_real_)
+
+      grand_mean <- suppressWarnings(mean(xk, na.rm = TRUE))
+      ss_tot <- suppressWarnings(sum((xk - grand_mean)^2, na.rm = TRUE))
+      if (!is.finite(ss_tot) || ss_tot <= 1e-10) return(NA_real_)
+
+      split_x <- split(xk, lk, drop = TRUE)
+      ss_between <- sum(vapply(split_x, function(v) {
+        v <- v[is.finite(v)]
+        if (length(v) == 0L) return(0)
+        length(v) * (mean(v, na.rm = TRUE) - grand_mean)^2
+      }, numeric(1)), na.rm = TRUE)
+
+      eta2 <- ss_between / ss_tot
+      if (!is.finite(eta2)) return(NA_real_)
+      max(0, min(1, as.numeric(eta2)))
+    }
+
+    resolve_histology_intensity_relation <- function(x = NULL) {
+      rel <- x
+      if (is.null(rel)) rel <- input$histology_fit_intensity_relation
+      rel <- tolower(trimws(as.character(rel)[1]))
+      if (!rel %in% c("direct", "inverse", "either")) rel <- "either"
+      rel
+    }
+
+    histology_intensity_relation_label <- function(x = NULL) {
+      rel <- resolve_histology_intensity_relation(x)
+      switch(
+        rel,
+        direct = "direct",
+        inverse = "inverse",
+        "either / unsigned"
+      )
+    }
+
+    default_histology_fit_relation <- function(source_mode = NULL, msi_mode = NULL) {
+      source_mode <- tolower(trimws(if (is.null(source_mode) || length(source_mode) == 0L) "current" else as.character(source_mode)[1]))
+      if (!source_mode %in% c("current", "pdata", "multi", "pca")) source_mode <- "current"
+      msi_mode <- tolower(trimws(if (is.null(msi_mode) || length(msi_mode) == 0L) "mz" else as.character(msi_mode)[1]))
+      if (!msi_mode %in% c("mz", "rgb", "pdata")) msi_mode <- "mz"
+
+      if (identical(source_mode, "pdata") || (identical(source_mode, "current") && identical(msi_mode, "pdata"))) {
+        "either"
+      } else {
+        "inverse"
+      }
+    }
+
+    score_edge_mask_against_distance <- function(edge_mask, edge_cache) {
+      if (is.null(edge_mask) || is.null(edge_cache) || is.null(edge_cache$dist)) return(NA_real_)
+      keep <- edge_mask & is.finite(edge_cache$dist)
+      n_keep <- suppressWarnings(sum(keep, na.rm = TRUE))
+      if (!is.finite(n_keep) || n_keep < 10L) return(NA_real_)
+      d <- as.numeric(edge_cache$dist[keep])
+      d <- d[is.finite(d)]
+      if (length(d) < 10L) return(NA_real_)
+      cov <- min(1, length(d) / max(25, suppressWarnings(as.integer(edge_cache$n_edge))))
+      (-mean(d)) - 0.60 * (1 - cov)^2
+    }
+
+    histology_feature_payload <- function(msi_obj, tr_hist, tx, ty, feature_mode = "hematoxylin", gaussian_smooth = FALSE, smooth_sigma = 1) {
+      sampled <- sample_transformed_overlay_to_msi(msi_obj = msi_obj, tr = tr_hist, tx = tx, ty = ty)
+      feat <- build_histology_feature_from_sampled(
+        sampled_rgba = sampled$sampled_rgba,
+        msi_obj = msi_obj,
+        feature_mode = feature_mode,
+        gaussian_smooth = gaussian_smooth,
+        smooth_sigma = smooth_sigma
+      )
+      feat$inside <- sampled$inside
+      feat
+    }
 
     cluster_mapping_payload <- reactive({
       req(make_msi_raster())
@@ -2613,6 +3356,92 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         s
       )
       nzchar(s) & !non_cell
+    }
+
+    match_nucleus_polygons_to_cells <- function(cell_poly_t, nucleus_poly_t, cell_keep = NULL) {
+      if (is.null(cell_poly_t) || nrow(cell_poly_t) == 0 || is.null(nucleus_poly_t) || nrow(nucleus_poly_t) == 0) {
+        return(rep(NA_integer_, if (is.null(nucleus_poly_t)) 0L else nrow(nucleus_poly_t)))
+      }
+
+      cell_keep <- rep_len(if (is.null(cell_keep)) TRUE else as.logical(cell_keep), nrow(cell_poly_t))
+      cell_keep[is.na(cell_keep)] <- FALSE
+      if (!any(cell_keep)) cell_keep[] <- TRUE
+
+      cell_idx_all <- seq_len(nrow(cell_poly_t))
+      cell_idx_use <- cell_idx_all[cell_keep]
+      cell_use <- cell_poly_t[cell_keep, , drop = FALSE]
+
+      cell_area <- suppressWarnings(as.numeric(sf::st_area(cell_use)))
+      cell_area[!is.finite(cell_area)] <- Inf
+
+      cell_pts <- try(suppressWarnings(sf::st_point_on_surface(cell_use)), silent = TRUE)
+      cell_xy <- try(sf::st_coordinates(cell_pts), silent = TRUE)
+      nuc_pts <- try(suppressWarnings(sf::st_point_on_surface(nucleus_poly_t)), silent = TRUE)
+      if (inherits(nuc_pts, "try-error")) {
+        nuc_pts <- try(suppressWarnings(sf::st_centroid(nucleus_poly_t)), silent = TRUE)
+      }
+      nuc_xy <- try(sf::st_coordinates(nuc_pts), silent = TRUE)
+
+      choose_best_local <- function(ix, i_nuc = NA_integer_) {
+        ix <- suppressWarnings(as.integer(ix))
+        ix <- ix[is.finite(ix) & ix >= 1L & ix <= nrow(cell_use)]
+        if (length(ix) == 0L) return(NA_integer_)
+        if (length(ix) == 1L) return(cell_idx_use[ix])
+
+        area_ix <- cell_area[ix]
+        if (any(is.finite(area_ix))) {
+          best_area <- min(area_ix, na.rm = TRUE)
+          ix_area <- ix[is.finite(area_ix) & abs(area_ix - best_area) <= 1e-8]
+          if (length(ix_area) == 1L) return(cell_idx_use[ix_area])
+          if (length(ix_area) > 0L) ix <- ix_area
+        }
+
+        if (!inherits(cell_xy, "try-error") && !inherits(nuc_xy, "try-error") &&
+            nrow(cell_xy) >= nrow(cell_use) && is.finite(i_nuc) && i_nuc >= 1L && i_nuc <= nrow(nucleus_poly_t) &&
+            nrow(nuc_xy) >= i_nuc) {
+          dx <- cell_xy[ix, 1] - nuc_xy[i_nuc, 1]
+          dy <- cell_xy[ix, 2] - nuc_xy[i_nuc, 2]
+          d2 <- dx * dx + dy * dy
+          d2[!is.finite(d2)] <- Inf
+          return(cell_idx_use[ix[which.min(d2)]])
+        }
+
+        cell_idx_use[ix[1]]
+      }
+
+      matched <- rep(NA_integer_, nrow(nucleus_poly_t))
+
+      hit_within <- try(sf::st_within(nuc_pts, cell_use), silent = TRUE)
+      if (!inherits(hit_within, "try-error")) {
+        for (i in seq_along(hit_within)) {
+          matched[i] <- choose_best_local(hit_within[[i]], i_nuc = i)
+        }
+      }
+
+      need_intersection <- which(!is.finite(matched))
+      if (length(need_intersection) > 0L) {
+        hit_intersects <- try(sf::st_intersects(nucleus_poly_t[need_intersection, , drop = FALSE], cell_use), silent = TRUE)
+        if (!inherits(hit_intersects, "try-error")) {
+          for (k in seq_along(need_intersection)) {
+            i <- need_intersection[k]
+            matched[i] <- choose_best_local(hit_intersects[[k]], i_nuc = i)
+          }
+        }
+      }
+
+      need_nearest <- which(!is.finite(matched))
+      if (length(need_nearest) > 0L && !inherits(cell_xy, "try-error") && !inherits(nuc_xy, "try-error") &&
+          nrow(cell_xy) >= nrow(cell_use) && nrow(nuc_xy) >= max(need_nearest)) {
+        for (i in need_nearest) {
+          dx <- cell_xy[, 1] - nuc_xy[i, 1]
+          dy <- cell_xy[, 2] - nuc_xy[i, 2]
+          d2 <- dx * dx + dy * dy
+          d2[!is.finite(d2)] <- Inf
+          matched[i] <- cell_idx_use[which.min(d2)]
+        }
+      }
+
+      matched
     }
 
     transform_polygon_sf <- function(poly_sf, nx, ny, scale_x, scale_y, translate_x, translate_y, rotate_deg, flip_y = FALSE, swap_xy = FALSE, scale_mode = "absolute", source_width = NA_real_, source_height = NA_real_) {
@@ -3114,12 +3943,13 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       out
     }
 
-    edge_fit_signal_from_pdata_field <- function(msi_obj, field) {
+    edge_fit_signal_from_pdata_field <- function(msi_obj, field, binary_mode = c("categorical", "mask", "label_map")) {
       obj <- msi_for_pdata()
       pd <- as.data.frame(Cardinal::pData(obj))
       if (!field %in% names(pd)) {
         stop(sprintf("pData field '%s' not found for Edge Fit optimization.", field))
       }
+      binary_mode <- match.arg(binary_mode)
 
       ny <- as.integer(msi_obj$ny)
       nx <- as.integer(msi_obj$nx)
@@ -3132,7 +3962,24 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       is_num <- is.numeric(vals) || is.integer(vals)
       unique_n <- length(unique(vals[!is.na(vals)]))
       integer_like <- is_num && all(is.na(vals_num) | abs(vals_num - round(vals_num)) < 1e-8)
+      uniq_num <- sort(unique(vals_num[is.finite(vals_num)]))
+      binary_like <- (is.logical(vals) || integer_like) &&
+        length(uniq_num) <= 2L &&
+        all(uniq_num %in% c(0, 1))
       as_categorical <- (!is_num) || (integer_like && unique_n <= 128L)
+
+      if (binary_mode %in% c("mask", "label_map") && isTRUE(binary_like)) {
+        sig_payload <- build_numeric_signal_matrix(
+          vals = vals_num,
+          msi_obj = msi_obj,
+          intensity_transform = "none",
+          apply_transform = FALSE,
+          gaussian_smooth = isTRUE(input$gaussian_smooth),
+          smooth_sigma = suppressWarnings(as.numeric(input$gaussian_sigma)),
+          enhance = FALSE
+        )
+        return(list(signal = sig_payload$signal, field = field, type = "binary_mask"))
+      }
 
       if (!as_categorical) {
         mat <- matrix(NA_real_, nrow = ny, ncol = nx)
@@ -3149,6 +3996,28 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       labs <- normalize_labels(vals)
       lab_mat <- matrix(NA_character_, nrow = ny, ncol = nx)
       lab_mat[cbind(row_idx, x_norm)] <- labs
+      lev <- unique(labs)
+      lev <- lev[!is.na(lev)]
+      col_map <- stats::setNames(rep("grey70", length(lev)), lev)
+      valid_col <- are_valid_colors(lev)
+      if (any(valid_col)) col_map[valid_col] <- lev[valid_col]
+      if (any(!valid_col)) col_map[!valid_col] <- get_discrete_palette(sum(!valid_col), input$cluster_palette)
+
+      if (isTRUE(binary_mode == "label_map")) {
+        lev_ord <- sort(unique(labs[!is.na(labs)]))
+        code_map <- stats::setNames(seq_along(lev_ord), lev_ord)
+        code_mat <- matrix(NA_real_, nrow = ny, ncol = nx)
+        keep_lab <- !is.na(lab_mat)
+        code_mat[keep_lab] <- unname(code_map[lab_mat[keep_lab]])
+        return(list(
+          signal = code_mat,
+          field = field,
+          type = "categorical_label_map",
+          label_matrix = lab_mat,
+          color_map = col_map
+        ))
+      }
+
       valid <- !is.na(lab_mat)
       right <- cbind(lab_mat[, -1, drop = FALSE], NA_character_)
       left <- cbind(NA_character_, lab_mat[, -ncol(lab_mat), drop = FALSE])
@@ -3171,27 +4040,395 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       list(signal = b, field = field, type = "categorical")
     }
 
-    edge_fit_signal_matrix <- function(msi_obj) {
-      source_mode <- tolower(trimws(as.character(input$edge_fit_signal_source)[1]))
-      if (!source_mode %in% c("current", "pdata")) source_mode <- "current"
-      if (!identical(source_mode, "pdata")) {
+    histology_fit_signal_from_fused_ions <- function(msi_obj, n_ions = 12L) {
+      obj <- msi_for_pdata()
+      n_ions <- suppressWarnings(as.integer(n_ions))
+      if (length(n_ions) != 1L || !isTRUE(is.finite(n_ions)) || n_ions < 2L) n_ions <- 12L
+      n_ions <- as.integer(min(64L, max(2L, n_ions)))
+
+      intensity_transform <- tolower(trimws(as.character(input$intensity_transform)[1]))
+      if (!intensity_transform %in% c("none", "sqrt", "log1p", "asinh")) intensity_transform <- "none"
+      smooth_sigma <- suppressWarnings(as.numeric(input$gaussian_sigma))
+      if (!is.finite(smooth_sigma) || smooth_sigma <= 0) smooth_sigma <- 1
+      use_smooth <- isTRUE(input$gaussian_smooth)
+
+      cand_n <- as.integer(min(max(24L, 4L * n_ions), max(24L, nrow(obj))))
+      cand_idx <- suggest_histology_fusion_indices(
+        obj = obj,
+        n_features = n_ions,
+        candidate_pool = cand_n,
+        intensity_transform = intensity_transform
+      )
+      if (length(cand_idx) == 0L) {
+        mz_axis_fallback <- suppressWarnings(as.numeric(Cardinal::mz(obj)))
+        cand_idx <- seq_len(min(length(mz_axis_fallback), n_ions))
+        cand_idx <- cand_idx[is.finite(cand_idx) & cand_idx >= 1L]
+        if (length(cand_idx) == 0L) {
+          stop("Could not identify informative ions for fused Histology Fit target.")
+        }
+        message(sprintf("[Histology Image Fit] Fused target fallback: using first %d m/z features.", length(cand_idx)))
+      }
+
+      sp <- try(as.matrix(Cardinal::spectra(obj)[cand_idx, , drop = FALSE]), silent = TRUE)
+      if (inherits(sp, "try-error") || is.null(sp) || nrow(sp) == 0L || ncol(sp) == 0L) {
+        stop("Could not extract MSI intensities for fused Histology Fit target.")
+      }
+      if (nrow(sp) != length(cand_idx) && ncol(sp) == length(cand_idx)) {
+        sp <- t(sp)
+      }
+      if (nrow(sp) != length(cand_idx)) {
+        stop("Unexpected MSI matrix dimensions while building fused Histology Fit target.")
+      }
+      storage.mode(sp) <- "double"
+
+      sig_list <- vector("list", length(cand_idx))
+      sig_score <- rep(-Inf, length(cand_idx))
+      for (ii in seq_along(cand_idx)) {
+        sig_payload <- build_numeric_signal_matrix(
+          vals = sp[ii, ],
+          msi_obj = msi_obj,
+          intensity_transform = intensity_transform,
+          apply_transform = TRUE,
+          gaussian_smooth = use_smooth,
+          smooth_sigma = smooth_sigma,
+          enhance = FALSE
+        )
+        sig_list[[ii]] <- sig_payload$signal
+        sig_score[ii] <- score_spatial_signal_map(sig_payload$signal, valid_mask = sig_payload$valid)
+      }
+
+      keep <- is.finite(sig_score)
+      if (!any(keep)) {
+        keep <- rep(TRUE, length(sig_list))
+        sig_score <- rep(1, length(sig_list))
+        message(sprintf("[Histology Image Fit] Fused target fallback: spatial ranking was not informative; using equal weights across %d ion maps.", length(sig_list)))
+      }
+      cand_idx <- cand_idx[keep]
+      sig_list <- sig_list[keep]
+      sig_score <- sig_score[keep]
+
+      ord <- order(sig_score, decreasing = TRUE, na.last = NA)
+      top_k <- min(length(ord), n_ions)
+      ord <- ord[seq_len(top_k)]
+      sel_idx <- cand_idx[ord]
+      sel_scores <- sig_score[ord]
+      sel_signals <- sig_list[ord]
+
+      w <- as.numeric(sel_scores)
+      w[!is.finite(w)] <- 0
+      w <- w - min(w, na.rm = TRUE)
+      if (!all(is.finite(w)) || sum(w) <= 1e-12) {
+        w <- rep(1, length(sel_signals))
+      } else {
+        w <- w + 1e-6
+      }
+      w <- w / sum(w)
+
+      fused <- matrix(0, nrow = as.integer(msi_obj$ny), ncol = as.integer(msi_obj$nx))
+      for (ii in seq_along(sel_signals)) {
+        fused <- fused + (w[ii] * sel_signals[[ii]])
+      }
+      fused[!is.finite(fused)] <- 0
+      ok <- is.finite(fused) & fused > 0
+      if (any(ok)) {
+        q <- suppressWarnings(stats::quantile(fused[ok], probs = 0.75, na.rm = TRUE, names = FALSE, type = 8))
+        if (is.finite(q) && q > 0) fused <- pmax(fused - q, 0)
+      }
+      mx <- suppressWarnings(max(fused, na.rm = TRUE))
+      if (is.finite(mx) && mx > 0) fused <- fused / mx
+
+      mz_axis <- suppressWarnings(as.numeric(Cardinal::mz(obj)))
+      sel_mz <- rep(NA_real_, length(sel_idx))
+      if (length(mz_axis) >= max(sel_idx)) {
+        sel_mz <- mz_axis[sel_idx]
+      }
+      mz_txt <- format(sel_mz[is.finite(sel_mz)], digits = 10, scientific = FALSE, trim = TRUE)
+      mz_preview <- if (length(mz_txt) > 0L) {
+        paste(utils::head(mz_txt, 6L), collapse = ", ")
+      } else {
+        "n/a"
+      }
+      if (length(mz_txt) > 6L) {
+        mz_preview <- paste0(mz_preview, ", ...")
+      }
+
+      list(
+        signal = fused,
+        field = NA_character_,
+        type = "mz_fusion",
+        label = sprintf("Fused MSI (%d ions)", length(sel_idx)),
+        detail = mz_preview,
+        mz_values = sel_mz,
+        feature_index = sel_idx,
+        feature_count = length(sel_idx)
+      )
+    }
+
+    histology_fit_signal_from_pca <- function(msi_obj, component = 1L, n_components = 1L, n_features = 32L) {
+      obj <- msi_for_pdata()
+      component <- suppressWarnings(as.integer(component))
+      n_components <- suppressWarnings(as.integer(n_components))
+      n_features <- suppressWarnings(as.integer(n_features))
+      if (length(component) != 1L || !isTRUE(is.finite(component)) || component < 1L) component <- 1L
+      if (length(n_components) != 1L || !isTRUE(is.finite(n_components)) || n_components < 1L) n_components <- 1L
+      if (length(n_features) != 1L || !isTRUE(is.finite(n_features)) || n_features < 4L) n_features <- 32L
+      component <- as.integer(min(64L, max(1L, component)))
+      n_components <- as.integer(min(8L, max(1L, n_components)))
+      n_features <- as.integer(min(128L, max(4L, n_features)))
+
+      intensity_transform <- tolower(trimws(as.character(input$intensity_transform)[1]))
+      if (!intensity_transform %in% c("none", "sqrt", "log1p", "asinh")) intensity_transform <- "none"
+      smooth_sigma <- suppressWarnings(as.numeric(input$gaussian_sigma))
+      if (!is.finite(smooth_sigma) || smooth_sigma <= 0) smooth_sigma <- 1
+      use_smooth <- isTRUE(input$gaussian_smooth)
+
+      cand_n <- as.integer(min(max(48L, 4L * n_features), max(48L, nrow(obj))))
+      sel_idx <- suggest_histology_fusion_indices(
+        obj = obj,
+        n_features = n_features,
+        candidate_pool = cand_n,
+        intensity_transform = intensity_transform
+      )
+      if (length(sel_idx) < 2L) {
+        mz_axis_fallback <- suppressWarnings(as.numeric(Cardinal::mz(obj)))
+        sel_idx <- seq_len(min(length(mz_axis_fallback), max(2L, n_features)))
+        sel_idx <- sel_idx[is.finite(sel_idx) & sel_idx >= 1L]
+        if (length(sel_idx) < 2L) {
+          stop("Could not identify enough informative ions for PCA Histology Fit target.")
+        }
+        message(sprintf("[Histology Image Fit] PCA target fallback: using first %d m/z features.", length(sel_idx)))
+      }
+
+      sp <- try(as.matrix(Cardinal::spectra(obj)[sel_idx, , drop = FALSE]), silent = TRUE)
+      if (inherits(sp, "try-error") || is.null(sp) || nrow(sp) < 2L || ncol(sp) < 2L) {
+        stop("Could not extract MSI intensities for PCA Histology Fit target.")
+      }
+      if (nrow(sp) != length(sel_idx) && ncol(sp) == length(sel_idx)) {
+        sp <- t(sp)
+      }
+      if (nrow(sp) != length(sel_idx)) {
+        stop("Unexpected MSI matrix dimensions while building PCA Histology Fit target.")
+      }
+
+      storage.mode(sp) <- "double"
+      if (!identical(intensity_transform, "none")) {
+        sp <- transform_intensity(sp, intensity_transform)
+      }
+      sp[!is.finite(sp)] <- 0
+
+      feat_mean <- rowMeans(sp)
+      sp_centered <- sp - feat_mean
+      feat_scale <- sqrt(rowMeans(sp_centered^2))
+      feat_scale[!is.finite(feat_scale) | feat_scale <= 1e-8] <- 1
+      sp_scaled <- sp_centered / feat_scale
+
+      cov_mat <- tcrossprod(sp_scaled) / max(1, ncol(sp_scaled) - 1L)
+      eig <- try(eigen(cov_mat, symmetric = TRUE), silent = TRUE)
+      if (inherits(eig, "try-error") || is.null(eig$values) || is.null(eig$vectors)) {
+        stop("Could not compute PCA for Histology Fit target.")
+      }
+
+      keep_comp <- is.finite(eig$values) & (eig$values > 1e-10)
+      if (!any(keep_comp)) {
+        stop("PCA target did not yield any finite components.")
+      }
+      values <- as.numeric(eig$values[keep_comp])
+      vectors <- eig$vectors[, keep_comp, drop = FALSE]
+      avg_signal <- suppressWarnings(colMeans(sp))
+      mz_axis <- suppressWarnings(as.numeric(Cardinal::mz(obj)))
+      sel_mz <- rep(NA_real_, length(sel_idx))
+      if (length(mz_axis) >= max(sel_idx)) {
+        sel_mz <- mz_axis[sel_idx]
+      }
+
+      comp_ids <- seq.int(component, min(ncol(vectors), component + n_components - 1L))
+      if (length(comp_ids) == 0L) comp_ids <- 1L
+
+      signal_list <- vector("list", length(comp_ids))
+      weight_vec <- rep(0, length(comp_ids))
+      var_vec <- rep(NA_real_, length(comp_ids))
+      load_ref <- NULL
+      for (ii in seq_along(comp_ids)) {
+        comp_use <- comp_ids[ii]
+        load_vec <- as.numeric(vectors[, comp_use])
+        score_vec <- as.numeric(crossprod(load_vec, sp_scaled))
+        orient <- suppressWarnings(stats::cor(score_vec, avg_signal, use = "pairwise.complete.obs", method = "spearman"))
+        if ((is.finite(orient) && orient < 0) || (!is.finite(orient) && sum(load_vec, na.rm = TRUE) < 0)) {
+          load_vec <- -load_vec
+          score_vec <- -score_vec
+        }
+        if (is.null(load_ref)) load_ref <- load_vec
+
+        sig_payload <- build_numeric_signal_matrix(
+          vals = score_vec,
+          msi_obj = msi_obj,
+          intensity_transform = "none",
+          apply_transform = FALSE,
+          gaussian_smooth = use_smooth,
+          smooth_sigma = smooth_sigma,
+          enhance = FALSE
+        )
+        signal_list[[ii]] <- sig_payload$signal
+        var_frac <- values[comp_use] / sum(values)
+        var_vec[ii] <- var_frac
+        spatial_score <- score_spatial_signal_map(sig_payload$signal, valid_mask = sig_payload$valid)
+        spatial_weight <- if (is.finite(spatial_score)) max(spatial_score, 0) else 0
+        weight_vec[ii] <- max(1e-6, if (is.finite(var_frac)) var_frac else 0) * (1 + spatial_weight)
+      }
+
+      if (!any(is.finite(weight_vec) & weight_vec > 0)) {
+        weight_vec <- rep(1, length(signal_list))
+      }
+      weight_vec[!is.finite(weight_vec) | weight_vec <= 0] <- 0
+      if (sum(weight_vec) <= 0) weight_vec <- rep(1, length(signal_list))
+      weight_vec <- weight_vec / sum(weight_vec)
+
+      pca_signal <- matrix(0, nrow = as.integer(msi_obj$ny), ncol = as.integer(msi_obj$nx))
+      for (ii in seq_along(signal_list)) {
+        pca_signal <- pca_signal + (weight_vec[ii] * signal_list[[ii]])
+      }
+      pca_signal <- matrix(rescale01(as.vector(pca_signal), enhance = FALSE), nrow = nrow(pca_signal), ncol = ncol(pca_signal))
+      pca_signal[!is.finite(pca_signal)] <- 0
+
+      top_loading_text <- function(loadings, mz_values, n_show = 3L, decreasing = TRUE) {
+        ord <- order(loadings, decreasing = decreasing, na.last = NA)
+        ord <- ord[seq_len(min(length(ord), n_show))]
+        vals <- mz_values[ord]
+        vals <- vals[is.finite(vals)]
+        if (length(vals) == 0L) return("n/a")
+        paste(format(vals, digits = 10, scientific = FALSE, trim = TRUE), collapse = ", ")
+      }
+
+      comp_label <- if (length(comp_ids) == 1L) {
+        sprintf("PC%d", comp_ids[1])
+      } else {
+        sprintf("PC%d-%d", min(comp_ids), max(comp_ids))
+      }
+      var_txt <- paste(sprintf("PC%d %.1f%%", comp_ids, 100 * ifelse(is.finite(var_vec), var_vec, 0)), collapse = ", ")
+      detail_txt <- sprintf(
+        "%s | %s | + %s | - %s",
+        comp_label,
+        var_txt,
+        top_loading_text(load_ref, sel_mz, decreasing = TRUE),
+        top_loading_text(load_ref, sel_mz, decreasing = FALSE)
+      )
+
+      list(
+        signal = pca_signal,
+        field = NA_character_,
+        type = "pca_component",
+        label = sprintf("MSI PCA (%s)", comp_label),
+        detail = detail_txt,
+        mz_values = sel_mz,
+        feature_index = sel_idx,
+        feature_count = length(sel_idx)
+      )
+    }
+
+    resolve_optimization_signal_matrix <- function(msi_obj, source_mode = "current", field = NULL, context_label = "optimization") {
+      source_mode <- tolower(trimws(as.character(source_mode)[1]))
+      if (!source_mode %in% c("current", "pdata", "multi", "pca")) source_mode <- "current"
+      if (identical(source_mode, "current")) {
+        use_histology_label_mode <- grepl("histology", tolower(context_label), fixed = TRUE) &&
+          !is.null(msi_obj$mode) &&
+          identical(as.character(msi_obj$mode)[1], "pdata") &&
+          !is.null(msi_obj$pdata_field) &&
+          nzchar(as.character(msi_obj$pdata_field)[1])
+        if (isTRUE(use_histology_label_mode)) {
+          out <- edge_fit_signal_from_pdata_field(
+            msi_obj = msi_obj,
+            field = as.character(msi_obj$pdata_field)[1],
+            binary_mode = "label_map"
+          )
+          return(list(
+            signal = out$signal,
+            source = "current",
+            field = out$field,
+            type = out$type,
+            label = if (!is.null(msi_obj$display_label)) as.character(msi_obj$display_label) else "Current MSI display",
+            detail = NA_character_,
+            label_matrix = if (!is.null(out$label_matrix)) out$label_matrix else NULL,
+            color_map = if (!is.null(out$color_map)) out$color_map else NULL
+          ))
+        }
         return(list(
           signal = msi_signal_matrix(msi_obj),
           source = "current",
           field = if (!is.null(msi_obj$pdata_field)) as.character(msi_obj$pdata_field) else NA_character_,
-          type = if (!is.null(msi_obj$mode)) as.character(msi_obj$mode) else NA_character_
+          type = if (!is.null(msi_obj$mode)) as.character(msi_obj$mode) else NA_character_,
+          label = if (!is.null(msi_obj$display_label)) as.character(msi_obj$display_label) else "Current MSI display",
+          detail = NA_character_
         ))
       }
-      field <- as.character(input$edge_fit_pdata_field)[1]
-      if (is.na(field) || !nzchar(field)) {
-        stop("Select a pData field for Edge Fit optimization.")
+      if (identical(source_mode, "multi")) {
+        n_ions <- suppressWarnings(as.integer(input$histology_fit_multi_n))
+        if (length(n_ions) != 1L || !isTRUE(is.finite(n_ions)) || n_ions < 2L) n_ions <- 12L
+        out <- histology_fit_signal_from_fused_ions(msi_obj = msi_obj, n_ions = n_ions)
+        return(list(
+          signal = out$signal,
+          source = "multi",
+          field = out$field,
+          type = out$type,
+          label = out$label,
+          detail = out$detail,
+          mz_values = out$mz_values,
+          feature_index = out$feature_index,
+          feature_count = out$feature_count
+        ))
       }
-      out <- edge_fit_signal_from_pdata_field(msi_obj = msi_obj, field = field)
+      if (identical(source_mode, "pca")) {
+        comp_id <- suppressWarnings(as.integer(input$histology_fit_pca_component))
+        n_comp <- suppressWarnings(as.integer(input$histology_fit_pca_n_components))
+        n_features <- suppressWarnings(as.integer(input$histology_fit_pca_n_features))
+        if (length(comp_id) != 1L || !isTRUE(is.finite(comp_id)) || comp_id < 1L) comp_id <- 1L
+        if (length(n_comp) != 1L || !isTRUE(is.finite(n_comp)) || n_comp < 1L) n_comp <- 1L
+        if (length(n_features) != 1L || !isTRUE(is.finite(n_features)) || n_features < 4L) n_features <- 32L
+        out <- histology_fit_signal_from_pca(msi_obj = msi_obj, component = comp_id, n_components = n_comp, n_features = n_features)
+        return(list(
+          signal = out$signal,
+          source = "pca",
+          field = out$field,
+          type = out$type,
+          label = out$label,
+          detail = out$detail,
+          mz_values = out$mz_values,
+          feature_index = out$feature_index,
+          feature_count = out$feature_count
+        ))
+      }
+      field <- as.character(field)[1]
+      if (is.na(field) || !nzchar(field)) {
+        stop(sprintf("Select a pData field for %s.", context_label))
+      }
+      binary_mode_use <- if (grepl("histology", tolower(context_label), fixed = TRUE)) "label_map" else "categorical"
+      out <- edge_fit_signal_from_pdata_field(msi_obj = msi_obj, field = field, binary_mode = binary_mode_use)
       list(
         signal = out$signal,
         source = "pdata",
         field = out$field,
-        type = out$type
+        type = out$type,
+        label = paste0("pData: ", out$field),
+        detail = NA_character_,
+        label_matrix = if (!is.null(out$label_matrix)) out$label_matrix else NULL,
+        color_map = if (!is.null(out$color_map)) out$color_map else NULL
+      )
+    }
+
+    edge_fit_signal_matrix <- function(msi_obj) {
+      resolve_optimization_signal_matrix(
+        msi_obj = msi_obj,
+        source_mode = input$edge_fit_signal_source,
+        field = input$edge_fit_pdata_field,
+        context_label = "Edge Fit optimization"
+      )
+    }
+
+    histology_fit_signal_matrix <- function(msi_obj) {
+      resolve_optimization_signal_matrix(
+        msi_obj = msi_obj,
+        source_mode = input$histology_fit_signal_source,
+        field = input$histology_fit_pdata_field,
+        context_label = "Histology Fit optimization"
       )
     }
 
@@ -3410,21 +4647,9 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       if (!is.finite(ny) || !is.finite(nx) || ny < 2 || nx < 2) {
         return(NULL)
       }
-
-      right <- cbind(signal[, -1, drop = FALSE], signal[, nx, drop = FALSE])
-      down <- rbind(signal[-1, , drop = FALSE], signal[ny, , drop = FALSE])
-      grad <- abs(right - signal) + abs(down - signal)
-      grad[!is.finite(grad)] <- 0
-
-      g_ok <- grad[is.finite(grad) & grad > 0]
-      if (length(g_ok) < 10L) return(NULL)
-      thr <- suppressWarnings(stats::quantile(g_ok, probs = q, na.rm = TRUE, names = FALSE, type = 8))
-      if (!is.finite(thr)) {
-        thr <- suppressWarnings(mean(g_ok, na.rm = TRUE))
-      }
-      if (!is.finite(thr)) return(NULL)
-
-      edge <- grad >= thr
+      edge_info <- build_edge_mask(signal, q = q)
+      if (is.null(edge_info) || is.null(edge_info$edge)) return(NULL)
+      edge <- edge_info$edge
       n_edge <- suppressWarnings(sum(edge, na.rm = TRUE))
       if (!is.finite(n_edge) || n_edge < 5L) return(NULL)
 
@@ -3455,7 +4680,54 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         }
       }
       d <- pmin(d, 50)
-      list(dist = d, n_edge = as.integer(n_edge), threshold = thr)
+      list(dist = d, edge = edge, n_edge = as.integer(n_edge), threshold = edge_info$threshold)
+    }
+
+    histology_fit_crop_window <- function(msi_obj, tr_hist, tx, ty, search_range = 0L, pad_extra = 2L) {
+      nx <- as.integer(msi_obj$nx)
+      ny <- as.integer(msi_obj$ny)
+      full_rows <- seq_len(ny)
+      full_cols <- seq_len(nx)
+
+      w <- suppressWarnings(as.numeric(tr_hist$width))
+      h <- suppressWarnings(as.numeric(tr_hist$height))
+      if (!is.finite(w) || w <= 0 || !is.finite(h) || h <= 0) {
+        return(list(rows = full_rows, cols = full_cols, label = sprintf("%d x %d", length(full_rows), length(full_cols))))
+      }
+
+      pad <- suppressWarnings(as.integer(ceiling(search_range)))
+      if (!is.finite(pad) || pad < 0L) pad <- 0L
+      pad_extra <- suppressWarnings(as.integer(ceiling(pad_extra)))
+      if (!is.finite(pad_extra) || pad_extra < 0L) pad_extra <- 2L
+      pad <- pad + pad_extra
+
+      cx <- (nx / 2) + as.numeric(tx)
+      cy <- (ny / 2) + as.numeric(ty)
+      x_lo <- floor(cx - (w / 2) - pad)
+      x_hi <- ceiling(cx + (w / 2) + pad)
+      y_lo <- floor(cy - (h / 2) - pad)
+      y_hi <- ceiling(cy + (h / 2) + pad)
+
+      x_norm <- as.integer(msi_obj$x_norm)
+      y_norm <- as.integer(msi_obj$y_norm)
+      pix_keep <- is.finite(x_norm) & is.finite(y_norm) &
+        x_norm >= x_lo & x_norm <= x_hi &
+        y_norm >= y_lo & y_norm <= y_hi
+
+      if (!any(pix_keep)) {
+        return(list(rows = full_rows, cols = full_cols, label = sprintf("%d x %d", length(full_rows), length(full_cols))))
+      }
+
+      row_idx <- as.integer(msi_obj$row_idx[pix_keep])
+      col_idx <- as.integer(msi_obj$x_norm[pix_keep])
+      row_min <- max(1L, min(row_idx, na.rm = TRUE))
+      row_max <- min(ny, max(row_idx, na.rm = TRUE))
+      col_min <- max(1L, min(col_idx, na.rm = TRUE))
+      col_max <- min(nx, max(col_idx, na.rm = TRUE))
+
+      rows <- seq.int(row_min, row_max)
+      cols <- seq.int(col_min, col_max)
+      list(rows = rows, cols = cols, label = sprintf("%d x %d", length(rows), length(cols)))
     }
 
     score_edge_shift <- function(mask_cache, edge_cache, dx = 0L, dy = 0L) {
@@ -3918,6 +5190,629 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         type = "message",
         duration = 6
       )
+    }, ignoreInit = TRUE)
+
+    output$histology_fit_preview_ui <- renderUI({
+      cand <- xh$histology_fit_candidates
+      if (is.null(cand) || nrow(cand) == 0) {
+        return(tags$small("Histology-fit preview: run Histology Fit to generate up to 5 candidates."))
+      }
+      labels <- sprintf(
+        "#%d dX=%.2f dY=%.2f score=%.4f | int=%.4f | corr=%.4f | edge=%.4f",
+        cand$rank, cand$dX, cand$dY, cand$score, cand$intensity_score, cand$signed_corr, cand$edge_score
+      )
+      vals <- as.character(cand$rank)
+      names(vals) <- labels
+      selectInput(
+        ns("histology_fit_choice"),
+        "Histology-fit candidates (top 5)",
+        choices = vals,
+        selected = vals[1]
+      )
+    })
+
+    observeEvent(input$apply_histology_fit_choice, {
+      cand <- xh$histology_fit_candidates
+      if (is.null(cand) || nrow(cand) == 0) {
+        showNotification("No histology-fit candidates available yet. Run Histology Fit first.", type = "warning", duration = 6)
+        return()
+      }
+      pick_rank <- suppressWarnings(as.integer(input$histology_fit_choice))
+      if (!is.finite(pick_rank)) pick_rank <- cand$rank[1]
+      row <- cand[cand$rank == pick_rank, , drop = FALSE]
+      if (nrow(row) == 0) row <- cand[1, , drop = FALSE]
+
+      updateSliderInput(session, "translate_x", value = row$translate_x[1])
+      updateSliderInput(session, "translate_y", value = row$translate_y[1])
+      updateNumericInput(session, "translate_x_num", value = row$translate_x[1])
+      updateNumericInput(session, "translate_y_num", value = row$translate_y[1])
+
+      showNotification(
+        sprintf(
+          "Applied histology-fit candidate #%d: dX=%.2f, dY=%.2f, score=%.4f",
+          row$rank[1], row$dX[1], row$dY[1], row$score[1]
+        ),
+        type = "message",
+        duration = 6
+      )
+    }, ignoreInit = TRUE)
+
+    output$histology_fit_summary <- renderPrint({
+      sm <- xh$histology_fit_summary
+      if (is.null(sm)) {
+        cat("No histology-fit results yet.\n")
+        cat("Run Histology Fit to score local XY candidates around the current transform.\n")
+        return(invisible(NULL))
+      }
+      print(sm)
+      cand <- xh$histology_fit_candidates
+      if (!is.null(cand) && nrow(cand) > 0L) {
+        cat("\nTop histology-fit candidates:\n")
+        print(cand)
+      }
+    })
+
+    output$histology_fit_target_info_ui <- renderUI({
+      info <- xh$histology_fit_target_info
+      if (is.null(info) || is.null(info$signal) || !is.matrix(info$signal)) {
+        return(tags$small("Run Histology Fit to preview the exact target signal image used for scoring."))
+      }
+      detail_txt <- if (!is.null(info$detail) && nzchar(as.character(info$detail)[1])) as.character(info$detail)[1] else NULL
+      feature_txt <- if (!is.null(info$feature_count) && is.finite(as.numeric(info$feature_count)[1])) {
+        sprintf("Features: %d", as.integer(info$feature_count)[1])
+      } else {
+        NULL
+      }
+      tags$div(
+        tags$strong(if (!is.null(info$label) && nzchar(as.character(info$label)[1])) as.character(info$label)[1] else "Histology-fit target"),
+        if (!is.null(detail_txt)) tags$p(style = "margin: 6px 0 0 0;", detail_txt),
+        tags$p(style = "margin: 6px 0 0 0;", sprintf("Signal type: %s", if (!is.null(info$type) && nzchar(as.character(info$type)[1])) as.character(info$type)[1] else "n/a")),
+        if (!is.null(feature_txt)) tags$p(style = "margin: 6px 0 0 0;", feature_txt)
+      )
+    })
+
+    draw_histology_fit_target_plot <- function(info, main = NULL) {
+      if (is.null(info) || is.null(info$signal) || !is.matrix(info$signal)) return(invisible(NULL))
+      sig <- info$signal
+      if (!is.null(info$type) &&
+          identical(as.character(info$type)[1], "categorical_label_map") &&
+          !is.null(info$label_matrix) &&
+          is.matrix(info$label_matrix) &&
+          !is.null(info$color_map)) {
+        lab_mat <- info$label_matrix
+        col_map <- as.character(info$color_map)
+        if (!is.null(names(info$color_map))) names(col_map) <- names(info$color_map)
+        col_mat <- matrix("#00000000", nrow = nrow(lab_mat), ncol = ncol(lab_mat))
+        keep <- !is.na(lab_mat)
+        col_mat[keep] <- unname(col_map[lab_mat[keep]])
+        rast <- as.raster(col_mat)
+      } else {
+        rast <- signal_matrix_to_raster(sig, palette_name = input$msi_palette)
+      }
+      if (is.null(rast)) return(invisible(NULL))
+      if (is.null(main) || !nzchar(trimws(as.character(main)[1]))) {
+        main <- if (!is.null(info$label) && nzchar(as.character(info$label)[1])) {
+          sprintf("Histology-fit target (%s)", as.character(info$label)[1])
+        } else {
+          "Histology-fit target"
+        }
+      }
+      graphics::par(mar = c(0.5, 0.5, 2.2, 0.5))
+      graphics::plot.new()
+      graphics::plot.window(xlim = c(1, ncol(sig)), ylim = c(nrow(sig), 1), asp = 1, xaxs = "i", yaxs = "i")
+      graphics::rasterImage(rast, 1, 1, ncol(sig), nrow(sig), interpolate = FALSE)
+      graphics::box(col = "grey70")
+      graphics::title(main = main)
+    }
+
+    output$histology_fit_target_plot <- renderPlot({
+      if (!isTRUE(input$show_fit_info)) return(invisible(NULL))
+      info <- xh$histology_fit_target_info
+      validate(need(!is.null(info) && !is.null(info$signal) && is.matrix(info$signal), "Run Histology Fit to preview the target signal image."))
+      draw_histology_fit_target_plot(info)
+    })
+
+    output$download_histology_fit_target_png <- downloadHandler(
+      filename = function() {
+        info <- xh$histology_fit_target_info
+        stem <- if (!is.null(info$label) && nzchar(as.character(info$label)[1])) {
+          gsub("[^A-Za-z0-9._-]+", "_", as.character(info$label)[1])
+        } else {
+          "histology_fit_target"
+        }
+        sprintf("%s_%s.png", stem, format(Sys.time(), "%Y%m%d_%H%M%S"))
+      },
+      content = function(file) {
+        info <- xh$histology_fit_target_info
+        if (is.null(info) || is.null(info$signal) || !is.matrix(info$signal)) {
+          stop("No Histology Fit target image is available yet. Run Histology Fit first.")
+        }
+        grDevices::png(file, width = 1400, height = 1100, res = 170)
+        on.exit(grDevices::dev.off(), add = TRUE)
+        draw_histology_fit_target_plot(info)
+      }
+    )
+
+    observeEvent(input$run_histology_fit, {
+      req(msi_for_pdata())
+      if (is.null(input$histology_upload) || !nzchar(input$histology_upload$name)) {
+        showNotification("Load a histology image before running Histology Fit.", type = "warning", duration = 7)
+        return()
+      }
+      xh$histology_fit_grid <- NULL
+      xh$histology_fit_candidates <- NULL
+      xh$histology_fit_summary <- NULL
+      xh$histology_fit_signature <- NULL
+      xh$histology_fit_target_info <- NULL
+
+      txy <- current_translate_xy()
+      tx0 <- as.numeric(txy$tx)
+      ty0 <- as.numeric(txy$ty)
+
+      rng <- suppressWarnings(as.integer(input$histology_fit_range))
+      stp <- suppressWarnings(as.integer(input$histology_fit_step))
+      if (!is.finite(rng) || rng < 1L) rng <- 30L
+      if (!is.finite(stp) || stp < 1L) stp <- 2L
+      rng <- as.integer(min(500L, max(1L, rng)))
+      stp <- as.integer(min(50L, max(1L, stp)))
+      histology_fit_relation <- resolve_histology_intensity_relation(input$histology_fit_intensity_relation)
+
+      msi <- make_msi_raster()
+      feat_mode <- tolower(trimws(as.character(input$histology_feature_mode)[1]))
+      if (!feat_mode %in% c("hematoxylin", "darkness", "purple")) feat_mode <- "hematoxylin"
+      histology_use_smooth <- isTRUE(input$gaussian_smooth)
+      histology_smooth_sigma <- suppressWarnings(as.numeric(input$gaussian_sigma))
+      if (!is.finite(histology_smooth_sigma) || histology_smooth_sigma <= 0) histology_smooth_sigma <- 1
+
+      ncores_req <- suppressWarnings(as.integer(tryCatch(setup_values()[["ncores"]], error = function(e) NA_integer_)))
+      if (!is.finite(ncores_req) || ncores_req < 1L) ncores_req <- 1L
+      ncores_detect <- suppressWarnings(as.integer(tryCatch(parallel::detectCores(logical = FALSE), error = function(e) NA_integer_)))
+      if (!is.finite(ncores_detect) || ncores_detect < 1L) ncores_detect <- ncores_req
+      ncores_use <- as.integer(max(1L, min(ncores_req, ncores_detect)))
+      can_parallel_histology <- (.Platform$OS.type != "windows") &&
+        requireNamespace("parallel", quietly = TRUE) &&
+        ncores_use > 1L
+
+      withProgress(message = "Running Histology Fit", value = 0.08, {
+        incProgress(0.18, detail = "Preparing MSI target map")
+        sig_info <- try(histology_fit_signal_matrix(msi), silent = TRUE)
+        if (inherits(sig_info, "try-error") || is.null(sig_info) || !is.matrix(sig_info$signal)) {
+          xh$histology_fit_target_info <- NULL
+          showNotification("Could not build Histology Fit target signal. Check current display mode or selected pData field.", type = "error", duration = 8)
+          return()
+        }
+        xh$histology_fit_target_info <- list(
+          signal = sig_info$signal,
+          source = if (!is.null(sig_info$source)) sig_info$source else NA_character_,
+          field = if (!is.null(sig_info$field)) sig_info$field else NA_character_,
+          type = if (!is.null(sig_info$type)) sig_info$type else NA_character_,
+          label = if (!is.null(sig_info$label)) sig_info$label else NA_character_,
+          detail = if (!is.null(sig_info$detail)) sig_info$detail else NA_character_,
+          feature_count = if (!is.null(sig_info$feature_count)) sig_info$feature_count else NA_integer_,
+          mz_values = if (!is.null(sig_info$mz_values)) sig_info$mz_values else NULL,
+          label_matrix = if (!is.null(sig_info$label_matrix)) sig_info$label_matrix else NULL,
+          color_map = if (!is.null(sig_info$color_map)) sig_info$color_map else NULL
+        )
+        signal <- suppressWarnings(matrix(as.numeric(sig_info$signal), nrow = nrow(sig_info$signal), ncol = ncol(sig_info$signal)))
+        signal[!is.finite(signal)] <- 0
+        message(sprintf(
+          "[Histology Image Fit] Target signal source=%s field=%s type=%s label=%s detail=%s feature=%s",
+          if (!is.null(sig_info$source)) as.character(sig_info$source) else "unknown",
+          if (!is.null(sig_info$field) && nzchar(as.character(sig_info$field))) as.character(sig_info$field) else "n/a",
+          if (!is.null(sig_info$type) && nzchar(as.character(sig_info$type))) as.character(sig_info$type) else "n/a",
+          if (!is.null(sig_info$label) && nzchar(as.character(sig_info$label))) as.character(sig_info$label) else "n/a",
+          if (!is.null(sig_info$detail) && nzchar(as.character(sig_info$detail))) as.character(sig_info$detail) else "n/a",
+          feat_mode
+        ))
+
+        incProgress(0.14, detail = "Caching transformed histology image")
+        tr_hist <- try(
+          transform_overlay_image(
+            histology_image(),
+            use_point_filter = FALSE,
+            alpha_scale = 1,
+            scale_correction = list(fx = 1, fy = 1)
+          ),
+          silent = TRUE
+        )
+        if (inherits(tr_hist, "try-error") || is.null(tr_hist) || is.null(tr_hist$raster)) {
+          xh$histology_fit_target_info <- NULL
+          showNotification("Could not transform histology image for Histology Fit.", type = "error", duration = 8)
+          return()
+        }
+        fit_window <- histology_fit_crop_window(msi, tr_hist, tx = tx0, ty = ty0, search_range = rng, pad_extra = stp)
+        signal_use <- signal[fit_window$rows, fit_window$cols, drop = FALSE]
+        label_use <- if (!is.null(sig_info$type) &&
+          identical(as.character(sig_info$type)[1], "categorical_label_map") &&
+          !is.null(sig_info$label_matrix) &&
+          is.matrix(sig_info$label_matrix)) {
+          sig_info$label_matrix[fit_window$rows, fit_window$cols, drop = FALSE]
+        } else {
+          NULL
+        }
+        edge_cache <- if (!is.null(sig_info$type) && as.character(sig_info$type)[1] %in% c("binary_mask", "categorical_label_map")) {
+          NULL
+        } else {
+          build_edge_distance_cache(signal_use)
+        }
+        message(sprintf("[Histology Image Fit] Scoring window=%s", fit_window$label))
+
+        score_histology_pair <- function(dx, dy) {
+          tx_abs <- clamp(tx0 + as.numeric(dx), -1000, 1000)
+          ty_abs <- clamp(ty0 + as.numeric(dy), -1000, 1000)
+
+          hp <- try(
+            histology_feature_payload(
+              msi_obj = msi,
+              tr_hist = tr_hist,
+              tx = tx_abs,
+              ty = ty_abs,
+              feature_mode = feat_mode,
+              gaussian_smooth = histology_use_smooth,
+              smooth_sigma = histology_smooth_sigma
+            ),
+            silent = TRUE
+          )
+          if (inherits(hp, "try-error") || is.null(hp) || !is.matrix(hp$signal) || !is.matrix(hp$valid)) {
+            return(list(
+              dX = as.integer(dx),
+              dY = as.integer(dy),
+              raw_score = NA_real_,
+              corr_score = NA_real_,
+              nmi_score = NA_real_,
+              edge_score = NA_real_,
+              overlap = 0L,
+              n_edge = 0L
+            ))
+          }
+
+          hp_signal <- hp$signal[fit_window$rows, fit_window$cols, drop = FALSE]
+          hp_valid <- hp$valid[fit_window$rows, fit_window$cols, drop = FALSE]
+          keep <- if (!is.null(label_use)) {
+            hp_valid & !is.na(label_use) & nzchar(trimws(as.character(label_use)))
+          } else {
+            hp_valid & is.finite(signal_use)
+          }
+          overlap_n <- suppressWarnings(sum(keep, na.rm = TRUE))
+          if (!is.finite(overlap_n) || overlap_n < 25L) {
+            return(list(
+              dX = as.integer(dx),
+              dY = as.integer(dy),
+              raw_score = NA_real_,
+              corr_score = NA_real_,
+              nmi_score = NA_real_,
+              edge_score = NA_real_,
+              overlap = as.integer(ifelse(is.finite(overlap_n), overlap_n, 0L)),
+              n_edge = 0L
+            ))
+          }
+
+          if (!is.null(label_use)) {
+            sc_corr <- NA_real_
+            sc_nmi <- NA_real_
+            sc_intensity <- categorical_signal_association(hp_signal[keep], label_use[keep], min_group_n = 5L)
+            sc_edge <- NA_real_
+            n_edge <- 0L
+          } else {
+            sc_corr <- signed_rank_correlation(hp_signal[keep], signal_use[keep])
+            sc_nmi <- normalized_mutual_information(hp_signal[keep], signal_use[keep], nbins = 24L)
+            sc_intensity <- switch(
+              histology_fit_relation,
+              direct = sc_corr,
+              inverse = if (is.finite(sc_corr)) -sc_corr else NA_real_,
+              either = if (is.finite(sc_corr)) abs(sc_corr) else NA_real_,
+              if (is.finite(sc_corr)) abs(sc_corr) else NA_real_
+            )
+            edge_info <- build_edge_mask(hp_signal, valid_mask = hp_valid)
+            sc_edge <- if (!is.null(edge_info)) score_edge_mask_against_distance(edge_info$edge, edge_cache) else NA_real_
+            n_edge <- if (is.null(edge_info) || is.null(edge_info$n_edge)) 0L else as.integer(edge_info$n_edge)
+          }
+
+          list(
+            dX = as.integer(dx),
+            dY = as.integer(dy),
+            raw_score = as.numeric(sc_intensity),
+            corr_score = as.numeric(sc_corr),
+            nmi_score = as.numeric(sc_nmi),
+            edge_score = as.numeric(sc_edge),
+            overlap = as.integer(overlap_n),
+            n_edge = as.integer(n_edge)
+          )
+        }
+
+        score_histology_grid <- function(dx_set, dy_set, progress_weight = 0, detail = NULL) {
+          empty_df <- data.frame(
+            dX = integer(0),
+            dY = integer(0),
+            raw_score = numeric(0),
+            corr_score = numeric(0),
+            nmi_score = numeric(0),
+            edge_score = numeric(0),
+            overlap = integer(0),
+            n_edge = integer(0),
+            stringsAsFactors = FALSE
+          )
+          if (!is.null(detail)) incProgress(0, detail = detail)
+          grid_pairs <- expand.grid(
+            dX = as.integer(dx_set),
+            dY = as.integer(dy_set),
+            KEEP.OUT.ATTRS = FALSE,
+            stringsAsFactors = FALSE
+          )
+          if (nrow(grid_pairs) == 0L) return(empty_df)
+
+          res_list <- vector("list", nrow(grid_pairs))
+          if (isTRUE(can_parallel_histology) && nrow(grid_pairs) >= (2L * ncores_use)) {
+            chunk_size <- max(64L, 16L * ncores_use)
+            chunks <- split(seq_len(nrow(grid_pairs)), ceiling(seq_len(nrow(grid_pairs)) / chunk_size))
+            parallel_failed <- FALSE
+            for (chunk_idx in chunks) {
+              chunk_df <- grid_pairs[chunk_idx, , drop = FALSE]
+              out_chunk <- try(
+                parallel::mclapply(
+                  seq_len(nrow(chunk_df)),
+                  function(k) score_histology_pair(dx = chunk_df$dX[k], dy = chunk_df$dY[k]),
+                  mc.cores = ncores_use,
+                  mc.preschedule = TRUE
+                ),
+                silent = TRUE
+              )
+              if (inherits(out_chunk, "try-error") || length(out_chunk) != length(chunk_idx)) {
+                parallel_failed <- TRUE
+                message("[Histology Image Fit] Parallel grid scoring failed; falling back to serial: ", if (inherits(out_chunk, "try-error")) as.character(out_chunk) else "unexpected result length")
+                break
+              }
+              res_list[chunk_idx] <- out_chunk
+              if (progress_weight > 0) incProgress(progress_weight * length(chunk_idx) / nrow(grid_pairs))
+            }
+            if (isTRUE(parallel_failed)) {
+              rem <- which(vapply(res_list, is.null, logical(1)))
+              step_update_local <- max(1L, as.integer(nrow(grid_pairs) / 40L))
+              for (ii in rem) {
+                res_list[[ii]] <- score_histology_pair(dx = grid_pairs$dX[ii], dy = grid_pairs$dY[ii])
+                if (progress_weight > 0 && (ii %% step_update_local == 0L)) {
+                  incProgress(progress_weight / ceiling(nrow(grid_pairs) / step_update_local))
+                }
+              }
+            }
+          } else {
+            step_update_local <- max(1L, as.integer(nrow(grid_pairs) / 40L))
+            for (ii in seq_len(nrow(grid_pairs))) {
+              res_list[[ii]] <- score_histology_pair(dx = grid_pairs$dX[ii], dy = grid_pairs$dY[ii])
+              if (progress_weight > 0 && (ii %% step_update_local == 0L)) {
+                incProgress(progress_weight / ceiling(nrow(grid_pairs) / step_update_local))
+              }
+            }
+          }
+
+          out <- do.call(rbind, lapply(res_list, function(z) {
+            if (is.null(z)) return(NULL)
+            data.frame(
+              dX = as.integer(z$dX),
+              dY = as.integer(z$dY),
+              raw_score = as.numeric(z$raw_score),
+              corr_score = as.numeric(z$corr_score),
+              nmi_score = as.numeric(z$nmi_score),
+              edge_score = as.numeric(z$edge_score),
+              overlap = as.integer(z$overlap),
+              n_edge = as.integer(z$n_edge),
+              stringsAsFactors = FALSE
+            )
+          }))
+          if (is.null(out) || nrow(out) == 0L) out <- empty_df
+          out
+        }
+
+        collapse_histology_candidates <- function(df, rng_local, stp_local) {
+          if (is.null(df) || nrow(df) == 0L) return(data.frame())
+          out <- df[is.finite(df$raw_score) | is.finite(df$edge_score), , drop = FALSE]
+          if (nrow(out) == 0L) return(out)
+          out <- out[order(out$dX, out$dY), , drop = FALSE]
+          out <- out[!duplicated(out[, c("dX", "dY"), drop = FALSE]), , drop = FALSE]
+          if (nrow(out) == 0L) return(out)
+
+          robust_z <- function(x) {
+            x <- as.numeric(x)
+            x[!is.finite(x)] <- NA_real_
+            keep <- is.finite(x)
+            if (!any(keep)) return(rep(0, length(x)))
+            med <- suppressWarnings(stats::median(x[keep], na.rm = TRUE))
+            madv <- suppressWarnings(stats::mad(x[keep], center = med, constant = 1, na.rm = TRUE))
+            if (!is.finite(madv) || madv <= 1e-6) return(rep(0, length(x)))
+            z <- (x - med) / madv
+            z[!is.finite(z)] <- 0
+            z
+          }
+
+          rng_used <- max(1, as.integer(rng_local))
+          stp_used <- max(1, as.integer(stp_local))
+          edge_band <- max(1, as.integer(2L * stp_used))
+
+          out$dist_norm <- sqrt((out$dX / rng_used)^2 + (out$dY / rng_used)^2)
+          out$dist_norm <- pmax(0, pmin(out$dist_norm, 2))
+          out$edge_margin <- pmin(rng_used - abs(out$dX), rng_used - abs(out$dY))
+          out$edge_norm <- pmax(0, pmin(1, out$edge_margin / edge_band))
+          pen_shift <- 0.08 * (out$dist_norm^2)
+          pen_edge <- 0.18 * ((1 - out$edge_norm)^2)
+
+          z_raw <- robust_z(out$raw_score)
+          z_edge <- robust_z(out$edge_score)
+          has_raw <- any(is.finite(out$raw_score))
+          has_edge <- any(is.finite(out$edge_score))
+          w_raw <- if (has_raw && has_edge) 0.45 else if (has_raw) 1 else 0
+          w_edge <- if (has_raw && has_edge) 0.55 else if (has_edge) 1 else 0
+          out$score <- (w_raw * z_raw) + (w_edge * z_edge) - pen_shift - pen_edge
+          out
+        }
+
+        pick_best_histology_candidate <- function(df, rng_local, stp_local) {
+          if (is.null(df) || nrow(df) == 0L) return(NULL)
+          ord <- order(df$score, decreasing = TRUE)
+          df_ord <- df[ord, , drop = FALSE]
+          best <- df_ord[1, , drop = FALSE]
+
+          edge_thr <- max(1L, as.integer(stp_local))
+          near_edge <- (abs(best$dX[1]) >= (rng_local - edge_thr)) || (abs(best$dY[1]) >= (rng_local - edge_thr))
+          if (isTRUE(near_edge)) {
+            interior <- df_ord[
+              abs(df_ord$dX) <= (rng_local - edge_thr) &
+                abs(df_ord$dY) <= (rng_local - edge_thr),
+              ,
+              drop = FALSE
+            ]
+            if (nrow(interior) > 0L) {
+              alt <- interior[which.max(interior$score), , drop = FALSE]
+              tol <- max(0.02, 0.05 * abs(best$score[1]))
+              if (is.finite(alt$score[1]) && alt$score[1] >= (best$score[1] - tol)) {
+                best <- alt
+              }
+            }
+          }
+          best
+        }
+
+        dx_vals <- seq.int(-rng, rng, by = stp)
+        dy_vals <- seq.int(-rng, rng, by = stp)
+        message(sprintf(
+          "[Histology Image Fit] Grid scoring mode=%s cores=%d",
+          if (can_parallel_histology) "parallel" else "serial",
+          ncores_use
+        ))
+        coarse_df <- score_histology_grid(dx_vals, dy_vals, progress_weight = 0.48, detail = "Scoring coarse XY grid")
+        cand_df <- collapse_histology_candidates(coarse_df, rng_local = rng, stp_local = stp)
+        best_row <- pick_best_histology_candidate(cand_df, rng_local = rng, stp_local = stp)
+        if (is.null(best_row) || nrow(best_row) == 0L || !is.finite(best_row$score[1])) {
+          xh$histology_fit_grid <- NULL
+          xh$histology_fit_candidates <- NULL
+          xh$histology_fit_summary <- NULL
+          xh$histology_fit_signature <- NULL
+          xh$histology_fit_target_info <- NULL
+          showNotification(
+            "Histology Fit could not find a valid local translation score. Try a smaller range, different MSI display, or a different histology feature mode.",
+            type = "warning",
+            duration = 8
+          )
+          return()
+        }
+
+        best_dx <- as.integer(best_row$dX[1])
+        best_dy <- as.integer(best_row$dY[1])
+        fine_dx <- seq.int(best_dx - stp, best_dx + stp, by = 1L)
+        fine_dy <- seq.int(best_dy - stp, best_dy + stp, by = 1L)
+        fine_dx <- fine_dx[fine_dx >= -rng & fine_dx <= rng]
+        fine_dy <- fine_dy[fine_dy >= -rng & fine_dy <= rng]
+        fine_df <- score_histology_grid(fine_dx, fine_dy, progress_weight = 0.14, detail = "Scoring local XY refinement")
+        all_df <- if (nrow(fine_df) > 0L) rbind(coarse_df, fine_df) else coarse_df
+        cand_df <- collapse_histology_candidates(all_df, rng_local = rng, stp_local = stp)
+        best_row <- pick_best_histology_candidate(cand_df, rng_local = rng, stp_local = stp)
+        if (is.null(best_row) || nrow(best_row) == 0L || !is.finite(best_row$score[1])) {
+          xh$histology_fit_grid <- NULL
+          xh$histology_fit_candidates <- NULL
+          xh$histology_fit_summary <- NULL
+          xh$histology_fit_signature <- NULL
+          xh$histology_fit_target_info <- NULL
+          showNotification(
+            "Histology Fit could not refine a valid translation score. Try changing the signal source or search range.",
+            type = "warning",
+            duration = 8
+          )
+          return()
+        }
+
+        cand_df$translate_x <- clamp(tx0 + cand_df$dX, -1000, 1000)
+        cand_df$translate_y <- clamp(ty0 + cand_df$dY, -1000, 1000)
+        xh$histology_fit_grid <- cand_df
+
+        best_idx <- which(cand_df$dX == best_row$dX[1] & cand_df$dY == best_row$dY[1])
+        ord_hist <- order(cand_df$score, decreasing = TRUE)
+        if (length(best_idx) > 0L) {
+          ord_hist <- c(best_idx[1], ord_hist[ord_hist != best_idx[1]])
+        }
+        cand_top <- cand_df[ord_hist, , drop = FALSE]
+        if (nrow(cand_top) > 5L) cand_top <- cand_top[seq_len(5L), , drop = FALSE]
+        cand_top$rank <- seq_len(nrow(cand_top))
+        cand_top_out <- cand_top[, c("rank", "dX", "dY", "score", "raw_score", "corr_score", "nmi_score", "edge_score", "overlap", "n_edge", "translate_x", "translate_y"), drop = FALSE]
+        names(cand_top_out)[names(cand_top_out) == "raw_score"] <- "intensity_score"
+        names(cand_top_out)[names(cand_top_out) == "corr_score"] <- "signed_corr"
+        names(cand_top_out)[names(cand_top_out) == "nmi_score"] <- "nmi"
+        xh$histology_fit_candidates <- cand_top_out
+
+        tx_new <- clamp(tx0 + best_row$dX[1], -1000, 1000)
+        ty_new <- clamp(ty0 + best_row$dY[1], -1000, 1000)
+
+        xh$histology_fit_summary <- list(
+          intensity_relation = histology_fit_relation,
+          intensity_relation_label = histology_intensity_relation_label(histology_fit_relation),
+          feature_mode = feat_mode,
+          signal_source = if (!is.null(sig_info$source)) sig_info$source else "current",
+          signal_field = if (!is.null(sig_info$field)) sig_info$field else NA_character_,
+          signal_type = if (!is.null(sig_info$type)) sig_info$type else NA_character_,
+          target_signal = if (!is.null(sig_info$label)) sig_info$label else if (!is.null(msi$display_label)) msi$display_label else NA_character_,
+          target_signal_detail = if (!is.null(sig_info$detail)) sig_info$detail else NA_character_,
+          target_feature_count = if (!is.null(sig_info$feature_count)) sig_info$feature_count else NA_integer_,
+          msi_display_label = if (!is.null(msi$display_label)) msi$display_label else NA_character_,
+          scoring_window = fit_window$label,
+          search_range = rng,
+          search_step = stp,
+          start_translate_x = tx0,
+          start_translate_y = ty0,
+          best_translate_x = tx_new,
+          best_translate_y = ty_new,
+          best_dX = best_row$dX[1],
+          best_dY = best_row$dY[1],
+          best_score = best_row$score[1],
+          best_intensity_score = best_row$raw_score[1],
+          best_signed_correlation = best_row$corr_score[1],
+          best_nmi = best_row$nmi_score[1],
+          best_edge_score = best_row$edge_score[1],
+          overlap_pixels = best_row$overlap[1],
+          histology_edge_pixels = best_row$n_edge[1],
+          n_candidates = nrow(all_df)
+        )
+        xh$histology_fit_signature <- current_histology_fit_signature()
+        message(sprintf(
+          "[Histology Image Fit] Best candidate relation=%s target=%s dX=%.2f dY=%.2f -> X=%.2f Y=%.2f | intensity=%.4f corr=%.4f NMI=%.4f edge=%.4f score=%.4f",
+          histology_intensity_relation_label(histology_fit_relation),
+          if (!is.null(xh$histology_fit_summary$target_signal) && nzchar(as.character(xh$histology_fit_summary$target_signal))) {
+            as.character(xh$histology_fit_summary$target_signal)
+          } else {
+            "n/a"
+          },
+          as.numeric(xh$histology_fit_summary$best_dX),
+          as.numeric(xh$histology_fit_summary$best_dY),
+          as.numeric(xh$histology_fit_summary$best_translate_x),
+          as.numeric(xh$histology_fit_summary$best_translate_y),
+          as.numeric(xh$histology_fit_summary$best_intensity_score),
+          as.numeric(xh$histology_fit_summary$best_signed_correlation),
+          as.numeric(xh$histology_fit_summary$best_nmi),
+          as.numeric(xh$histology_fit_summary$best_edge_score),
+          as.numeric(xh$histology_fit_summary$best_score)
+        ))
+        print(xh$histology_fit_summary)
+        print(xh$histology_fit_candidates)
+
+        showNotification(
+          sprintf(
+            "Histology Fit finished (%s relation) for target %s: best dX=%.2f, dY=%.2f (candidate X=%.2f, Y=%.2f; intensity=%.4f, corr=%.4f, edge=%.4f, score=%.4f). Top-5 candidates are available below; use Apply selected to update X/Y.",
+            histology_intensity_relation_label(histology_fit_relation),
+            if (!is.null(xh$histology_fit_summary$target_signal) && nzchar(as.character(xh$histology_fit_summary$target_signal))) {
+              as.character(xh$histology_fit_summary$target_signal)
+            } else {
+              "n/a"
+            },
+            best_row$dX[1],
+            best_row$dY[1],
+            tx_new,
+            ty_new,
+            best_row$raw_score[1],
+            best_row$corr_score[1],
+            best_row$edge_score[1],
+            best_row$score[1]
+          ),
+          type = "message",
+          duration = 8
+        )
+      })
     }, ignoreInit = TRUE)
 
     output$stat_fit_preview_ui <- renderUI({
@@ -4765,6 +6660,30 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       ignoreInit = TRUE
     )
 
+    observeEvent(current_histology_fit_signature(), {
+      if (is.null(xh$histology_fit_grid) && is.null(xh$histology_fit_candidates) && is.null(xh$histology_fit_summary) && is.null(xh$histology_fit_target_info)) {
+        return()
+      }
+      cur_sig <- current_histology_fit_signature()
+      prev_sig <- xh$histology_fit_signature
+      if (!is.null(prev_sig) && identical(cur_sig, prev_sig)) {
+        return()
+      }
+      xh$histology_fit_grid <- NULL
+      xh$histology_fit_candidates <- NULL
+      xh$histology_fit_summary <- NULL
+      xh$histology_fit_signature <- NULL
+      xh$histology_fit_target_info <- NULL
+    }, ignoreInit = TRUE)
+
+    output$histology_fit_heatmap_ui <- renderUI({
+      if (requireNamespace("plotly", quietly = TRUE)) {
+        plotly::plotlyOutput(ns("histology_fit_heatmap"), height = "240px")
+      } else {
+        plotOutput(ns("histology_fit_heatmap"), height = "240px")
+      }
+    })
+
     output$stat_fit_heatmap_ui <- renderUI({
       if (requireNamespace("plotly", quietly = TRUE)) {
         plotly::plotlyOutput(ns("stat_fit_heatmap"), height = "240px")
@@ -4789,6 +6708,78 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       obj <- get_stat_fit_objective()
       idx <- if (identical(obj, "min")) which.min(g2$score) else which.max(g2$score)
       g2[idx, , drop = FALSE]
+    }
+
+    get_histology_fit_intensity_relation <- function() {
+      rel <- NULL
+      if (!is.null(xh$histology_fit_summary) && !is.null(xh$histology_fit_summary$intensity_relation)) {
+        rel <- tolower(trimws(as.character(xh$histology_fit_summary$intensity_relation)[1]))
+      }
+      if (!rel %in% c("direct", "inverse", "either")) {
+        rel <- resolve_histology_intensity_relation(input$histology_fit_intensity_relation)
+      }
+      if (!rel %in% c("direct", "inverse", "either")) rel <- "either"
+      rel
+    }
+
+    build_irregular_axis_bounds <- function(vals) {
+      vals <- sort(unique(as.numeric(vals)))
+      vals <- vals[is.finite(vals)]
+      if (length(vals) == 0L) {
+        return(data.frame(value = numeric(0), vmin = numeric(0), vmax = numeric(0)))
+      }
+      if (length(vals) == 1L) {
+        delta <- 0.5
+        return(data.frame(value = vals, vmin = vals - delta, vmax = vals + delta))
+      }
+      mids <- (vals[-1] + vals[-length(vals)]) / 2
+      lower_pad <- mids[1] - vals[1]
+      upper_pad <- vals[length(vals)] - mids[length(mids)]
+      data.frame(
+        value = vals,
+        vmin = c(vals[1] - lower_pad, mids),
+        vmax = c(mids, vals[length(vals)] + upper_pad)
+      )
+    }
+
+    regularize_histology_fit_plot_grid <- function(g2) {
+      if (is.null(g2) || nrow(g2) == 0L) return(g2)
+      gx <- sort(unique(as.integer(g2$dX)))
+      gy <- sort(unique(as.integer(g2$dY)))
+      if (length(gx) == 0L || length(gy) == 0L) return(g2)
+
+      full <- expand.grid(
+        dX = gx,
+        dY = gy,
+        KEEP.OUT.ATTRS = FALSE,
+        stringsAsFactors = FALSE
+      )
+      full <- merge(full, g2, by = c("dX", "dY"), all.x = TRUE, sort = FALSE)
+      full$.filled <- !is.finite(full$score)
+
+      have_score <- which(is.finite(full$score))
+      need_fill <- which(full$.filled)
+      if (length(have_score) > 0L && length(need_fill) > 0L) {
+        fill_cols <- intersect(
+          c("score", "raw_score", "corr_score", "nmi_score", "edge_score", "overlap", "n_edge", "translate_x", "translate_y"),
+          names(full)
+        )
+        src_x <- full$dX[have_score]
+        src_y <- full$dY[have_score]
+        for (ii in need_fill) {
+          dist2 <- ((src_x - full$dX[ii])^2) + ((src_y - full$dY[ii])^2)
+          jj <- have_score[which.min(dist2)]
+          full[ii, fill_cols] <- full[jj, fill_cols]
+        }
+      }
+
+      xb <- build_irregular_axis_bounds(gx)
+      yb <- build_irregular_axis_bounds(gy)
+      names(xb) <- c("dX", "x_min", "x_max")
+      names(yb) <- c("dY", "y_min", "y_max")
+      full <- merge(full, xb, by = "dX", all.x = TRUE, sort = FALSE)
+      full <- merge(full, yb, by = "dY", all.x = TRUE, sort = FALSE)
+      full[order(full$dY, full$dX), , drop = FALSE]
     }
 
     build_stat_fit_heatmap <- function(g2, best, with_tooltip = FALSE, anchor_tx = NA_real_, anchor_ty = NA_real_) {
@@ -4902,6 +6893,134 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         print(s)
       }
     })
+
+    get_histology_fit_best_row <- function(g2) {
+      idx <- which.max(g2$score)
+      g2[idx, , drop = FALSE]
+    }
+
+    build_histology_fit_heatmap <- function(g2, best, with_tooltip = FALSE, anchor_tx = NA_real_, anchor_ty = NA_real_) {
+      origin <- data.frame(dX = 0, dY = 0)
+      rel <- get_histology_fit_intensity_relation()
+      g_plot <- regularize_histology_fit_plot_grid(g2)
+      filled_note <- if (isTRUE(any(g_plot$.filled))) {
+        " | mixed coarse/fine grid completed for display"
+      } else {
+        ""
+      }
+      anchor_txt <- if (is.finite(anchor_tx) && is.finite(anchor_ty)) {
+        sprintf(" | anchor tx=%.1f, ty=%.1f", as.numeric(anchor_tx), as.numeric(anchor_ty))
+      } else {
+        ""
+      }
+      if (isTRUE(with_tooltip)) {
+        tx_abs <- if (is.finite(anchor_tx)) as.numeric(anchor_tx) + as.numeric(g_plot$dX) else NA_real_
+        ty_abs <- if (is.finite(anchor_ty)) as.numeric(anchor_ty) + as.numeric(g_plot$dY) else NA_real_
+        g_plot$.tip <- sprintf(
+          "dX: %d<br>dY: %d<br>tx: %.1f<br>ty: %.1f<br>score: %.4f<br>intensity: %.4f<br>corr: %.4f<br>NMI: %.4f<br>edge: %.4f<br>overlap: %d<br>histology edges: %d<br>display cell: %s",
+          as.integer(g_plot$dX), as.integer(g_plot$dY), tx_abs, ty_abs, as.numeric(g_plot$score),
+          as.numeric(g_plot$raw_score), as.numeric(g_plot$corr_score), as.numeric(g_plot$nmi_score), as.numeric(g_plot$edge_score), as.integer(g_plot$overlap), as.integer(g_plot$n_edge),
+          ifelse(g_plot$.filled, "nearest-filled", "scored")
+        )
+        p <- ggplot2::ggplot(g_plot, ggplot2::aes(xmin = x_min, xmax = x_max, ymin = y_min, ymax = y_max, fill = score, text = .tip))
+      } else {
+        p <- ggplot2::ggplot(g_plot, ggplot2::aes(xmin = x_min, xmax = x_max, ymin = y_min, ymax = y_max, fill = score))
+      }
+
+      p +
+        ggplot2::geom_rect(color = NA) +
+        ggplot2::geom_point(data = origin, ggplot2::aes(x = dX, y = dY), inherit.aes = FALSE, shape = 3, size = 3, stroke = 1.1, color = "deepskyblue3") +
+        ggplot2::geom_point(data = best, ggplot2::aes(x = dX, y = dY), inherit.aes = FALSE, shape = 4, size = 4, stroke = 1.2, color = "red") +
+        ggplot2::coord_equal() +
+        ggplot2::scale_fill_viridis_c(option = "magma", na.value = "grey85") +
+        ggplot2::theme_minimal() +
+        ggplot2::labs(
+          title = "Histology-fit heatmap",
+          subtitle = paste0(
+            "Fill = composite score | intensity relation: ",
+            histology_intensity_relation_label(rel),
+            " | blue + = current position (dX=0,dY=0)",
+            anchor_txt,
+            filled_note
+          ),
+          x = "dX",
+          y = "dY",
+          fill = "Score"
+        )
+    }
+
+    if (requireNamespace("plotly", quietly = TRUE)) {
+      output$histology_fit_heatmap <- plotly::renderPlotly({
+        if (!isTRUE(input$show_fit_info)) return(NULL)
+        grid <- xh$histology_fit_grid
+        validate(need(!is.null(grid) && nrow(grid) > 0, "Run Histology Fit to view diagnostic heatmap."))
+        g2 <- grid[is.finite(grid$score), , drop = FALSE]
+        validate(need(nrow(g2) > 0, "No valid Histology Fit points to plot."))
+        best <- get_histology_fit_best_row(g2)
+        s <- xh$histology_fit_summary
+        p <- build_histology_fit_heatmap(
+          g2,
+          best,
+          with_tooltip = TRUE,
+          anchor_tx = if (!is.null(s$start_translate_x)) as.numeric(s$start_translate_x) else NA_real_,
+          anchor_ty = if (!is.null(s$start_translate_y)) as.numeric(s$start_translate_y) else NA_real_
+        )
+        plotly::ggplotly(p, tooltip = "text")
+      })
+    } else {
+      output$histology_fit_heatmap <- renderPlot({
+        if (!isTRUE(input$show_fit_info)) return(invisible(NULL))
+        grid <- xh$histology_fit_grid
+        validate(need(!is.null(grid) && nrow(grid) > 0, "Run Histology Fit to view diagnostic heatmap."))
+        g2 <- grid[is.finite(grid$score), , drop = FALSE]
+        validate(need(nrow(g2) > 0, "No valid Histology Fit points to plot."))
+        best <- get_histology_fit_best_row(g2)
+        s <- xh$histology_fit_summary
+        build_histology_fit_heatmap(
+          g2,
+          best,
+          with_tooltip = FALSE,
+          anchor_tx = if (!is.null(s$start_translate_x)) as.numeric(s$start_translate_x) else NA_real_,
+          anchor_ty = if (!is.null(s$start_translate_y)) as.numeric(s$start_translate_y) else NA_real_
+        )
+      })
+    }
+
+      output$histology_fit_contour <- renderPlot({
+        if (!isTRUE(input$show_fit_info)) return(invisible(NULL))
+        grid <- xh$histology_fit_grid
+      validate(need(!is.null(grid) && nrow(grid) > 0, "Run Histology Fit to view contour diagnostics."))
+      g2 <- grid[is.finite(grid$score), , drop = FALSE]
+      validate(need(nrow(g2) > 0, "No valid Histology Fit score values to plot."))
+      best <- get_histology_fit_best_row(g2)
+      g_plot <- regularize_histology_fit_plot_grid(g2)
+      rel <- get_histology_fit_intensity_relation()
+      origin <- data.frame(dX = 0, dY = 0)
+        s <- xh$histology_fit_summary
+        anchor_txt <- if (!is.null(s$start_translate_x) && !is.null(s$start_translate_y) &&
+          is.finite(s$start_translate_x) && is.finite(s$start_translate_y)) {
+          sprintf(" | anchor tx=%.1f, ty=%.1f", as.numeric(s$start_translate_x), as.numeric(s$start_translate_y))
+      } else {
+        ""
+        }
+        ggplot2::ggplot(g_plot, ggplot2::aes(x = dX, y = dY, z = score)) +
+          ggplot2::geom_contour(bins = 12, linewidth = 0.5) +
+          ggplot2::geom_point(data = origin, ggplot2::aes(x = dX, y = dY), inherit.aes = FALSE, shape = 3, size = 3, stroke = 1.1, color = "deepskyblue3") +
+          ggplot2::geom_point(data = best, ggplot2::aes(x = dX, y = dY), inherit.aes = FALSE, shape = 4, size = 4, stroke = 1.2, color = "red") +
+          ggplot2::coord_equal() +
+          ggplot2::theme_minimal() +
+          ggplot2::labs(
+          title = "Histology-fit contours",
+          subtitle = paste0(
+            "Contours = composite score | intensity relation: ",
+            histology_intensity_relation_label(rel),
+            " | blue + = current position (dX=0,dY=0)",
+            anchor_txt
+          ),
+            x = "dX",
+            y = "dY"
+          )
+      })
 
     observeEvent(input$optimize_xy, {
       req(msi_for_pdata())
@@ -5608,9 +7727,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       hit <- sf::st_intersects(pts_sf, poly_t)
 
       outside_label <- "outside_polygon"
-      mapped_lab <- rep(outside_label, nrow(pts_df))
       poly_uid <- paste0("polygon_", sprintf("%05d", seq_len(nrow(poly_t))))
-      mapped_uid <- rep(outside_label, nrow(pts_df))
       has_hit <- lengths(hit) > 0
       raw_labels <- as.character(poly_t$map_label)
       is_cell_poly <- is_cell_like_polygon_label(raw_labels)
@@ -5619,74 +7736,166 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       poly_area[!is.finite(poly_area)] <- 0
       canvas_area <- as.numeric(msi$nx) * as.numeric(msi$ny)
       huge_poly <- is.finite(poly_area) & poly_area > (0.5 * canvas_area)
-      if (any(huge_poly) && any(is_cell_poly & !huge_poly)) {
-        is_cell_poly <- is_cell_poly & !huge_poly
+      usable_poly <- !huge_poly
+      if (!any(usable_poly)) {
+        usable_poly <- rep(TRUE, length(raw_labels))
+      }
+      if (any(huge_poly) && any(is_cell_poly & usable_poly)) {
+        is_cell_poly <- is_cell_poly & usable_poly
+      }
+      if (!any(is_cell_poly) && any(usable_poly)) {
+        is_cell_poly <- usable_poly
       }
       if (!any(is_cell_poly)) {
         # Fallback: if heuristics remove everything, use all polygons.
         is_cell_poly <- rep(TRUE, length(raw_labels))
       }
 
-      hit_cell <- logical(nrow(pts_df))
-      if (nrow(pts_df) > 0) {
-        hit_cell <- vapply(hit, function(ix) {
-          any(is_cell_poly[ix])
-        }, logical(1))
-      }
-      if (any(has_hit)) {
-        if (identical(input$polygon_overlap_rule, "all")) {
-          mapped_lab[has_hit] <- vapply(hit[has_hit], function(ix) {
-            ix_use <- ix[is_cell_poly[ix]]
-            if (length(ix_use) == 0L) return(outside_label)
-            paste(unique(poly_t$map_label[ix_use]), collapse = ";")
-          }, character(1))
-          mapped_uid[has_hit] <- vapply(hit[has_hit], function(ix) {
-            ix_use <- ix[is_cell_poly[ix]]
-            if (length(ix_use) == 0L) return(outside_label)
-            paste(unique(poly_uid[ix_use]), collapse = ";")
-          }, character(1))
-        } else {
-          mapped_lab[has_hit] <- vapply(hit[has_hit], function(ix) {
-            ix_use <- ix[is_cell_poly[ix]]
-            if (length(ix_use) == 0L) return(outside_label)
-            as.character(poly_t$map_label[ix_use[1]])
-          }, character(1))
-          mapped_uid[has_hit] <- vapply(hit[has_hit], function(ix) {
-            ix_use <- ix[is_cell_poly[ix]]
-            if (length(ix_use) == 0L) return(outside_label)
-            as.character(poly_uid[ix_use[1]])
-          }, character(1))
-        }
-      }
-
-      map_polygon_labels_from_vector <- function(label_vec_full, outside = "outside_polygon") {
+      map_polygon_values_from_hit <- function(value_vec_full, mask = rep(TRUE, length(value_vec_full)), outside = outside_label) {
         out <- rep(outside, nrow(pts_df))
         if (!any(has_hit)) return(out)
+        mask <- rep_len(as.logical(mask), length(value_vec_full))
+        mask[is.na(mask)] <- FALSE
         if (identical(input$polygon_overlap_rule, "all")) {
           out[has_hit] <- vapply(hit[has_hit], function(ix) {
-            ix_use <- ix[is_cell_poly[ix]]
+            ix_use <- ix[mask[ix]]
             if (length(ix_use) == 0L) return(outside)
-            paste(unique(as.character(label_vec_full[ix_use])), collapse = ";")
+            paste(unique(as.character(value_vec_full[ix_use])), collapse = ";")
           }, character(1))
         } else {
           out[has_hit] <- vapply(hit[has_hit], function(ix) {
-            ix_use <- ix[is_cell_poly[ix]]
+            ix_use <- ix[mask[ix]]
             if (length(ix_use) == 0L) return(outside)
-            as.character(label_vec_full[ix_use[1]])
+            as.character(value_vec_full[ix_use[1]])
           }, character(1))
         }
         out
       }
 
+      mapped_lab_all <- map_polygon_values_from_hit(poly_t$map_label, mask = usable_poly, outside = outside_label)
+      mapped_uid_all <- map_polygon_values_from_hit(poly_uid, mask = usable_poly, outside = outside_label)
+      mapped_lab <- map_polygon_values_from_hit(poly_t$map_label, mask = is_cell_poly, outside = outside_label)
+      mapped_uid <- map_polygon_values_from_hit(poly_uid, mask = is_cell_poly, outside = outside_label)
+      hit_cell <- mapped_uid != outside_label
+      hit_non_cell <- mapped_uid_all != outside_label & !hit_cell
+
       mapped_lab_original <- NULL
       orig_col_name <- NULL
       if (!is.null(companion_base_field) && "map_label_original" %in% colnames(poly_t)) {
-        mapped_lab_original <- map_polygon_labels_from_vector(poly_t$map_label_original, outside = outside_label)
+        mapped_lab_original <- map_polygon_values_from_hit(poly_t$map_label_original, mask = is_cell_poly, outside = outside_label)
         orig_col_name <- "polygon_region"
         if (identical(orig_col_name, col_name)) {
           orig_col_name <- make.names(paste0(col_name, "_original"))
         }
       }
+
+      mapped_compartment_label <- NULL
+      mapped_compartment_class <- NULL
+      mapped_nucleus_uid <- NULL
+      compartment_label_col <- make.names(paste0(col_name, "_compartment"))
+      compartment_class_col <- make.names(paste0(col_name, "_compartment_class"))
+      nucleus_uid_col <- "polygon_nucleus_id"
+      n_nucleus_pixels <- 0L
+      n_cytoplasm_pixels <- 0L
+      n_nucleus_matched <- 0L
+
+      if (!is.null(input$nucleus_polygon_file) && nzchar(input$nucleus_polygon_file$name)) {
+        nucleus_poly_try <- try(nucleus_polygon_data(), silent = TRUE)
+        if (inherits(nucleus_poly_try, "try-error") || is.null(nucleus_poly_try)) {
+          showNotification("Nucleus polygon file could not be read. Remove it or provide a valid GeoJSON.", type = "error", duration = 8)
+          return()
+        }
+
+        nucleus_poly <- nucleus_poly_try
+        if (nrow(nucleus_poly) > 0) {
+          nucleus_axis_mode <- resolve_polygon_axis_mode(nucleus_poly, input$polygon_axis_mode, get_histology_image_optional())
+          nucleus_t <- transform_polygon_sf(
+            poly_sf = nucleus_poly,
+            nx = msi$nx,
+            ny = msi$ny,
+            scale_x = input$scale_x,
+            scale_y = input$scale_y,
+            translate_x = input$translate_x,
+            translate_y = input$translate_y,
+            rotate_deg = effective_polygon_rotate_deg(),
+            flip_y = isTRUE(input$flip_histology_y),
+            swap_xy = identical(nucleus_axis_mode, "yx"),
+            scale_mode = input$overlay_scale_mode,
+            source_width = if (!is.null(src_dims)) src_dims$width else NA_real_,
+            source_height = if (!is.null(src_dims)) src_dims$height else NA_real_
+          )
+
+          nucleus_uid <- paste0("nucleus_", sprintf("%05d", seq_len(nrow(nucleus_t))))
+          nucleus_area <- suppressWarnings(as.numeric(sf::st_area(nucleus_t)))
+          nucleus_keep <- !(is.finite(nucleus_area) & nucleus_area > (0.5 * canvas_area))
+          if (!any(nucleus_keep)) nucleus_keep <- rep(TRUE, nrow(nucleus_t))
+          nucleus_t <- nucleus_t[nucleus_keep, , drop = FALSE]
+          nucleus_uid <- nucleus_uid[nucleus_keep]
+
+          if (nrow(nucleus_t) > 0) {
+            nucleus_parent_idx <- match_nucleus_polygons_to_cells(poly_t, nucleus_t, cell_keep = is_cell_poly)
+            valid_nucleus <- is.finite(nucleus_parent_idx) & nucleus_parent_idx >= 1L & nucleus_parent_idx <= nrow(poly_t)
+            n_nucleus_matched <- sum(valid_nucleus, na.rm = TRUE)
+
+            nucleus_parent_uid <- rep(NA_character_, length(nucleus_parent_idx))
+            nucleus_parent_lab <- rep(NA_character_, length(nucleus_parent_idx))
+            if (any(valid_nucleus)) {
+              nucleus_parent_uid[valid_nucleus] <- poly_uid[nucleus_parent_idx[valid_nucleus]]
+              nucleus_parent_lab[valid_nucleus] <- as.character(poly_t$map_label[nucleus_parent_idx[valid_nucleus]])
+            }
+
+            nucleus_hit <- sf::st_intersects(pts_sf, nucleus_t)
+            has_nucleus_hit <- lengths(nucleus_hit) > 0
+
+            map_nucleus_values_from_hit <- function(value_vec_full, outside = outside_label) {
+              out <- rep(outside, nrow(pts_df))
+              if (!any(has_nucleus_hit)) return(out)
+              if (identical(input$polygon_overlap_rule, "all")) {
+                out[has_nucleus_hit] <- vapply(nucleus_hit[has_nucleus_hit], function(ix) {
+                  ix_use <- ix[valid_nucleus[ix]]
+                  if (length(ix_use) == 0L) return(outside)
+                  vals <- unique(as.character(value_vec_full[ix_use]))
+                  vals <- vals[!is.na(vals) & nzchar(trimws(vals))]
+                  if (length(vals) == 0L) return(outside)
+                  paste(vals, collapse = ";")
+                }, character(1))
+              } else {
+                out[has_nucleus_hit] <- vapply(nucleus_hit[has_nucleus_hit], function(ix) {
+                  ix_use <- ix[valid_nucleus[ix]]
+                  if (length(ix_use) == 0L) return(outside)
+                  as.character(value_vec_full[ix_use[1]])
+                }, character(1))
+              }
+              out
+            }
+
+            mapped_nucleus_uid <- map_nucleus_values_from_hit(nucleus_uid, outside = outside_label)
+            mapped_nucleus_parent_uid <- map_nucleus_values_from_hit(nucleus_parent_uid, outside = outside_label)
+            mapped_nucleus_parent_lab <- map_nucleus_values_from_hit(nucleus_parent_lab, outside = outside_label)
+            nucleus_pixel_hit <- mapped_nucleus_uid != outside_label
+
+            if (any(nucleus_pixel_hit)) {
+              mapped_uid[nucleus_pixel_hit] <- mapped_nucleus_parent_uid[nucleus_pixel_hit]
+              mapped_lab[nucleus_pixel_hit] <- mapped_nucleus_parent_lab[nucleus_pixel_hit]
+            }
+
+            mapped_compartment_label <- mapped_lab_all
+            mapped_compartment_class <- rep(outside_label, nrow(pts_df))
+            mapped_compartment_class[hit_non_cell] <- "non_cell_polygon"
+            mapped_compartment_class[hit_cell] <- "cytoplasm"
+            mapped_compartment_label[hit_cell] <- paste0(mapped_lab[hit_cell], "__cytoplasm")
+            if (any(nucleus_pixel_hit)) {
+              mapped_compartment_class[nucleus_pixel_hit] <- "nucleus"
+              mapped_compartment_label[nucleus_pixel_hit] <- paste0(mapped_nucleus_parent_lab[nucleus_pixel_hit], "__nucleus")
+            }
+
+            n_nucleus_pixels <- sum(mapped_compartment_class == "nucleus", na.rm = TRUE)
+            n_cytoplasm_pixels <- sum(mapped_compartment_class == "cytoplasm", na.rm = TRUE)
+          }
+        }
+      }
+
+      hit_cell <- mapped_uid != outside_label
 
       obj <- msi_for_pdata()
       pd <- as.data.frame(Cardinal::pData(obj))
@@ -5699,6 +7908,15 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       pd[[uid_col]] <- mapped_uid
       binary_col <- "polygon_is_cell"
       pd[[binary_col]] <- as.integer(hit_cell)
+      if (!is.null(mapped_compartment_label) && length(mapped_compartment_label) == nrow(pd)) {
+        pd[[compartment_label_col]] <- mapped_compartment_label
+      }
+      if (!is.null(mapped_compartment_class) && length(mapped_compartment_class) == nrow(pd)) {
+        pd[[compartment_class_col]] <- mapped_compartment_class
+      }
+      if (!is.null(mapped_nucleus_uid) && length(mapped_nucleus_uid) == nrow(pd)) {
+        pd[[nucleus_uid_col]] <- mapped_nucleus_uid
+      }
 
       Cardinal::pData(obj) <- build_position_pdata(obj, pd)
       xh$mapped_obj <- obj
@@ -5715,32 +7933,73 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       xh$cluster_lookup <- lookup
 
       if (!is.null(orig_col_name) && orig_col_name %in% names(pd)) {
-        showNotification(
-          sprintf(
-            "Mapped polygons to cluster column '%s', original-label column '%s', '%s', and binary '%s' (inside=%d, outside=%d).",
-            col_name,
-            orig_col_name,
-            uid_col,
-            binary_col,
-            sum(pd[[binary_col]] == 1, na.rm = TRUE),
-            sum(pd[[binary_col]] == 0, na.rm = TRUE)
-          ),
-          type = "message",
-          duration = 8
-        )
+        if (!is.null(mapped_compartment_label) && !is.null(mapped_compartment_class) && !is.null(mapped_nucleus_uid)) {
+          showNotification(
+            sprintf(
+              "Mapped polygons to '%s', original-label column '%s', '%s', '%s', '%s', '%s', and '%s' (cell=%d, nucleus=%d, cytoplasm=%d, matched nuclei=%d).",
+              col_name,
+              orig_col_name,
+              uid_col,
+              binary_col,
+              compartment_label_col,
+              compartment_class_col,
+              nucleus_uid_col,
+              sum(pd[[binary_col]] == 1, na.rm = TRUE),
+              n_nucleus_pixels,
+              n_cytoplasm_pixels,
+              n_nucleus_matched
+            ),
+            type = "message",
+            duration = 9
+          )
+        } else {
+          showNotification(
+            sprintf(
+              "Mapped polygons to cluster column '%s', original-label column '%s', '%s', and binary '%s' (inside=%d, outside=%d).",
+              col_name,
+              orig_col_name,
+              uid_col,
+              binary_col,
+              sum(pd[[binary_col]] == 1, na.rm = TRUE),
+              sum(pd[[binary_col]] == 0, na.rm = TRUE)
+            ),
+            type = "message",
+            duration = 8
+          )
+        }
       } else {
-        showNotification(
-          sprintf(
-            "Mapped polygons to '%s', '%s', and binary '%s' (inside=%d, outside=%d).",
-            col_name,
-            uid_col,
-            binary_col,
-            sum(pd[[binary_col]] == 1, na.rm = TRUE),
-            sum(pd[[binary_col]] == 0, na.rm = TRUE)
-          ),
-          type = "message",
-          duration = 6
-        )
+        if (!is.null(mapped_compartment_label) && !is.null(mapped_compartment_class) && !is.null(mapped_nucleus_uid)) {
+          showNotification(
+            sprintf(
+              "Mapped polygons to '%s', '%s', '%s', '%s', '%s', and '%s' (cell=%d, nucleus=%d, cytoplasm=%d, matched nuclei=%d).",
+              col_name,
+              uid_col,
+              binary_col,
+              compartment_label_col,
+              compartment_class_col,
+              nucleus_uid_col,
+              sum(pd[[binary_col]] == 1, na.rm = TRUE),
+              n_nucleus_pixels,
+              n_cytoplasm_pixels,
+              n_nucleus_matched
+            ),
+            type = "message",
+            duration = 8
+          )
+        } else {
+          showNotification(
+            sprintf(
+              "Mapped polygons to '%s', '%s', and binary '%s' (inside=%d, outside=%d).",
+              col_name,
+              uid_col,
+              binary_col,
+              sum(pd[[binary_col]] == 1, na.rm = TRUE),
+              sum(pd[[binary_col]] == 0, na.rm = TRUE)
+            ),
+            type = "message",
+            duration = 6
+          )
+        }
       }
     })
 
@@ -5912,7 +8171,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       df <- data.frame(x = x, y = y_plot, value = v)
       hide_leg <- isTRUE(input$hide_pdata_legend)
 
-      if (is.numeric(v)) {
+      if (!isTRUE(pdata_values_are_categorical(v))) {
         p <- ggplot2::ggplot(df, ggplot2::aes(x = x, y = y, fill = value)) +
           ggplot2::geom_raster() +
           ggplot2::scale_fill_gradientn(colors = get_msi_palette(input$msi_palette), na.value = "transparent") +
@@ -5985,8 +8244,198 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       as.list(setNames(vals, keys))
     }
 
+    normalize_loaded_rotate_deg <- function(value, kv = NULL, upload_name = NULL) {
+      deg <- suppressWarnings(as.numeric(value))
+      deg <- if (length(deg) > 0L) deg[1] else NA_real_
+      if (!is.finite(deg)) {
+        return(list(value = NA_real_, converted = FALSE, reason = "invalid"))
+      }
+
+      kv <- if (is.null(kv)) list() else as.list(kv)
+      conv <- ""
+      if (!is.null(kv[["registration_rotation_convention"]])) {
+        conv <- tolower(trimws(as.character(kv[["registration_rotation_convention"]])[1]))
+      }
+      if (identical(conv, "shared_overlay_rotation_v2")) {
+        return(list(value = wrap_rotation_deg(deg), converted = FALSE, reason = "current"))
+      }
+
+      saved_layer <- ""
+      if (!is.null(kv[["registration_saved_overlay_layer"]])) {
+        saved_layer <- tolower(trimws(as.character(kv[["registration_saved_overlay_layer"]])[1]))
+      } else if (!is.null(kv[["overlay_layer"]])) {
+        saved_layer <- tolower(trimws(as.character(kv[["overlay_layer"]])[1]))
+      }
+
+      upload_label <- ""
+      if (!is.null(upload_name) && length(upload_name) > 0) {
+        upload_label <- tolower(trimws(as.character(upload_name)[1]))
+      }
+
+      looks_histology_legacy <- saved_layer %in% c("histology", "cluster") ||
+        grepl("histology|hande|h&e", upload_label, perl = TRUE)
+
+      if (isTRUE(looks_histology_legacy)) {
+        return(list(value = wrap_rotation_deg(deg - 90), converted = TRUE, reason = "legacy_histology"))
+      }
+
+      list(value = wrap_rotation_deg(deg), converted = FALSE, reason = "legacy_default")
+    }
+
+    parse_saved_msi_coord_frame <- function(kv = NULL) {
+      kv <- if (is.null(kv)) list() else as.list(kv)
+      xmin <- suppressWarnings(as.numeric(kv[["msi_coord_xmin"]]))
+      xmax <- suppressWarnings(as.numeric(kv[["msi_coord_xmax"]]))
+      ymin <- suppressWarnings(as.numeric(kv[["msi_coord_ymin"]]))
+      ymax <- suppressWarnings(as.numeric(kv[["msi_coord_ymax"]]))
+      xmin <- if (length(xmin) > 0L) xmin[1] else NA_real_
+      xmax <- if (length(xmax) > 0L) xmax[1] else NA_real_
+      ymin <- if (length(ymin) > 0L) ymin[1] else NA_real_
+      ymax <- if (length(ymax) > 0L) ymax[1] else NA_real_
+      if (!all(is.finite(c(xmin, xmax, ymin, ymax)))) return(NULL)
+
+      nx <- suppressWarnings(as.integer(kv[["msi_canvas_nx"]]))
+      ny <- suppressWarnings(as.integer(kv[["msi_canvas_ny"]]))
+      nx <- if (length(nx) > 0L) nx[1] else NA_integer_
+      ny <- if (length(ny) > 0L) ny[1] else NA_integer_
+      if (!is.finite(nx) || nx < 1L) nx <- suppressWarnings(as.integer(round(xmax - xmin + 1)))
+      if (!is.finite(ny) || ny < 1L) ny <- suppressWarnings(as.integer(round(ymax - ymin + 1)))
+      nx <- if (length(nx) > 0L) nx[1] else NA_integer_
+      ny <- if (length(ny) > 0L) ny[1] else NA_integer_
+      if (!is.finite(nx) || nx < 1L || !is.finite(ny) || ny < 1L) return(NULL)
+
+      list(
+        xmin = xmin,
+        xmax = xmax,
+        ymin = ymin,
+        ymax = ymax,
+        nx = nx,
+        ny = ny,
+        source = "saved_params"
+      )
+    }
+
+    estimate_saved_overlay_canvas <- function(kv = NULL) {
+      kv <- if (is.null(kv)) list() else as.list(kv)
+      scale_mode <- if (!is.null(kv[["overlay_scale_mode"]]) && length(kv[["overlay_scale_mode"]]) > 0L) {
+        tolower(trimws(as.character(kv[["overlay_scale_mode"]])[1]))
+      } else {
+        ""
+      }
+      if (!identical(scale_mode, "absolute")) return(NULL)
+
+      src_dims <- get_overlay_source_dims()
+      if (is.null(src_dims) || !all(is.finite(c(src_dims$width, src_dims$height))) ||
+          src_dims$width <= 0 || src_dims$height <= 0) {
+        return(NULL)
+      }
+
+      sx <- suppressWarnings(as.numeric(kv[["scale_x"]]))
+      sy <- suppressWarnings(as.numeric(kv[["scale_y"]]))
+      sx <- if (length(sx) > 0L) sx[1] else NA_real_
+      sy <- if (length(sy) > 0L) sy[1] else NA_real_
+      if (!is.finite(sx) || sx <= 0 || !is.finite(sy) || sy <= 0) return(NULL)
+
+      rot_info <- normalize_loaded_rotate_deg(
+        value = if (!is.null(kv[["rotate_deg"]])) kv[["rotate_deg"]] else 0,
+        kv = kv,
+        upload_name = NULL
+      )
+      rot_deg <- rot_info$value
+      if (!is.finite(rot_deg)) rot_deg <- 0
+      theta <- (rot_deg + 90) * pi / 180
+
+      base_w <- as.numeric(src_dims$width) * sx
+      base_h <- as.numeric(src_dims$height) * sy
+      est_nx <- suppressWarnings(as.integer(round(abs(base_w * cos(theta)) + abs(base_h * sin(theta)))))
+      est_ny <- suppressWarnings(as.integer(round(abs(base_w * sin(theta)) + abs(base_h * cos(theta)))))
+      if (!is.finite(est_nx) || est_nx < 1L || !is.finite(est_ny) || est_ny < 1L) return(NULL)
+
+      list(
+        xmin = NA_real_,
+        xmax = NA_real_,
+        ymin = NA_real_,
+        ymax = NA_real_,
+        nx = est_nx,
+        ny = est_ny,
+        source = paste0("overlay_estimate:", src_dims$source)
+      )
+    }
+
+    adjust_loaded_translate_xy <- function(tx, ty, kv = NULL, upload_name = NULL) {
+      tx_num <- suppressWarnings(as.numeric(tx))
+      ty_num <- suppressWarnings(as.numeric(ty))
+      tx_num <- if (length(tx_num) > 0L) tx_num[1] else NA_real_
+      ty_num <- if (length(ty_num) > 0L) ty_num[1] else NA_real_
+      if (!is.finite(tx_num) && !is.finite(ty_num)) {
+        return(list(tx = tx_num, ty = ty_num, adjusted = FALSE, mode = "none"))
+      }
+
+      current_frame <- current_msi_coord_frame()
+      if (is.null(current_frame)) {
+        return(list(tx = tx_num, ty = ty_num, adjusted = FALSE, mode = "no_current_frame"))
+      }
+
+      saved_frame <- parse_saved_msi_coord_frame(kv)
+      mode <- "saved_frame"
+      if (is.null(saved_frame)) {
+        saved_frame <- estimate_saved_overlay_canvas(kv)
+        mode <- "heuristic_overlay_estimate"
+        if (!is.null(saved_frame)) {
+          guess_xmin <- if (is.finite(current_frame$xmin) && current_frame$xmin >= 1) 1 else 0
+          guess_ymin <- if (is.finite(current_frame$ymin) && current_frame$ymin >= 1) 1 else 0
+          saved_frame$xmin <- guess_xmin
+          saved_frame$ymin <- guess_ymin
+          saved_frame$xmax <- saved_frame$xmin + saved_frame$nx - 1
+          saved_frame$ymax <- saved_frame$ymin + saved_frame$ny - 1
+
+          # Only apply the heuristic if the current MSI frame looks like a crop
+          # of a larger full-image canvas.
+          bigger_canvas <- (saved_frame$nx >= current_frame$nx + 2L) || (saved_frame$ny >= current_frame$ny + 2L)
+          cropped_extent <- (current_frame$xmin > saved_frame$xmin + 1) ||
+            (current_frame$ymin > saved_frame$ymin + 1) ||
+            (current_frame$xmax < saved_frame$xmax - 1) ||
+            (current_frame$ymax < saved_frame$ymax - 1)
+          if (!(bigger_canvas && cropped_extent)) {
+            saved_frame <- NULL
+          }
+        }
+      }
+
+      if (is.null(saved_frame)) {
+        return(list(tx = tx_num, ty = ty_num, adjusted = FALSE, mode = "no_saved_frame"))
+      }
+
+      tx_adj <- if (is.finite(tx_num)) {
+        tx_num + (saved_frame$xmin - current_frame$xmin) + ((saved_frame$nx - current_frame$nx) / 2)
+      } else {
+        tx_num
+      }
+      ty_adj <- if (is.finite(ty_num)) {
+        ty_num + (saved_frame$ymin - current_frame$ymin) + ((saved_frame$ny - current_frame$ny) / 2)
+      } else {
+        ty_num
+      }
+
+      delta_tx <- if (is.finite(tx_num) && is.finite(tx_adj)) abs(tx_adj - tx_num) else 0
+      delta_ty <- if (is.finite(ty_num) && is.finite(ty_adj)) abs(ty_adj - ty_num) else 0
+      adjusted <- (delta_tx > 1e-8) || (delta_ty > 1e-8)
+
+      list(
+        tx = if (is.finite(tx_adj)) clamp(tx_adj, -1000, 1000) else tx_adj,
+        ty = if (is.finite(ty_adj)) clamp(ty_adj, -1000, 1000) else ty_adj,
+        adjusted = adjusted,
+        mode = mode,
+        current_frame = current_frame,
+        saved_frame = saved_frame
+      )
+    }
+
     observeEvent(input$registration_params_upload, {
       req(input$registration_params_upload)
+      xh$histology_fit_relation_auto <- TRUE
+      xh$histology_fit_relation_last_default <- NULL
+      xh$histology_fit_relation_updating <- FALSE
       kv <- read_registration_params(input$registration_params_upload$datapath)
       validate(need(!is.null(kv) && length(kv) > 0, "Could not parse registration parameter file."))
       kv <- as.list(kv)
@@ -6068,24 +8517,50 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         }
       }
       if (!is.null(kv[["rotate_deg"]])) {
-        v <- suppressWarnings(as.numeric(kv[["rotate_deg"]]))
+        rot_info <- normalize_loaded_rotate_deg(
+          value = kv[["rotate_deg"]],
+          kv = kv,
+          upload_name = input$registration_params_upload$name
+        )
+        v <- rot_info$value
         if (is.finite(v)) {
-          updateSliderInput(session, "rotate_deg", value = clamp(v, -180, 180))
-          updateNumericInput(session, "rotate_deg_num", value = clamp(v, -180, 180))
+          updateSliderInput(session, "rotate_deg", value = v)
+          updateNumericInput(session, "rotate_deg_num", value = v)
+          if (isTRUE(rot_info$converted)) {
+            showNotification(
+              "Loaded legacy histology registration parameters with a 90-degree rotation correction for the shared overlay convention.",
+              type = "message",
+              duration = 7
+            )
+          }
         }
       }
-      if (!is.null(kv[["translate_x"]])) {
-        v <- suppressWarnings(as.numeric(kv[["translate_x"]]))
-        if (is.finite(v)) {
-          updateSliderInput(session, "translate_x", value = clamp(v, -1000, 1000))
-          updateNumericInput(session, "translate_x_num", value = clamp(v, -1000, 1000))
+      if (!is.null(kv[["translate_x"]]) || !is.null(kv[["translate_y"]])) {
+        tr_info <- adjust_loaded_translate_xy(
+          tx = kv[["translate_x"]],
+          ty = kv[["translate_y"]],
+          kv = kv,
+          upload_name = input$registration_params_upload$name
+        )
+        if (is.finite(tr_info$tx)) {
+          updateSliderInput(session, "translate_x", value = tr_info$tx)
+          updateNumericInput(session, "translate_x_num", value = tr_info$tx)
         }
-      }
-      if (!is.null(kv[["translate_y"]])) {
-        v <- suppressWarnings(as.numeric(kv[["translate_y"]]))
-        if (is.finite(v)) {
-          updateSliderInput(session, "translate_y", value = clamp(v, -1000, 1000))
-          updateNumericInput(session, "translate_y_num", value = clamp(v, -1000, 1000))
+        if (is.finite(tr_info$ty)) {
+          updateSliderInput(session, "translate_y", value = tr_info$ty)
+          updateNumericInput(session, "translate_y_num", value = tr_info$ty)
+        }
+        if (isTRUE(tr_info$adjusted)) {
+          msg <- if (identical(tr_info$mode, "saved_frame")) {
+            "Adjusted loaded translation to the current cropped MSI coordinate frame using saved MSI extents."
+          } else if (identical(tr_info$mode, "heuristic_overlay_estimate")) {
+            "Adjusted loaded translation to the current cropped MSI coordinate frame using an estimated full-image canvas."
+          } else {
+            NULL
+          }
+          if (!is.null(msg)) {
+            showNotification(msg, type = "message", duration = 7)
+          }
         }
       }
       if (!is.null(kv[["histology_alpha"]])) {
@@ -6144,6 +8619,50 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
               v <- suppressWarnings(as.numeric(kv[["optimize_edge_band"]]))
               if (is.finite(v)) updateNumericInput(session, "optimize_edge_band", value = clamp(v, 1, 20))
             }
+            if ("histology_fit_range" %in% names(kv) && !is.null(kv[["histology_fit_range"]])) {
+              v <- suppressWarnings(as.numeric(kv[["histology_fit_range"]]))
+              if (is.finite(v)) updateNumericInput(session, "histology_fit_range", value = clamp(v, 1, 500))
+            }
+            if ("histology_fit_step" %in% names(kv) && !is.null(kv[["histology_fit_step"]])) {
+              v <- suppressWarnings(as.numeric(kv[["histology_fit_step"]]))
+              if (is.finite(v)) updateNumericInput(session, "histology_fit_step", value = clamp(v, 1, 50))
+            }
+            if ("histology_feature_mode" %in% names(kv) && !is.null(kv[["histology_feature_mode"]])) {
+              v <- tolower(trimws(as.character(kv[["histology_feature_mode"]])[1]))
+              if (v %in% c("hematoxylin", "darkness", "purple")) updateSelectInput(session, "histology_feature_mode", selected = v)
+            }
+            if ("histology_fit_signal_source" %in% names(kv) && !is.null(kv[["histology_fit_signal_source"]])) {
+              v <- tolower(trimws(as.character(kv[["histology_fit_signal_source"]])[1]))
+              if (v %in% c("current", "pdata", "multi", "pca")) updateSelectInput(session, "histology_fit_signal_source", selected = v)
+            }
+            if ("histology_fit_pdata_field" %in% names(kv) && !is.null(kv[["histology_fit_pdata_field"]])) {
+              v <- as.character(kv[["histology_fit_pdata_field"]])[1]
+              if (!is.na(v) && nzchar(v)) updateSelectInput(session, "histology_fit_pdata_field", selected = v)
+            }
+            if ("histology_fit_multi_n" %in% names(kv) && !is.null(kv[["histology_fit_multi_n"]])) {
+              v <- suppressWarnings(as.numeric(kv[["histology_fit_multi_n"]]))
+              if (is.finite(v)) updateNumericInput(session, "histology_fit_multi_n", value = clamp(v, 2, 64))
+            }
+            if ("histology_fit_pca_component" %in% names(kv) && !is.null(kv[["histology_fit_pca_component"]])) {
+              v <- suppressWarnings(as.numeric(kv[["histology_fit_pca_component"]]))
+              if (is.finite(v)) updateNumericInput(session, "histology_fit_pca_component", value = clamp(v, 1, 64))
+            }
+            if ("histology_fit_pca_n_components" %in% names(kv) && !is.null(kv[["histology_fit_pca_n_components"]])) {
+              v <- suppressWarnings(as.numeric(kv[["histology_fit_pca_n_components"]]))
+              if (is.finite(v)) updateNumericInput(session, "histology_fit_pca_n_components", value = clamp(v, 1, 8))
+            }
+            if ("histology_fit_pca_n_features" %in% names(kv) && !is.null(kv[["histology_fit_pca_n_features"]])) {
+              v <- suppressWarnings(as.numeric(kv[["histology_fit_pca_n_features"]]))
+              if (is.finite(v)) updateNumericInput(session, "histology_fit_pca_n_features", value = clamp(v, 4, 128))
+            }
+            if ("histology_fit_intensity_relation" %in% names(kv) && !is.null(kv[["histology_fit_intensity_relation"]])) {
+              v <- tolower(trimws(as.character(kv[["histology_fit_intensity_relation"]])[1]))
+              if (v %in% c("direct", "inverse", "either")) updateSelectInput(session, "histology_fit_intensity_relation", selected = v)
+            } else if ("histology_fit_objective" %in% names(kv) && !is.null(kv[["histology_fit_objective"]])) {
+              v <- tolower(trimws(as.character(kv[["histology_fit_objective"]])[1]))
+              v_map <- if (identical(v, "min")) "inverse" else "either"
+              updateSelectInput(session, "histology_fit_intensity_relation", selected = v_map)
+            }
             if ("stat_fit_outside_mode" %in% names(kv) && !is.null(kv[["stat_fit_outside_mode"]])) {
               v <- tolower(trimws(as.character(kv[["stat_fit_outside_mode"]])[1]))
               if (v %in% c("bbox", "local", "global")) updateSelectInput(session, "stat_fit_outside_mode", selected = v)
@@ -6179,6 +8698,26 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         obj_now <- try(msi_data(), silent = TRUE)
         if (!inherits(obj_now, "try-error") && !is.null(obj_now)) {
           refresh_mz_ion_inputs(obj_now)
+        }
+        if ("histology_fit_pdata_field" %in% names(kv) && !is.null(kv[["histology_fit_pdata_field"]])) {
+          v <- as.character(kv[["histology_fit_pdata_field"]])[1]
+          if (!is.na(v) && nzchar(v)) updateSelectInput(session, "histology_fit_pdata_field", selected = v)
+        }
+        if ("histology_fit_multi_n" %in% names(kv) && !is.null(kv[["histology_fit_multi_n"]])) {
+          v <- suppressWarnings(as.numeric(kv[["histology_fit_multi_n"]]))
+          if (is.finite(v)) updateNumericInput(session, "histology_fit_multi_n", value = clamp(v, 2, 64))
+        }
+        if ("histology_fit_pca_component" %in% names(kv) && !is.null(kv[["histology_fit_pca_component"]])) {
+          v <- suppressWarnings(as.numeric(kv[["histology_fit_pca_component"]]))
+          if (is.finite(v)) updateNumericInput(session, "histology_fit_pca_component", value = clamp(v, 1, 64))
+        }
+        if ("histology_fit_pca_n_components" %in% names(kv) && !is.null(kv[["histology_fit_pca_n_components"]])) {
+          v <- suppressWarnings(as.numeric(kv[["histology_fit_pca_n_components"]]))
+          if (is.finite(v)) updateNumericInput(session, "histology_fit_pca_n_components", value = clamp(v, 1, 8))
+        }
+        if ("histology_fit_pca_n_features" %in% names(kv) && !is.null(kv[["histology_fit_pca_n_features"]])) {
+          v <- suppressWarnings(as.numeric(kv[["histology_fit_pca_n_features"]]))
+          if (is.finite(v)) updateNumericInput(session, "histology_fit_pca_n_features", value = clamp(v, 4, 128))
         }
       }, once = TRUE)
 
@@ -6432,6 +8971,9 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
     }, ignoreInit = TRUE)
 
     observeEvent(input$reset_transform, {
+      xh$histology_fit_relation_auto <- TRUE
+      xh$histology_fit_relation_last_default <- NULL
+      xh$histology_fit_relation_updating <- FALSE
       updateSliderInput(session, "histology_alpha", value = 0.5)
       updateSliderInput(session, "cluster_alpha", value = 0.7)
       updateSliderInput(session, "scale_x", value = 1)
@@ -6457,9 +8999,19 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       updateCheckboxInput(session, "gaussian_smooth", value = TRUE)
       updateCheckboxInput(session, "show_fit_info", value = TRUE)
       updateSliderInput(session, "polygon_linewidth", value = 1)
+      updateSelectInput(session, "cluster_palette", selected = "Alphabet")
             updateSelectInput(session, "rgb_render_mode", selected = "dominant")
             updateSliderInput(session, "rgb_bg_cutoff", value = 0.05)
             updateNumericInput(session, "optimize_edge_band", value = 4)
+            updateNumericInput(session, "histology_fit_range", value = 30)
+            updateNumericInput(session, "histology_fit_step", value = 2)
+            updateSelectInput(session, "histology_feature_mode", selected = "purple")
+            updateNumericInput(session, "histology_fit_pca_component", value = 1)
+            updateNumericInput(session, "histology_fit_pca_n_components", value = 1)
+            updateNumericInput(session, "histology_fit_pca_n_features", value = 32)
+            updateSelectInput(session, "histology_fit_signal_source", selected = "multi")
+            updateNumericInput(session, "histology_fit_multi_n", value = 12)
+            updateSelectInput(session, "histology_fit_intensity_relation", selected = "inverse")
             updateSelectInput(session, "stat_fit_metric_mode", selected = "inside_outside")
             updateSelectInput(session, "stat_fit_outside_mode", selected = "bbox")
             updateSelectInput(session, "stat_fit_objective", selected = "min")
