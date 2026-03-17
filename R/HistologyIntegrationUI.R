@@ -53,9 +53,19 @@ HistologyIntegrationUI <- function(id) {
               accept = c(".geojson", ".json")
             ),
             fileInput(
+              ns("roi_polygon_file"),
+              "ROI rectangle file (optional)",
+              accept = c(".geojson", ".json")
+            ),
+            fileInput(
               ns("nucleus_polygon_file"),
               "Nucleus polygon file (optional)",
               accept = c(".geojson", ".json")
+            ),
+            fileInput(
+              ns("histology_metadata_file"),
+              "Histology metadata sidecar (optional .json)",
+              accept = c(".json")
             ),
             tags$small("If provided, polygon mapping will also annotate nucleus-versus-cytoplasm pixels in pData."),
             selectInput(
@@ -95,9 +105,9 @@ HistologyIntegrationUI <- function(id) {
               selected = "Alphabet"
             ),
             checkboxInput(ns("enhance_contrast"), "Enhance contrast", value = TRUE),
-            checkboxInput(ns("gaussian_smooth"), "Gaussian smoothing", value = TRUE),
+            checkboxInput(ns("gaussian_smooth"), "Gaussian smoothing", value = FALSE),
             numericInput(ns("gaussian_sigma"), "Gaussian sigma", value = 1, min = 0.1, step = 0.1),
-            checkboxInput(ns("flip_histology_y"), "Flip histology Y", value = FALSE),
+            uiOutput(ns("registration_frame_status_ui")),
             tags$hr(),
             tags$h5("Mapping & Save"),
             radioButtons(
@@ -108,6 +118,12 @@ HistologyIntegrationUI <- function(id) {
             ),
             uiOutput(ns("mapping_source_ui")),
             actionButton(ns("map_to_pdata"), "Map selected source to pData"),
+            tags$div(style = "margin-top: 8px;", actionButton(ns("reset_transform"), "Reset transform")),
+            tags$div(style = "margin-top: 8px;", downloadButton(ns("download_registration_params"), "Save params (.txt)")),
+            tags$div(
+              style = "margin-top: 8px;",
+              fileInput(ns("registration_params_upload"), "Load params (.txt/.csv)", accept = c(".txt", ".csv"))
+            ),
             shinyFiles::shinySaveButton(ns("save_mapped_imzml"), "Save mapped imzML", "Save", filetype = list("")),
             tags$hr(),
             uiOutput(ns("pdata_field_ui")),
@@ -121,8 +137,8 @@ HistologyIntegrationUI <- function(id) {
           radioButtons(
             ns("overlay_layer"),
             "Overlay shown",
-            choices = c("Polygon outlines" = "polygon", "Histology image" = "histology", "Cluster-color image" = "cluster"),
-            selected = "polygon",
+            choices = c("Combined: histology + polygons" = "combined", "Polygon outlines" = "polygon", "Histology image" = "histology", "Cluster-color image" = "cluster"),
+            selected = "combined",
             inline = TRUE
           ),
           plotOutput(ns("overlay_plot"), height = "680px"),
@@ -179,11 +195,16 @@ HistologyIntegrationUI <- function(id) {
               ),
               column(
                 3,
-                selectInput(
-                  ns("polygon_axis_mode"),
-                  "Polygon axis mode",
-                  choices = c("Auto (infer 90-degree swap)" = "auto", "Standard (X,Y)" = "xy", "Swap axes (Y,X)" = "yx"),
-                  selected = "yx"
+                checkboxInput(ns("show_advanced_registration"), "Show advanced registration controls", value = FALSE),
+                conditionalPanel(
+                  condition = sprintf("input['%s']", ns("show_advanced_registration")),
+                  selectInput(
+                    ns("polygon_axis_mode"),
+                    "Polygon axis mode",
+                    choices = c("Auto (infer 90-degree swap)" = "auto", "Standard (X,Y)" = "xy", "Swap axes (Y,X)" = "yx"),
+                    selected = "auto"
+                  ),
+                  checkboxInput(ns("flip_histology_y"), "Flip histology Y", value = FALSE)
                 ),
                 checkboxInput(ns("polygon_color_by_label"), "Polygon color by label", value = FALSE),
                 polygon_color_input,
@@ -495,11 +516,6 @@ HistologyIntegrationUI <- function(id) {
                 DT::dataTableOutput(ns("polygon_cluster_profile_table"))
               )
             ),
-            fluidRow(
-              column(3, actionButton(ns("reset_transform"), "Reset transform")),
-              column(3, downloadButton(ns("download_registration_params"), "Save params (.txt)")),
-              column(6, fileInput(ns("registration_params_upload"), "Load params (.txt/.csv)", accept = c(".txt", ".csv")))
-            )
           ),
           tags$hr(),
           plotOutput(ns("pdata_plot"), height = "460px"),

@@ -29,7 +29,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       histology_fit_relation_updating = FALSE,
       polygon_cluster_result = NULL,
       polygon_cluster_profile_table = NULL,
-      polygon_label_field_before_cluster = NULL
+      polygon_label_field_before_cluster = NULL,
+      loaded_registration_reference_frame = NULL
     )
     overlay_last_recorded <- reactiveVal(NULL)
 
@@ -488,6 +489,108 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       poly <- try(sf::st_read(input$nucleus_polygon_file$datapath, quiet = TRUE), silent = TRUE)
       validate(need(!inherits(poly, "try-error"), "Could not read nucleus polygon file. Please provide a valid GeoJSON."))
       poly
+    })
+
+    roi_polygon_data <- reactive({
+      req(input$roi_polygon_file)
+      validate(need(requireNamespace("sf", quietly = TRUE), "Package 'sf' is required for polygon mapping."))
+      poly <- try(sf::st_read(input$roi_polygon_file$datapath, quiet = TRUE), silent = TRUE)
+      validate(need(!inherits(poly, "try-error"), "Could not read ROI polygon file. Please provide a valid GeoJSON."))
+      poly
+    })
+
+    histology_metadata <- reactive({
+      if (is.null(input$histology_metadata_file) || is.null(input$histology_metadata_file$datapath)) return(NULL)
+      read_histology_metadata_sidecar(input$histology_metadata_file$datapath)
+    })
+
+    roi_anchor_info <- reactive({
+      explicit_roi <- NULL
+      roi_source <- "none"
+      if (!is.null(input$roi_polygon_file) && nzchar(input$roi_polygon_file$name)) {
+        explicit_roi <- roi_polygon_data()
+        roi_source <- "separate_roi_file"
+      } else if (!is.null(input$polygon_file) && nzchar(input$polygon_file$name)) {
+        poly <- polygon_data()
+        roi_guess <- detect_qupath_roi_anchor(poly)
+        if (!is.null(roi_guess) && !is.null(roi_guess$polygon) && nrow(roi_guess$polygon) > 0L) {
+          explicit_roi <- roi_guess$polygon
+          roi_source <- as.character(roi_guess$source %||% "embedded_annotation")
+        }
+      }
+      bbox <- polygon_geometry_bbox(explicit_roi)
+      list(
+        polygon = explicit_roi,
+        source = roi_source,
+        bbox = bbox,
+        present = !is.null(explicit_roi) && nrow(explicit_roi) > 0L
+      )
+    })
+
+    registration_transform <- reactive({
+      hist_img <- if (!is.null(input$histology_upload) && nzchar(input$histology_upload$name)) {
+        try(histology_image(), silent = TRUE)
+      } else {
+        NULL
+      }
+      if (inherits(hist_img, "try-error")) hist_img <- NULL
+      roi_info <- roi_anchor_info()
+      overlay_frame <- overlay_frame_from_inputs(
+        hist_img = hist_img,
+        roi_poly = if (isTRUE(roi_info$present)) roi_info$polygon else NULL,
+        metadata = histology_metadata(),
+        histology_resample_factor = input$histology_resample_factor,
+        polygon_file_name = if (!is.null(input$polygon_file)) input$polygon_file$name else NULL,
+        histology_file_name = if (!is.null(input$histology_upload)) input$histology_upload$name else NULL
+      )
+      txy <- current_translate_xy()
+      list(
+        slide_key = overlay_frame$slide_key,
+        overlay_source_origin_x = overlay_frame$origin_x,
+        overlay_source_origin_y = overlay_frame$origin_y,
+        overlay_source_width = overlay_frame$source_width,
+        overlay_source_height = overlay_frame$source_height,
+        overlay_image_width = overlay_frame$image_width,
+        overlay_image_height = overlay_frame$image_height,
+        overlay_downsample_factor = overlay_frame$overlay_downsample_factor,
+        scale_x = suppressWarnings(as.numeric(input$scale_x)),
+        scale_y = suppressWarnings(as.numeric(input$scale_y)),
+        rotate_deg = suppressWarnings(as.numeric(input$rotate_deg)),
+        translate_x = suppressWarnings(as.numeric(txy$tx)),
+        translate_y = suppressWarnings(as.numeric(txy$ty)),
+        orientation_override = list(
+          flip_histology_y = isTRUE(input$flip_histology_y),
+          polygon_axis_mode = tolower(trimws(as.character(input$polygon_axis_mode)[1]))
+        ),
+        roi_anchor_id = overlay_frame$roi_source,
+        roi_anchor_bbox = overlay_frame$roi_anchor_bbox,
+        roi_anchor_present = isTRUE(overlay_frame$roi_anchor_present),
+        overlay_source_frame_type = overlay_frame$source_frame_type,
+        frame_status = overlay_frame$frame_status
+      )
+    })
+
+    output$registration_frame_status_ui <- renderUI({
+      tr <- registration_transform()
+      bbox <- tr$roi_anchor_bbox
+      bbox_txt <- if (!is.null(bbox) && all(is.finite(bbox))) {
+        sprintf("ROI bbox: [%.0f, %.0f] to [%.0f, %.0f]", bbox[["xmin"]], bbox[["ymin"]], bbox[["xmax"]], bbox[["ymax"]])
+      } else {
+        "ROI bbox: not available"
+      }
+      tags$div(
+        tags$small(
+          sprintf(
+            "Frame status: %s | slide key: %s | ROI source: %s | downsample: %s",
+            tr$frame_status %||% "legacy_best_effort",
+            tr$slide_key %||% "n/a",
+            tr$roi_anchor_id %||% "none",
+            if (is.finite(tr$overlay_downsample_factor)) format(tr$overlay_downsample_factor, trim = TRUE) else "n/a"
+          )
+        ),
+        tags$br(),
+        tags$small(bbox_txt)
+      )
     })
 
     output$polygon_label_field_ui <- renderUI({
@@ -1753,6 +1856,27 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         ggplot2::theme_minimal(base_size = 11)
     })
 
+    stable_subsample_indices <- function(n_total, n_keep) {
+      n_total <- suppressWarnings(as.integer(n_total))
+      n_keep <- suppressWarnings(as.integer(n_keep))
+      if (!is.finite(n_total) || n_total <= 0L) return(integer(0))
+      if (!is.finite(n_keep) || n_keep >= n_total) return(seq_len(n_total))
+      n_keep <- max(1L, min(n_total, n_keep))
+      idx <- unique(as.integer(ceiling(((seq_len(n_keep) - 0.5) * n_total) / n_keep)))
+      idx <- idx[is.finite(idx) & idx >= 1L & idx <= n_total]
+      if (length(idx) < n_keep) {
+        miss <- setdiff(seq_len(n_total), idx)
+        if (length(miss) > 0L) {
+          fill_n <- min(length(miss), n_keep - length(idx))
+          fill_idx <- unique(as.integer(ceiling(((seq_len(fill_n) - 0.5) * length(miss)) / fill_n)))
+          fill_idx <- fill_idx[is.finite(fill_idx) & fill_idx >= 1L & fill_idx <= length(miss)]
+          idx <- sort(unique(c(idx, miss[fill_idx])))
+        }
+      }
+      if (length(idx) > n_keep) idx <- idx[seq_len(n_keep)]
+      sort(unique(idx))
+    }
+
     suggest_rgb_indices <- function(obj, n_channels = 3L, max_cells = 1.5e7) {
       n_channels <- suppressWarnings(as.integer(n_channels))
       if (!n_channels %in% c(2L, 3L)) n_channels <- 3L
@@ -1770,7 +1894,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       sample_pix <- min(n_pix, sample_pix)
       if (sample_pix < 2L) sample_pix <- min(n_pix, 2L)
 
-      pix_idx <- if (sample_pix < n_pix) sort(sample.int(n_pix, sample_pix)) else seq_len(n_pix)
+      pix_idx <- if (sample_pix < n_pix) stable_subsample_indices(n_pix, sample_pix) else seq_len(n_pix)
       sp <- try(as.matrix(Cardinal::spectra(obj)[, pix_idx, drop = FALSE]), silent = TRUE)
       if (inherits(sp, "try-error") || nrow(sp) < 2L || ncol(sp) < 2L) return(integer(0))
 
@@ -1916,8 +2040,57 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       score
     }
 
+    score_spatial_coherence_map <- function(signal, valid_mask = NULL, sigma = 2) {
+      if (is.null(signal) || !is.matrix(signal) || nrow(signal) < 2L || ncol(signal) < 2L) {
+        return(-Inf)
+      }
+      sig <- suppressWarnings(matrix(as.numeric(signal), nrow = nrow(signal), ncol = ncol(signal)))
+      sig[!is.finite(sig)] <- 0
+      if (is.null(valid_mask)) {
+        valid <- is.finite(signal)
+      } else {
+        valid <- matrix(as.logical(valid_mask), nrow = nrow(signal), ncol = ncol(signal))
+      }
+      valid[!is.finite(valid)] <- FALSE
+      if (sum(valid, na.rm = TRUE) < 25L) return(-Inf)
+
+      sigma <- suppressWarnings(as.numeric(sigma))
+      if (!is.finite(sigma) || sigma <= 0) sigma <- 2
+
+      sig_masked <- sig
+      sig_masked[!valid] <- NA_real_
+      smooth <- gaussian_smooth_matrix(sig_masked, sigma = sigma)
+      keep <- valid & is.finite(smooth)
+      if (sum(keep, na.rm = TRUE) < 25L) return(-Inf)
+
+      raw_vals <- sig[keep]
+      smooth_vals <- smooth[keep]
+      detail_vals <- raw_vals - smooth_vals
+
+      corr <- suppressWarnings(stats::cor(raw_vals, smooth_vals, use = "pairwise.complete.obs", method = "spearman"))
+      if (!is.finite(corr)) corr <- 0
+      corr <- max(0, min(1, corr))
+
+      var_smooth <- suppressWarnings(stats::var(smooth_vals, na.rm = TRUE))
+      var_detail <- suppressWarnings(stats::var(detail_vals, na.rm = TRUE))
+      if (!is.finite(var_smooth) || var_smooth < 0) var_smooth <- 0
+      if (!is.finite(var_detail) || var_detail < 0) var_detail <- 0
+      low_freq_frac <- var_smooth / max(1e-8, var_smooth + var_detail)
+      low_freq_frac <- max(0, min(1, low_freq_frac))
+
+      qv <- suppressWarnings(stats::quantile(raw_vals, probs = c(0.50, 0.90, 0.99), na.rm = TRUE, names = FALSE, type = 8))
+      contrast <- if (all(is.finite(qv))) (qv[2] - qv[1]) + 0.35 * (qv[3] - qv[2]) else 0
+      if (!is.finite(contrast)) contrast <- 0
+
+      structure_score <- score_spatial_signal_map(signal, valid_mask = valid)
+      if (!is.finite(structure_score)) structure_score <- 0
+
+      0.45 * corr + 0.30 * low_freq_frac + 0.15 * contrast + 0.10 * structure_score
+    }
+
     suggest_histology_fusion_indices <- function(
       obj,
+      msi_obj = NULL,
       n_features = 12L,
       candidate_pool = NULL,
       max_cells = 1.5e7,
@@ -1946,7 +2119,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       sample_pix <- min(n_pix, sample_pix)
       if (sample_pix < 2L) sample_pix <- min(n_pix, 2L)
 
-      pix_idx <- if (sample_pix < n_pix) sort(sample.int(n_pix, sample_pix)) else seq_len(n_pix)
+      pix_idx <- if (sample_pix < n_pix) stable_subsample_indices(n_pix, sample_pix) else seq_len(n_pix)
       sp <- try(as.matrix(Cardinal::spectra(obj)[, pix_idx, drop = FALSE]), silent = TRUE)
       if (inherits(sp, "try-error") || nrow(sp) < 2L || ncol(sp) < 2L) return(integer(0))
 
@@ -1978,6 +2151,64 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
       cand_k <- min(length(ord), max(candidate_pool, as.integer(ceiling(sqrt(length(ord)) * 6))))
       cand <- ord[seq_len(cand_k)]
+
+      robust_z_local <- function(x) {
+        x <- as.numeric(x)
+        x[!is.finite(x)] <- NA_real_
+        keep <- is.finite(x)
+        if (!any(keep)) return(rep(0, length(x)))
+        med <- suppressWarnings(stats::median(x[keep], na.rm = TRUE))
+        madv <- suppressWarnings(stats::mad(x[keep], center = med, constant = 1, na.rm = TRUE))
+        if (!is.finite(madv) || madv <= 1e-6) return(rep(0, length(x)))
+        z <- (x - med) / madv
+        z[!is.finite(z)] <- 0
+        z
+      }
+
+      if (!is.null(msi_obj) && length(cand) > 1L) {
+        eval_n <- min(length(cand), max(candidate_pool, min(96L, 4L * n_features)))
+        eval_idx <- cand[seq_len(eval_n)]
+        sp_eval <- try(as.matrix(Cardinal::spectra(obj)[eval_idx, , drop = FALSE]), silent = TRUE)
+        if (!inherits(sp_eval, "try-error") && !is.null(sp_eval)) {
+          if (nrow(sp_eval) != length(eval_idx) && ncol(sp_eval) == length(eval_idx)) {
+            sp_eval <- t(sp_eval)
+          }
+          if (nrow(sp_eval) == length(eval_idx)) {
+            storage.mode(sp_eval) <- "double"
+            if (!identical(intensity_transform, "none")) {
+              sp_eval <- transform_intensity(sp_eval, intensity_transform)
+            }
+            sp_eval[!is.finite(sp_eval)] <- 0
+
+            spatial_score <- rep(NA_real_, length(eval_idx))
+            for (ii in seq_along(eval_idx)) {
+              sig_payload <- build_numeric_signal_matrix(
+                vals = sp_eval[ii, ],
+                msi_obj = msi_obj,
+                intensity_transform = "none",
+                apply_transform = FALSE,
+                gaussian_smooth = FALSE,
+                enhance = FALSE
+              )
+              spatial_score[ii] <- score_spatial_coherence_map(sig_payload$signal, valid_mask = sig_payload$valid, sigma = 2)
+            }
+
+            var_z <- robust_z_local(score[eval_idx])
+            spatial_z <- robust_z_local(spatial_score)
+            combined <- 0.25 * var_z + 0.75 * spatial_z
+            bad_spatial <- is.finite(spatial_z) & spatial_z < -0.75
+            combined[bad_spatial] <- combined[bad_spatial] - 2.0
+            score[eval_idx] <- combined
+
+            ord <- order(score, decreasing = TRUE, na.last = NA)
+            ord <- ord[is.finite(score[ord])]
+            if (length(ord) > 0L) {
+              cand <- ord[seq_len(min(length(ord), cand_k))]
+            }
+          }
+        }
+      }
+
       cand_mat <- sp[cand, , drop = FALSE]
       keep <- rowSums(is.finite(cand_mat)) >= 5L
       cand <- cand[keep]
@@ -2267,6 +2498,14 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
     resolve_polygon_axis_mode <- function(poly_sf, mode = "auto", hist_img = NULL) {
       mode_chr <- tolower(trimws(if (is.null(mode) || length(mode) == 0) "auto" else as.character(mode[[1]])))
       if (mode_chr %in% c("xy", "yx")) return(mode_chr)
+      reg_tr <- try(registration_transform(), silent = TRUE)
+      if (!inherits(reg_tr, "try-error") && !is.null(reg_tr)) {
+        # In the ROI/metadata-backed workflow, QuPath image exports and polygon
+        # coordinates are assumed to share the same source orientation.
+        if (isTRUE(reg_tr$roi_anchor_present) || identical(reg_tr$overlay_source_frame_type, "whole_slide")) {
+          return("xy")
+        }
+      }
       if (is.null(hist_img)) return("xy")
 
       info <- try(magick::image_info(hist_img)[1, ], silent = TRUE)
@@ -2368,13 +2607,52 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       )
     }
 
+    registration_reference_coord_frame <- function(obj = NULL) {
+      current_frame <- current_msi_coord_frame(obj)
+      saved_frame <- isolate(xh$loaded_registration_reference_frame)
+      if (current_frame_is_saved_subset(current_frame, saved_frame)) {
+        saved_frame
+      } else {
+        current_frame
+      }
+    }
+
+    current_registration_view_coord_frame <- function(obj = NULL) {
+      current_frame <- current_msi_coord_frame(obj)
+      saved_frame <- isolate(xh$loaded_registration_reference_frame)
+      if (!current_frame_is_saved_subset(current_frame, saved_frame)) {
+        return(current_frame)
+      }
+      list(
+        xmin = current_frame$xmin,
+        xmax = current_frame$xmax,
+        ymin = saved_frame$ymax - current_frame$ymax + saved_frame$ymin,
+        ymax = saved_frame$ymax - current_frame$ymin + saved_frame$ymin,
+        nx = current_frame$nx,
+        ny = current_frame$ny
+      )
+    }
+
+    registration_pixel_source_xy <- function(msi_obj) {
+      x_src <- suppressWarnings(as.numeric(msi_obj$x_source))
+      y_src <- suppressWarnings(as.numeric(msi_obj$y_source))
+      current_frame <- current_msi_coord_frame()
+      saved_frame <- isolate(xh$loaded_registration_reference_frame)
+      if (current_frame_is_saved_subset(current_frame, saved_frame)) {
+        y_src <- saved_frame$ymax - y_src + saved_frame$ymin
+      }
+      list(x = x_src, y = y_src)
+    }
+
     current_registration_params <- reactive({
       obj <- try(msi_for_pdata(), silent = TRUE)
       mz_axis <- numeric(0)
       coord_frame <- NULL
+      reg_tr <- try(registration_transform(), silent = TRUE)
+      if (inherits(reg_tr, "try-error")) reg_tr <- NULL
       if (!inherits(obj, "try-error")) {
         mz_axis <- suppressWarnings(as.numeric(Cardinal::mz(obj)))
-        coord_frame <- current_msi_coord_frame(obj)
+        coord_frame <- registration_reference_coord_frame(obj)
       }
 
       mz_sel_idx <- suppressWarnings(as.integer(input$mz_select))
@@ -2391,14 +2669,33 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       rgb_sel_vals <- if (length(rgb_sel_idx) > 0) mz_axis[rgb_sel_idx] else numeric(0)
 
       list(
+        registration_canonical_frame = "msi_source_coords_v1",
         registration_rotation_convention = "shared_overlay_rotation_v2",
-        registration_translation_frame = "relative_to_saved_msi_canvas_center_v2",
+        registration_translation_frame = "overlay_center_in_msi_source_coords_v3",
         registration_saved_overlay_layer = input$overlay_layer,
+        slide_key = if (!is.null(reg_tr)) reg_tr$slide_key else NA_character_,
+        overlay_source_frame_type = if (!is.null(reg_tr)) reg_tr$overlay_source_frame_type else NA_character_,
+        histology_export_origin_x = if (!is.null(reg_tr)) reg_tr$overlay_source_origin_x else NA_real_,
+        histology_export_origin_y = if (!is.null(reg_tr)) reg_tr$overlay_source_origin_y else NA_real_,
+        histology_export_width = if (!is.null(reg_tr)) reg_tr$overlay_source_width else NA_real_,
+        histology_export_height = if (!is.null(reg_tr)) reg_tr$overlay_source_height else NA_real_,
+        histology_downsample_factor = if (!is.null(reg_tr)) reg_tr$overlay_downsample_factor else NA_real_,
+        roi_anchor_present = if (!is.null(reg_tr)) isTRUE(reg_tr$roi_anchor_present) else FALSE,
+        roi_anchor_bbox = if (!is.null(reg_tr) && !is.null(reg_tr$roi_anchor_bbox)) paste(as.numeric(reg_tr$roi_anchor_bbox), collapse = ",") else NA_character_,
+        orientation_override_active = if (!is.null(reg_tr)) {
+          isTRUE(reg_tr$orientation_override$flip_histology_y) ||
+            (!is.null(reg_tr$orientation_override$polygon_axis_mode) && !identical(reg_tr$orientation_override$polygon_axis_mode, "auto"))
+        } else {
+          FALSE
+        },
+        frame_status = if (!is.null(reg_tr)) reg_tr$frame_status else NA_character_,
         msi_coord_frame = if (!is.null(coord_frame)) "absolute_cardinal_coords_v1" else NA_character_,
         msi_coord_xmin = if (!is.null(coord_frame)) coord_frame$xmin else NA_real_,
         msi_coord_xmax = if (!is.null(coord_frame)) coord_frame$xmax else NA_real_,
         msi_coord_ymin = if (!is.null(coord_frame)) coord_frame$ymin else NA_real_,
         msi_coord_ymax = if (!is.null(coord_frame)) coord_frame$ymax else NA_real_,
+        overlay_center_source_x = if (!is.null(coord_frame)) ((coord_frame$xmin + coord_frame$xmax) / 2) + reg_tr$translate_x else NA_real_,
+        overlay_center_source_y = if (!is.null(coord_frame)) ((coord_frame$ymin + coord_frame$ymax) / 2) + reg_tr$translate_y else NA_real_,
         msi_canvas_nx = if (!is.null(coord_frame)) coord_frame$nx else NA_integer_,
         msi_canvas_ny = if (!is.null(coord_frame)) coord_frame$ny else NA_integer_,
         msi_plot_mode = input$msi_plot_mode,
@@ -2484,8 +2781,14 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       validate(need(all(c("x", "y") %in% names(cd)), "MSI coordinates must contain x and y."))
       validate(need(nrow(cd) > 0, "MSI data has no coordinates."))
 
-      x_norm <- as.integer(cd$x - min(cd$x, na.rm = TRUE) + 1L)
-      y_norm <- as.integer(cd$y - min(cd$y, na.rm = TRUE) + 1L)
+      x_source <- suppressWarnings(as.numeric(cd$x))
+      y_source <- suppressWarnings(as.numeric(cd$y))
+      xmin <- min(x_source, na.rm = TRUE)
+      xmax <- max(x_source, na.rm = TRUE)
+      ymin <- min(y_source, na.rm = TRUE)
+      ymax <- max(y_source, na.rm = TRUE)
+      x_norm <- as.integer(x_source - xmin + 1L)
+      y_norm <- as.integer(y_source - ymin + 1L)
       nx <- max(x_norm, na.rm = TRUE)
       ny <- max(y_norm, na.rm = TRUE)
       row_idx <- ny - y_norm + 1L
@@ -2634,6 +2937,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
               raster = ras,
               nx = nx,
               ny = ny,
+              xmin = xmin,
+              xmax = xmax,
+              ymin = ymin,
+              ymax = ymax,
               mz_selected = NA_real_,
               mz_index = NA_integer_,
               rgb_mz = NULL,
@@ -2642,6 +2949,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
               mode_requested = mode_req,
               display_label = paste0("pData: ", field),
               opt_signal = sig_opt,
+              x_source = x_source,
+              y_source = y_source,
+              x_display = x_norm,
+              y_display = row_idx,
               x_norm = x_norm,
               y_norm = y_norm,
               row_idx = row_idx
@@ -2666,6 +2977,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
             raster = as.raster(col_mat),
             nx = nx,
             ny = ny,
+            xmin = xmin,
+            xmax = xmax,
+            ymin = ymin,
+            ymax = ymax,
             mz_selected = NA_real_,
             mz_index = NA_integer_,
             rgb_mz = NULL,
@@ -2674,6 +2989,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
             mode_requested = mode_req,
             display_label = paste0("pData: ", field),
             opt_signal = sig_opt,
+            x_source = x_source,
+            y_source = y_source,
+            x_display = x_norm,
+            y_display = row_idx,
             x_norm = x_norm,
             y_norm = y_norm,
             row_idx = row_idx
@@ -2707,6 +3026,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
               raster = ras,
               nx = nx,
               ny = ny,
+              xmin = xmin,
+              xmax = xmax,
+              ymin = ymin,
+              ymax = ymax,
               mz_selected = NA_real_,
               mz_index = NA_integer_,
               rgb_mz = rgb_mz,
@@ -2715,6 +3038,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
               mode_requested = mode_req,
               display_label = rgb_label,
               opt_signal = NULL,
+              x_source = x_source,
+              y_source = y_source,
+              x_display = x_norm,
+              y_display = row_idx,
               x_norm = x_norm,
               y_norm = y_norm,
               row_idx = row_idx
@@ -2729,6 +3056,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           raster = as.raster(empty_mat),
           nx = nx,
           ny = ny,
+          xmin = xmin,
+          xmax = xmax,
+          ymin = ymin,
+          ymax = ymax,
           mz_selected = NA_real_,
           mz_index = NA_integer_,
           rgb_mz = numeric(0),
@@ -2737,6 +3068,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           mode_requested = mode_req,
           display_label = "RGB: select 2-3 channels and click Apply RGB channels",
           opt_signal = NULL,
+          x_source = x_source,
+          y_source = y_source,
+          x_display = x_norm,
+          y_display = row_idx,
           x_norm = x_norm,
           y_norm = y_norm,
           row_idx = row_idx
@@ -2756,6 +3091,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         raster = ras,
         nx = nx,
         ny = ny,
+        xmin = xmin,
+        xmax = xmax,
+        ymin = ymin,
+        ymax = ymax,
         mz_selected = mzv[idx],
         mz_index = idx,
         rgb_mz = NULL,
@@ -2764,6 +3103,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         mode_requested = mode_req,
         display_label = sprintf("m/z %.5f", mzv[idx]),
         opt_signal = sig_opt,
+        x_source = x_source,
+        y_source = y_source,
+        x_display = x_norm,
+        y_display = row_idx,
         x_norm = x_norm,
         y_norm = y_norm,
         row_idx = row_idx
@@ -2791,12 +3134,16 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
     transform_overlay_image <- function(img, use_point_filter = FALSE, alpha_scale = 1, scale_correction = NULL) {
       req(make_msi_raster())
       img_work <- img
+      txy_base <- current_translate_xy()
+      tr_spec <- registration_transform()
 
-      if (isTRUE(input$flip_histology_y)) img_work <- magick::image_flip(img_work)
+      if (isTRUE(effective_overlay_flip_y())) img_work <- magick::image_flip(img_work)
 
       info0 <- magick::image_info(img_work)[1, ]
-      nx <- make_msi_raster()$nx
-      ny <- make_msi_raster()$ny
+      msi <- make_msi_raster()
+      nx <- msi$nx
+      ny <- msi$ny
+      coord_frame <- registration_reference_coord_frame()
 
       scale_mode <- tolower(trimws(as.character(input$overlay_scale_mode)[1]))
       if (!scale_mode %in% c("absolute", "fit")) scale_mode <- "absolute"
@@ -2828,10 +3175,18 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
 
       ras <- image_to_raster_rgba(img_work, alpha_scale = alpha_scale)
+      src_center_x <- if (!is.null(coord_frame)) ((coord_frame$xmin + coord_frame$xmax) / 2) + tr_spec$translate_x else (nx / 2) + tr_spec$translate_x
+      src_center_y <- if (!is.null(coord_frame)) ((coord_frame$ymin + coord_frame$ymax) / 2) + tr_spec$translate_y else (ny / 2) + tr_spec$translate_y
       list(
         raster = ras,
         width = ncol(ras),
         height = nrow(ras),
+        translate_x_base = as.numeric(txy_base$tx),
+        translate_y_base = as.numeric(txy_base$ty),
+        xleft_source = src_center_x - (ncol(ras) / 2),
+        xright_source = src_center_x + (ncol(ras) / 2),
+        ybottom_source = src_center_y - (nrow(ras) / 2),
+        ytop_source = src_center_y + (nrow(ras) / 2),
         source_width = as.numeric(info0$width),
         source_height = as.numeric(info0$height),
         scale_correction_x = corr_x,
@@ -2848,8 +3203,34 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       deg + 90
     }
 
+    overlay_uses_qupath_source_frame <- function(tr_spec = NULL) {
+      if (is.null(tr_spec)) {
+        tr_spec <- try(registration_transform(), silent = TRUE)
+      }
+      if (inherits(tr_spec, "try-error") || is.null(tr_spec)) return(FALSE)
+      isTRUE(tr_spec$roi_anchor_present) ||
+        identical(tr_spec$overlay_source_frame_type, "whole_slide") ||
+        identical(tr_spec$overlay_source_frame_type, "roi_relative") ||
+        identical(tr_spec$overlay_source_frame_type, "image_bbox")
+    }
+
     effective_polygon_rotate_deg <- function() {
-      effective_overlay_rotate_deg()
+      deg <- suppressWarnings(as.numeric(input$rotate_deg))
+      if (!is.finite(deg)) deg <- 0
+      deg
+    }
+
+    effective_overlay_flip_y <- function() {
+      isTRUE(input$flip_histology_y)
+    }
+
+    effective_polygon_flip_y <- function(tr_spec = NULL) {
+      if (is.null(tr_spec)) {
+        tr_spec <- try(registration_transform(), silent = TRUE)
+      }
+      base_flip <- isTRUE(overlay_uses_qupath_source_frame(tr_spec))
+      user_flip <- isTRUE(input$flip_histology_y)
+      xor(base_flip, user_flip)
     }
 
     transformed_overlay <- reactive({
@@ -2861,33 +3242,48 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         req(input$polygon_file)
         req(polygon_data())
 
-        msi <- make_msi_raster()
         poly <- polygon_data()
         poly$map_label <- get_polygon_labels(poly, input$polygon_label_field)
-        axis_mode <- resolve_polygon_axis_mode(poly, input$polygon_axis_mode, get_histology_image_optional())
-        src_dims <- get_overlay_source_dims()
-        poly_t <- transform_polygon_sf(
-          poly_sf = poly,
-          nx = msi$nx,
-          ny = msi$ny,
-          scale_x = input$scale_x,
-          scale_y = input$scale_y,
-          translate_x = input$translate_x,
-          translate_y = input$translate_y,
-          rotate_deg = effective_polygon_rotate_deg(),
-          flip_y = isTRUE(input$flip_histology_y),
-          swap_xy = identical(axis_mode, "yx"),
-          scale_mode = input$overlay_scale_mode,
-          source_width = if (!is.null(src_dims)) src_dims$width else NA_real_,
-          source_height = if (!is.null(src_dims)) src_dims$height else NA_real_
-        )
+        poly_t <- transform_polygons_for_current_registration(poly, tx = input$translate_x, ty = input$translate_y)
 
         return(list(
           layer = "polygon",
-          polygons = poly_t,
+          polygons = poly_t$display,
+          polygons_source = poly_t$source,
           alpha_used = NA_real_,
-          axis_mode = axis_mode,
-          polygon_source_dim = if (!is.null(src_dims)) paste0(src_dims$width, "x", src_dims$height, " (", src_dims$source, ")") else NA_character_
+          axis_mode = poly_t$axis_mode,
+          polygon_source_dim = {
+            tr_spec <- registration_transform()
+            if (is.finite(tr_spec$overlay_source_width) && is.finite(tr_spec$overlay_source_height)) {
+              paste0(tr_spec$overlay_source_width, "x", tr_spec$overlay_source_height, " (registration_frame)")
+            } else {
+              NA_character_
+            }
+          }
+        ))
+      }
+
+      if (identical(input$overlay_layer, "combined")) {
+        hist_out <- NULL
+        poly_out <- NULL
+        if (!is.null(input$histology_upload) && nzchar(input$histology_upload$name)) {
+          alpha_use <- if (is.finite(input$histology_alpha)) input$histology_alpha else 0.5
+          hist_out <- transform_overlay_image(histology_image(), use_point_filter = FALSE, alpha_scale = alpha_use, scale_correction = scale_corr)
+          hist_out$alpha_used <- alpha_use
+        }
+        if (!is.null(input$polygon_file) && nzchar(input$polygon_file$name)) {
+          poly <- polygon_data()
+          poly$map_label <- get_polygon_labels(poly, input$polygon_label_field)
+          poly_out <- transform_polygons_for_current_registration(poly, tx = input$translate_x, ty = input$translate_y)
+        }
+        validate(need(!is.null(hist_out) || !is.null(poly_out), "Load a histology image or polygon file for combined validation."))
+        return(list(
+          layer = "combined",
+          histology = hist_out,
+          polygons = if (!is.null(poly_out)) poly_out$display else NULL,
+          polygons_source = if (!is.null(poly_out)) poly_out$source else NULL,
+          axis_mode = if (!is.null(poly_out)) poly_out$axis_mode else NA_character_,
+          alpha_used = if (!is.null(hist_out)) hist_out$alpha_used else NA_real_
         ))
       }
 
@@ -2908,21 +3304,33 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
     })
 
     sample_transformed_overlay_to_msi <- function(msi_obj, tr, tx, ty) {
-      nx <- as.integer(msi_obj$nx)
-      ny <- as.integer(msi_obj$ny)
       w <- as.integer(tr$width)
       h <- as.integer(tr$height)
       validate(need(is.finite(w) && w > 0 && is.finite(h) && h > 0, "Invalid transformed overlay dimensions."))
 
-      cx <- (nx / 2) + as.numeric(tx)
-      cy <- (ny / 2) + as.numeric(ty)
-      xleft <- cx - w / 2
-      xright <- cx + w / 2
-      ybottom <- cy - h / 2
-      ytop <- cy + h / 2
+      if (!all(is.finite(c(tr$xleft_source, tr$xright_source, tr$ybottom_source, tr$ytop_source)))) {
+        stop("Transformed overlay is missing canonical source bounds.")
+      }
 
-      xpix <- as.numeric(msi_obj$x_norm)
-      ypix <- as.numeric(msi_obj$y_norm)
+      tx_base <- suppressWarnings(as.numeric(tr$translate_x_base))
+      ty_base <- suppressWarnings(as.numeric(tr$translate_y_base))
+      tx_now <- suppressWarnings(as.numeric(tx))
+      ty_now <- suppressWarnings(as.numeric(ty))
+      if (!is.finite(tx_base)) tx_base <- 0
+      if (!is.finite(ty_base)) ty_base <- 0
+      if (!is.finite(tx_now)) tx_now <- tx_base
+      if (!is.finite(ty_now)) ty_now <- ty_base
+      dx_shift <- tx_now - tx_base
+      dy_shift <- ty_now - ty_base
+
+      xleft <- tr$xleft_source + dx_shift
+      xright <- tr$xright_source + dx_shift
+      ybottom <- tr$ybottom_source + dy_shift
+      ytop <- tr$ytop_source + dy_shift
+
+      pix_src <- registration_pixel_source_xy(msi_obj)
+      xpix <- suppressWarnings(as.numeric(pix_src$x))
+      ypix <- suppressWarnings(as.numeric(pix_src$y))
 
       u <- (xpix - xleft) / (xright - xleft)
       v <- (ytop - ypix) / (ytop - ybottom)
@@ -2941,6 +3349,67 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         width = w,
         height = h
       )
+    }
+
+    source_canvas_grid_df <- function(msi_obj) {
+      coord_frame <- current_registration_view_coord_frame()
+      validate(need(!is.null(coord_frame), "MSI source coordinate frame is unavailable."))
+      x_seq <- seq(coord_frame$xmin, coord_frame$xmax, by = 1)
+      y_seq <- seq(coord_frame$ymax, coord_frame$ymin, by = -1)
+      expand.grid(
+        x = x_seq,
+        y = y_seq,
+        KEEP.OUT.ATTRS = FALSE,
+        stringsAsFactors = FALSE
+      )
+    }
+
+    overlay_source_bbox_to_display <- function(ov) {
+      coord_frame <- current_registration_view_coord_frame()
+      if (is.null(coord_frame) || is.null(ov) ||
+          !all(is.finite(c(ov$xleft_source, ov$xright_source, ov$ybottom_source, ov$ytop_source)))) {
+        return(NULL)
+      }
+      source_bbox_to_display_bbox(
+        c(
+          xmin = ov$xleft_source,
+          xmax = ov$xright_source,
+          ymin = ov$ybottom_source,
+          ymax = ov$ytop_source
+        ),
+        coord_frame = coord_frame
+      )
+    }
+
+    transform_polygons_for_current_registration <- function(poly_sf, tx, ty, axis_mode = NULL) {
+      msi <- make_msi_raster()
+      tr_spec <- registration_transform()
+      if (is.null(axis_mode)) {
+        axis_mode <- resolve_polygon_axis_mode(poly_sf, input$polygon_axis_mode, get_histology_image_optional())
+      }
+      polygon_rotate <- effective_polygon_rotate_deg()
+      polygon_flip_y <- effective_polygon_flip_y(tr_spec)
+      poly_src <- transform_polygon_sf(
+        poly_sf = poly_sf,
+        nx = msi$nx,
+        ny = msi$ny,
+        scale_x = input$scale_x,
+        scale_y = input$scale_y,
+        translate_x = tx,
+        translate_y = ty,
+        rotate_deg = polygon_rotate,
+        flip_y = polygon_flip_y,
+        swap_xy = identical(axis_mode, "yx"),
+        scale_mode = input$overlay_scale_mode,
+        source_width = tr_spec$overlay_source_width,
+        source_height = tr_spec$overlay_source_height,
+        source_origin_x = tr_spec$overlay_source_origin_x,
+        source_origin_y = tr_spec$overlay_source_origin_y,
+        downsample_factor = tr_spec$overlay_downsample_factor,
+        coord_frame = registration_reference_coord_frame()
+      )
+      poly_display <- source_sf_to_display_sf(poly_src, current_registration_view_coord_frame())
+      list(source = poly_src, display = poly_display, axis_mode = axis_mode)
     }
 
     decode_rgba_hex <- function(rgba_hex) {
@@ -3212,34 +3681,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       scale_corr <- list(fx = 1, fy = 1)
       tr <- transform_overlay_image(cluster_overlay_image(), use_point_filter = TRUE, alpha_scale = 1, scale_correction = scale_corr)
       msi <- make_msi_raster()
-
-      nx <- msi$nx
-      ny <- msi$ny
-      w <- tr$width
-      h <- tr$height
-
-      cx <- (nx / 2) + input$translate_x
-      cy <- (ny / 2) + input$translate_y
-      xleft <- cx - w / 2
-      xright <- cx + w / 2
-      ybottom <- cy - h / 2
-      ytop <- cy + h / 2
-
-      xpix <- msi$x_norm
-      ypix <- msi$y_norm
-
-      u <- (xpix - xleft) / (xright - xleft)
-      v <- (ytop - ypix) / (ytop - ybottom)
-      inside <- is.finite(u) & is.finite(v) & u >= 0 & u <= 1 & v >= 0 & v <= 1
-
-      col_idx <- pmin(w, pmax(1L, as.integer(floor(u * (w - 1L)) + 1L)))
-      row_idx <- pmin(h, pmax(1L, as.integer(floor(v * (h - 1L)) + 1L)))
-
-      col_mat <- as.matrix(tr$raster)
-      sampled <- rep(NA_character_, length(xpix))
-      sampled[inside] <- col_mat[cbind(row_idx[inside], col_idx[inside])]
-
-      list(sampled_rgba = sampled)
+      sampled <- sample_transformed_overlay_to_msi(msi_obj = msi, tr = tr, tx = input$translate_x, ty = input$translate_y)
+      list(sampled_rgba = sampled$sampled_rgba)
     })
 
     extract_reference_cluster_colors <- function(img, max_colors = 128L) {
@@ -3297,6 +3740,24 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       )
       validate(need(!inherits(new_pd, "try-error"), "Could not construct PositionDataFrame for mapped pData."))
       new_pd
+    }
+
+    flip_values_vertically_to_match_display <- function(vals, msi_obj) {
+      vals <- as.vector(vals)
+      x_src <- suppressWarnings(as.integer(msi_obj$x_source))
+      y_src <- suppressWarnings(as.integer(msi_obj$y_source))
+      if (length(vals) != length(x_src) || length(vals) != length(y_src)) return(vals)
+      if (!all(is.finite(x_src)) || !all(is.finite(y_src))) return(vals)
+
+      ymin <- min(y_src, na.rm = TRUE)
+      ymax <- max(y_src, na.rm = TRUE)
+      key_now <- paste(x_src, y_src, sep = ":")
+      key_flip <- paste(x_src, ymax - y_src + ymin, sep = ":")
+      m <- match(key_flip, key_now)
+      ok <- is.finite(m) & m >= 1L & m <= length(vals)
+      out <- vals
+      out[ok] <- vals[m[ok]]
+      out
     }
 
     normalize_crs <- function(crs_obj) {
@@ -3444,7 +3905,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       matched
     }
 
-    transform_polygon_sf <- function(poly_sf, nx, ny, scale_x, scale_y, translate_x, translate_y, rotate_deg, flip_y = FALSE, swap_xy = FALSE, scale_mode = "absolute", source_width = NA_real_, source_height = NA_real_) {
+    transform_polygon_sf <- function(poly_sf, nx, ny, scale_x, scale_y, translate_x, translate_y, rotate_deg, flip_y = FALSE, swap_xy = FALSE, scale_mode = "absolute", source_width = NA_real_, source_height = NA_real_, source_origin_x = NA_real_, source_origin_y = NA_real_, downsample_factor = 1, coord_frame = NULL) {
       geom_type <- as.character(sf::st_geometry_type(poly_sf))
       keep <- geom_type %in% c("POLYGON", "MULTIPOLYGON")
       poly <- poly_sf[keep, , drop = FALSE]
@@ -3480,11 +3941,15 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         frame_h <- bb_h
       }
       validate(need(is.finite(frame_w) && is.finite(frame_h) && frame_w > 0 && frame_h > 0, "Polygon reference frame is invalid."))
+      downsample_factor <- suppressWarnings(as.numeric(downsample_factor)[1])
+      if (!is.finite(downsample_factor) || downsample_factor <= 0) downsample_factor <- 1
+      frame_w_img <- frame_w / downsample_factor
+      frame_h_img <- frame_h / downsample_factor
 
       mode <- tolower(trimws(as.character(scale_mode)[1]))
       if (!mode %in% c("absolute", "fit")) mode <- "absolute"
       if (identical(mode, "fit")) {
-        fit_scale <- min(nx / frame_w, ny / frame_h)
+        fit_scale <- min(nx / frame_w_img, ny / frame_h_img)
         sx <- fit_scale * scale_x
         sy <- fit_scale * scale_y
       } else {
@@ -3493,27 +3958,23 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
       validate(need(is.finite(sx) && is.finite(sy) && sx > 0 && sy > 0, "Polygon scale must be positive."))
 
-      cx <- (nx / 2) + translate_x
-      cy <- (ny / 2) + translate_y
+      center_frame <- coord_frame
+      if (is.null(center_frame)) center_frame <- current_msi_coord_frame()
+      cx <- if (!is.null(center_frame)) ((center_frame$xmin + center_frame$xmax) / 2) + translate_x else (nx / 2) + translate_x
+      cy <- if (!is.null(center_frame)) ((center_frame$ymin + center_frame$ymax) / 2) + translate_y else (ny / 2) + translate_y
       theta <- rotate_deg * pi / 180
       ct <- cos(theta)
       st <- sin(theta)
 
+      use_source_origin <- is.finite(source_origin_x) && is.finite(source_origin_y)
       in_frame <- if (has_source_dims) {
         bb_xmin >= -1 && bb_ymin >= -1 && bb_xmax <= (frame_w + 1) && bb_ymax <= (frame_h + 1)
       } else {
         FALSE
       }
-      # Keep polygon and image on the same scale path:
-      # never auto-normalize/stretch polygon bbox to frame.
-      use_normalized_frame <- FALSE
-      # If coordinates are offset but otherwise image-space sized, shift into frame.
-      use_shifted_origin <- has_source_dims && !in_frame
-      # Keep polygon and image in the same underlying source-image frame.
-      # Do not implicitly switch polygon frame size based on bbox dimensions.
-      use_bbox_frame <- FALSE
-      geom_frame_w <- frame_w
-      geom_frame_h <- frame_h
+      use_source_frame <- use_source_origin || (has_source_dims && in_frame)
+      geom_frame_w <- if (use_source_frame) frame_w_img else (bb_w / downsample_factor)
+      geom_frame_h <- if (use_source_frame) frame_h_img else (bb_h / downsample_factor)
       w <- geom_frame_w * sx
       h <- geom_frame_h * sy
 
@@ -3553,16 +4014,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           y_src <- tmp
         }
 
-        if (use_normalized_frame) {
-          x_base <- (x_src - bb_xmin) / bb_w * frame_w
-          y_base <- (y_src - bb_ymin) / bb_h * frame_h
-        } else if (use_shifted_origin && !use_bbox_frame) {
-          x_base <- (x_src - bb_xmin) / bb_w * frame_w
-          y_base <- (y_src - bb_ymin) / bb_h * frame_h
-        } else if (use_shifted_origin) {
-          x_base <- x_src - bb_xmin
-          y_base <- y_src - bb_ymin
-        } else if (has_source_dims) {
+        if (use_source_origin) {
+          x_base <- x_src - source_origin_x
+          y_base <- y_src - source_origin_y
+        } else if (has_source_dims && in_frame) {
           x_base <- x_src
           y_base <- y_src
         } else {
@@ -3570,12 +4025,13 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           y_base <- y_src - bb_ymin
         }
 
-        x0 <- x_base * sx
+        x_frame <- x_base / downsample_factor
+        y_frame <- y_base / downsample_factor
+        x0 <- x_frame * sx
         if (isTRUE(flip_y)) {
-          y0 <- y_base * sy
+          y0 <- (geom_frame_h - y_frame) * sy
         } else {
-          # Convert top-left image-style Y coordinates into plot Y coordinates.
-          y0 <- (geom_frame_h - y_base) * sy
+          y0 <- y_frame * sy
         }
 
         xr <- x0 - w / 2
@@ -3689,23 +4145,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       req(polygon_data())
       poly <- polygon_data()
       poly$map_label <- get_polygon_labels(poly, input$polygon_label_field)
-      axis_mode <- resolve_polygon_axis_mode(poly, input$polygon_axis_mode, get_histology_image_optional())
-      src_dims <- get_overlay_source_dims()
-      poly_t <- transform_polygon_sf(
-        poly_sf = poly,
-        nx = msi_obj$nx,
-        ny = msi_obj$ny,
-        scale_x = input$scale_x,
-        scale_y = input$scale_y,
-        translate_x = tx,
-        translate_y = ty,
-        rotate_deg = effective_polygon_rotate_deg(),
-        flip_y = isTRUE(input$flip_histology_y),
-        swap_xy = identical(axis_mode, "yx"),
-        scale_mode = input$overlay_scale_mode,
-        source_width = if (!is.null(src_dims)) src_dims$width else NA_real_,
-        source_height = if (!is.null(src_dims)) src_dims$height else NA_real_
-      )
+      poly_t <- transform_polygons_for_current_registration(poly, tx = tx, ty = ty)$source
 
       # For inside/outside optimization, suppress obvious non-cell and
       # overly large polygons that can make the mask nearly invariant.
@@ -3727,12 +4167,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
       validate(need(nrow(poly_t) > 0, "No valid polygons remain for inside/outside mask (after filtering non-cell/oversized polygons)."))
 
-      grid <- expand.grid(
-        x = seq_len(as.integer(msi_obj$nx)),
-        y = seq_len(as.integer(msi_obj$ny)),
-        KEEP.OUT.ATTRS = FALSE,
-        stringsAsFactors = FALSE
-      )
+      grid <- source_canvas_grid_df(msi_obj)
       poly_crs <- normalize_crs(try(sf::st_crs(poly_t), silent = TRUE))
       if (is.null(poly_crs)) {
         pts_sf <- sf::st_as_sf(grid, coords = c("x", "y"), remove = FALSE)
@@ -3741,10 +4176,12 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
       hit <- sf::st_intersects(pts_sf, poly_t)
       hit_mask <- lengths(hit) > 0
-      row_idx <- as.integer(msi_obj$ny - grid$y + 1L)
+      coord_frame <- current_registration_view_coord_frame()
+      row_idx <- as.integer(coord_frame$ymax - grid$y + 1L)
+      col_idx <- as.integer(grid$x - coord_frame$xmin + 1L)
 
       mask <- matrix(FALSE, nrow = as.integer(msi_obj$ny), ncol = as.integer(msi_obj$nx))
-      mask[cbind(row_idx, as.integer(grid$x))] <- hit_mask
+      mask[cbind(row_idx, col_idx)] <- hit_mask
       mask
     }
 
@@ -3758,30 +4195,9 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       req(polygon_data())
       poly <- polygon_data()
       poly$map_label <- get_polygon_labels(poly, label_field)
-      axis_mode <- resolve_polygon_axis_mode(poly, input$polygon_axis_mode, get_histology_image_optional())
-      src_dims <- get_overlay_source_dims()
-      poly_t <- transform_polygon_sf(
-        poly_sf = poly,
-        nx = msi_obj$nx,
-        ny = msi_obj$ny,
-        scale_x = input$scale_x,
-        scale_y = input$scale_y,
-        translate_x = tx,
-        translate_y = ty,
-        rotate_deg = effective_polygon_rotate_deg(),
-        flip_y = isTRUE(input$flip_histology_y),
-        swap_xy = identical(axis_mode, "yx"),
-        scale_mode = input$overlay_scale_mode,
-        source_width = if (!is.null(src_dims)) src_dims$width else NA_real_,
-        source_height = if (!is.null(src_dims)) src_dims$height else NA_real_
-      )
+      poly_t <- transform_polygons_for_current_registration(poly, tx = tx, ty = ty)$source
 
-      grid <- expand.grid(
-        x = seq_len(as.integer(msi_obj$nx)),
-        y = seq_len(as.integer(msi_obj$ny)),
-        KEEP.OUT.ATTRS = FALSE,
-        stringsAsFactors = FALSE
-      )
+      grid <- source_canvas_grid_df(msi_obj)
       poly_crs <- normalize_crs(try(sf::st_crs(poly_t), silent = TRUE))
       if (is.null(poly_crs)) {
         pts_sf <- sf::st_as_sf(grid, coords = c("x", "y"), remove = FALSE)
@@ -3828,9 +4244,11 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         code_vec[keep] <- as.integer(m[keep])
       }
 
-      row_idx <- as.integer(msi_obj$ny - grid$y + 1L)
+      coord_frame <- current_registration_view_coord_frame()
+      row_idx <- as.integer(coord_frame$ymax - grid$y + 1L)
+      col_idx <- as.integer(grid$x - coord_frame$xmin + 1L)
       code_mat <- matrix(0L, nrow = as.integer(msi_obj$ny), ncol = as.integer(msi_obj$nx))
-      code_mat[cbind(row_idx, as.integer(grid$x))] <- code_vec
+      code_mat[cbind(row_idx, col_idx)] <- code_vec
 
       list(
         code_mat = code_mat,
@@ -4055,6 +4473,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       cand_n <- as.integer(min(max(24L, 4L * n_ions), max(24L, nrow(obj))))
       cand_idx <- suggest_histology_fusion_indices(
         obj = obj,
+        msi_obj = msi_obj,
         n_features = n_ions,
         candidate_pool = cand_n,
         intensity_transform = intensity_transform
@@ -4094,7 +4513,13 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           enhance = FALSE
         )
         sig_list[[ii]] <- sig_payload$signal
-        sig_score[ii] <- score_spatial_signal_map(sig_payload$signal, valid_mask = sig_payload$valid)
+        sig_score[ii] <- combine_weighted_scores(
+          c(
+            score_spatial_coherence_map(sig_payload$signal, valid_mask = sig_payload$valid, sigma = 2),
+            score_spatial_signal_map(sig_payload$signal, valid_mask = sig_payload$valid)
+          ),
+          c(0.75, 0.25)
+        )
       }
 
       keep <- is.finite(sig_score)
@@ -4185,6 +4610,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       cand_n <- as.integer(min(max(48L, 4L * n_features), max(48L, nrow(obj))))
       sel_idx <- suggest_histology_fusion_indices(
         obj = obj,
+        msi_obj = msi_obj,
         n_features = n_features,
         candidate_pool = cand_n,
         intensity_transform = intensity_transform
@@ -4247,7 +4673,9 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       signal_list <- vector("list", length(comp_ids))
       weight_vec <- rep(0, length(comp_ids))
       var_vec <- rep(NA_real_, length(comp_ids))
-      load_ref <- NULL
+      comp_structure_vec <- rep(NA_real_, length(comp_ids))
+      comp_coherence_vec <- rep(NA_real_, length(comp_ids))
+      load_mat <- matrix(0, nrow = length(sel_idx), ncol = length(comp_ids))
       for (ii in seq_along(comp_ids)) {
         comp_use <- comp_ids[ii]
         load_vec <- as.numeric(vectors[, comp_use])
@@ -4257,7 +4685,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           load_vec <- -load_vec
           score_vec <- -score_vec
         }
-        if (is.null(load_ref)) load_ref <- load_vec
+        load_mat[, ii] <- load_vec
 
         sig_payload <- build_numeric_signal_matrix(
           vals = score_vec,
@@ -4271,9 +4699,15 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         signal_list[[ii]] <- sig_payload$signal
         var_frac <- values[comp_use] / sum(values)
         var_vec[ii] <- var_frac
-        spatial_score <- score_spatial_signal_map(sig_payload$signal, valid_mask = sig_payload$valid)
-        spatial_weight <- if (is.finite(spatial_score)) max(spatial_score, 0) else 0
-        weight_vec[ii] <- max(1e-6, if (is.finite(var_frac)) var_frac else 0) * (1 + spatial_weight)
+        comp_structure_vec[ii] <- score_spatial_signal_map(sig_payload$signal, valid_mask = sig_payload$valid)
+        comp_coherence_vec[ii] <- score_spatial_coherence_map(sig_payload$signal, valid_mask = sig_payload$valid, sigma = 2)
+        spatial_weight <- combine_weighted_scores(
+          c(comp_coherence_vec[ii], comp_structure_vec[ii]),
+          c(0.75, 0.25)
+        )
+        spatial_gain <- if (is.finite(spatial_weight)) max(spatial_weight, 0) else 0
+        spatial_penalty <- if (is.finite(spatial_weight) && spatial_weight < -0.25) 0.20 else 1.0
+        weight_vec[ii] <- max(1e-6, if (is.finite(var_frac)) var_frac else 0) * spatial_penalty * (1 + spatial_gain)
       }
 
       if (!any(is.finite(weight_vec) & weight_vec > 0)) {
@@ -4299,6 +4733,14 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         paste(format(vals, digits = 10, scientific = FALSE, trim = TRUE), collapse = ", ")
       }
 
+      load_summary <- if (ncol(load_mat) == length(weight_vec) && length(weight_vec) > 0L) {
+        as.numeric(drop(load_mat %*% weight_vec))
+      } else if (ncol(load_mat) > 0L) {
+        as.numeric(load_mat[, 1])
+      } else {
+        rep(NA_real_, length(sel_idx))
+      }
+
       comp_label <- if (length(comp_ids) == 1L) {
         sprintf("PC%d", comp_ids[1])
       } else {
@@ -4306,11 +4748,11 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
       var_txt <- paste(sprintf("PC%d %.1f%%", comp_ids, 100 * ifelse(is.finite(var_vec), var_vec, 0)), collapse = ", ")
       detail_txt <- sprintf(
-        "%s | %s | + %s | - %s",
+        "%s | %s | loadings + %s | loadings - %s",
         comp_label,
         var_txt,
-        top_loading_text(load_ref, sel_mz, decreasing = TRUE),
-        top_loading_text(load_ref, sel_mz, decreasing = FALSE)
+        top_loading_text(load_summary, sel_mz, decreasing = TRUE),
+        top_loading_text(load_summary, sel_mz, decreasing = FALSE)
       )
 
       list(
@@ -4321,13 +4763,68 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         detail = detail_txt,
         mz_values = sel_mz,
         feature_index = sel_idx,
-        feature_count = length(sel_idx)
+        feature_count = length(sel_idx),
+        component_ids = comp_ids,
+        component_variance = var_vec,
+        component_weights = weight_vec,
+        top_positive_mz = top_loading_text(load_summary, sel_mz, n_show = 8L, decreasing = TRUE),
+        top_negative_mz = top_loading_text(load_summary, sel_mz, n_show = 8L, decreasing = FALSE),
+        selected_mz_preview = {
+          ord_abs <- order(abs(load_summary), decreasing = TRUE, na.last = NA)
+          mz_preview_vals <- sel_mz[ord_abs]
+          mz_preview_vals <- mz_preview_vals[is.finite(mz_preview_vals)]
+          if (length(mz_preview_vals) == 0L) {
+            "n/a"
+          } else {
+            paste(format(utils::head(mz_preview_vals, 12L), digits = 10, scientific = FALSE, trim = TRUE), collapse = ", ")
+          }
+        }
       )
     }
 
     resolve_optimization_signal_matrix <- function(msi_obj, source_mode = "current", field = NULL, context_label = "optimization") {
       source_mode <- tolower(trimws(as.character(source_mode)[1]))
       if (!source_mode %in% c("current", "pdata", "multi", "pca")) source_mode <- "current"
+
+      histology_pdata_target_from_field <- function(msi_obj, field, label_txt = NULL) {
+        out_preview <- edge_fit_signal_from_pdata_field(
+          msi_obj = msi_obj,
+          field = field,
+          binary_mode = "label_map"
+        )
+        out_type <- if (!is.null(out_preview$type) && nzchar(as.character(out_preview$type)[1])) {
+          as.character(out_preview$type)[1]
+        } else {
+          NA_character_
+        }
+        if (!identical(out_type, "categorical_label_map")) {
+          return(list(
+            signal = out_preview$signal,
+            field = out_preview$field,
+            type = out_type,
+            label = if (!is.null(label_txt) && nzchar(as.character(label_txt)[1])) as.character(label_txt)[1] else paste0("pData: ", field),
+            detail = NA_character_,
+            label_matrix = if (!is.null(out_preview$label_matrix)) out_preview$label_matrix else NULL,
+            color_map = if (!is.null(out_preview$color_map)) out_preview$color_map else NULL
+          ))
+        }
+
+        out_score <- edge_fit_signal_from_pdata_field(
+          msi_obj = msi_obj,
+          field = field,
+          binary_mode = "categorical"
+        )
+        list(
+          signal = out_score$signal,
+          field = out_score$field,
+          type = "categorical_spatial_map",
+          label = if (!is.null(label_txt) && nzchar(as.character(label_txt)[1])) as.character(label_txt)[1] else paste0("pData: ", field),
+          detail = "Scored as all-label boundary-density map across the full categorical field.",
+          label_matrix = if (!is.null(out_preview$label_matrix)) out_preview$label_matrix else NULL,
+          color_map = if (!is.null(out_preview$color_map)) out_preview$color_map else NULL
+        )
+      }
+
       if (identical(source_mode, "current")) {
         use_histology_label_mode <- grepl("histology", tolower(context_label), fixed = TRUE) &&
           !is.null(msi_obj$mode) &&
@@ -4335,18 +4832,18 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           !is.null(msi_obj$pdata_field) &&
           nzchar(as.character(msi_obj$pdata_field)[1])
         if (isTRUE(use_histology_label_mode)) {
-          out <- edge_fit_signal_from_pdata_field(
+          out <- histology_pdata_target_from_field(
             msi_obj = msi_obj,
             field = as.character(msi_obj$pdata_field)[1],
-            binary_mode = "label_map"
+            label_txt = if (!is.null(msi_obj$display_label)) as.character(msi_obj$display_label) else "Current MSI display"
           )
           return(list(
             signal = out$signal,
             source = "current",
             field = out$field,
             type = out$type,
-            label = if (!is.null(msi_obj$display_label)) as.character(msi_obj$display_label) else "Current MSI display",
-            detail = NA_character_,
+            label = out$label,
+            detail = out$detail,
             label_matrix = if (!is.null(out$label_matrix)) out$label_matrix else NULL,
             color_map = if (!is.null(out$color_map)) out$color_map else NULL
           ))
@@ -4400,15 +4897,19 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       if (is.na(field) || !nzchar(field)) {
         stop(sprintf("Select a pData field for %s.", context_label))
       }
-      binary_mode_use <- if (grepl("histology", tolower(context_label), fixed = TRUE)) "label_map" else "categorical"
-      out <- edge_fit_signal_from_pdata_field(msi_obj = msi_obj, field = field, binary_mode = binary_mode_use)
+      is_histology_context <- grepl("histology", tolower(context_label), fixed = TRUE)
+      if (isTRUE(is_histology_context)) {
+        out <- histology_pdata_target_from_field(msi_obj = msi_obj, field = field, label_txt = paste0("pData: ", field))
+      } else {
+        out <- edge_fit_signal_from_pdata_field(msi_obj = msi_obj, field = field, binary_mode = "categorical")
+      }
       list(
         signal = out$signal,
         source = "pdata",
         field = out$field,
         type = out$type,
-        label = paste0("pData: ", out$field),
-        detail = NA_character_,
+        label = if (!is.null(out$label)) out$label else paste0("pData: ", out$field),
+        detail = if (!is.null(out$detail)) out$detail else NA_character_,
         label_matrix = if (!is.null(out$label_matrix)) out$label_matrix else NULL,
         color_map = if (!is.null(out$color_map)) out$color_map else NULL
       )
@@ -4641,6 +5142,118 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       score
     }
 
+    build_histology_mask_fit_cache <- function(mask, band_px = 6L) {
+      mask <- matrix(as.logical(mask), nrow = nrow(mask), ncol = ncol(mask))
+      mask[!is.finite(mask)] <- FALSE
+      bands <- build_mask_bands(mask, band_px = band_px)
+      center_weight <- matrix(0, nrow = nrow(mask), ncol = ncol(mask))
+      boundary_cache <- build_mask_boundary_distance_cache(mask)
+      if (!is.null(boundary_cache) && !is.null(boundary_cache$dist)) {
+        dist_in <- suppressWarnings(matrix(as.numeric(boundary_cache$dist), nrow = nrow(mask), ncol = ncol(mask)))
+        dist_in[!mask | !is.finite(dist_in)] <- 0
+        d_keep <- dist_in[mask & is.finite(dist_in) & dist_in > 0]
+        if (length(d_keep) > 0L) {
+          d_norm <- suppressWarnings(stats::quantile(d_keep, probs = 0.95, na.rm = TRUE, names = FALSE, type = 8))
+          if (!is.finite(d_norm) || d_norm <= 0) d_norm <- suppressWarnings(max(d_keep, na.rm = TRUE))
+          if (is.finite(d_norm) && d_norm > 0) {
+            center_weight[mask] <- pmin(1, dist_in[mask] / d_norm)
+          }
+        }
+      }
+      bands$mask <- mask
+      bands$center_weight <- center_weight
+      bands
+    }
+
+    sample_shifted_weighted_signal <- function(coord_obj, signal, weight, dx = 0L, dy = 0L, min_n = 5L) {
+      if (is.null(coord_obj) || length(coord_obj$r) == 0L || is.null(weight) || !is.matrix(weight)) {
+        return(list(ok = FALSE, mean = NA_real_, n = 0L, cov = 0))
+      }
+      ny <- nrow(signal)
+      nx <- ncol(signal)
+      rr <- coord_obj$r + as.integer(dy)
+      cc <- coord_obj$c + as.integer(dx)
+      keep <- rr >= 1L & rr <= ny & cc >= 1L & cc <= nx
+      n_keep <- sum(keep)
+      cov <- n_keep / max(1L, as.integer(coord_obj$n_total))
+      if (!is.finite(n_keep) || n_keep < min_n) {
+        return(list(ok = FALSE, mean = NA_real_, n = as.integer(n_keep), cov = cov))
+      }
+
+      vals <- as.numeric(signal[cbind(rr[keep], cc[keep])])
+      ww <- as.numeric(weight[cbind(rr[keep], cc[keep])])
+      good <- is.finite(vals) & is.finite(ww) & ww > 0
+      if (sum(good) < min_n) {
+        return(list(ok = FALSE, mean = NA_real_, n = as.integer(sum(good)), cov = cov))
+      }
+      ww <- ww[good]
+      vals <- vals[good]
+      wsum <- sum(ww)
+      if (!is.finite(wsum) || wsum <= 0) {
+        return(list(ok = FALSE, mean = NA_real_, n = as.integer(length(vals)), cov = cov))
+      }
+      list(
+        ok = TRUE,
+        mean = sum(vals * ww) / wsum,
+        n = as.integer(length(vals)),
+        cov = cov
+      )
+    }
+
+    score_mask_centrality_shift <- function(mask_cache, signal, dx = 0L, dy = 0L) {
+      if (is.null(mask_cache) || is.null(mask_cache$inside_all)) return(-Inf)
+      dx <- as.integer(round(dx))
+      dy <- as.integer(round(dy))
+
+      inside_all <- sample_shifted_stats(mask_cache$inside_all, signal, dx = dx, dy = dy, min_n = 10L)
+      if (!isTRUE(inside_all$ok)) {
+        inside_all <- sample_shifted_stats(mask_cache$inside_all, signal, dx = dx, dy = dy, min_n = 1L)
+      }
+      if (!isTRUE(inside_all$ok)) return(-Inf)
+
+      center_term <- if (!is.null(mask_cache$center_weight)) {
+        sample_shifted_weighted_signal(mask_cache$inside_all, signal, mask_cache$center_weight, dx = dx, dy = dy, min_n = 5L)
+      } else {
+        list(ok = FALSE, mean = NA_real_, cov = inside_all$cov)
+      }
+      core_term <- sample_shifted_stats(mask_cache$inside_core, signal, dx = dx, dy = dy, min_n = 5L)
+      boundary_in <- if (length(mask_cache$inside_rings) >= 1L) {
+        sample_shifted_stats(mask_cache$inside_rings[[1]], signal, dx = dx, dy = dy, min_n = 3L)
+      } else {
+        list(ok = FALSE, mean = NA_real_, cov = 0)
+      }
+      boundary_out <- if (length(mask_cache$outside_rings) >= 1L) {
+        sample_shifted_stats(mask_cache$outside_rings[[1]], signal, dx = dx, dy = dy, min_n = 3L)
+      } else {
+        list(ok = FALSE, mean = NA_real_, cov = 0)
+      }
+
+      center_mean <- if (isTRUE(center_term$ok)) center_term$mean else if (isTRUE(core_term$ok)) core_term$mean else inside_all$mean
+      boundary_in_mean <- if (isTRUE(boundary_in$ok)) boundary_in$mean else inside_all$mean
+      boundary_out_mean <- if (isTRUE(boundary_out$ok)) boundary_out$mean else suppressWarnings(mean(as.numeric(signal), na.rm = TRUE))
+      if (!is.finite(boundary_out_mean)) boundary_out_mean <- 0
+
+      centeredness <- center_mean - boundary_in_mean
+      inside_vs_outside <- center_mean - boundary_out_mean
+      core_boost <- if (isTRUE(core_term$ok)) core_term$mean - inside_all$mean else 0
+      global_contrast <- inside_all$mean - boundary_out_mean
+      coverage <- pmax(
+        0.01,
+        pmin(
+          1,
+          min(
+            if (is.finite(inside_all$cov)) inside_all$cov else 0,
+            if (isTRUE(center_term$ok) && is.finite(center_term$cov)) center_term$cov else if (is.finite(inside_all$cov)) inside_all$cov else 0
+          )
+        )
+      )
+
+      base <- 0.45 * centeredness + 0.30 * inside_vs_outside + 0.15 * core_boost + 0.10 * global_contrast
+      score <- base - 1.10 * (1 - coverage)^2
+      if (!is.finite(score)) return(-Inf)
+      score
+    }
+
     build_edge_distance_cache <- function(signal, q = 0.85) {
       ny <- nrow(signal)
       nx <- ncol(signal)
@@ -4649,38 +5262,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
       edge_info <- build_edge_mask(signal, q = q)
       if (is.null(edge_info) || is.null(edge_info$edge)) return(NULL)
-      edge <- edge_info$edge
-      n_edge <- suppressWarnings(sum(edge, na.rm = TRUE))
-      if (!is.finite(n_edge) || n_edge < 5L) return(NULL)
-
-      # Two-pass chamfer distance transform from MSI edges.
-      inf <- 1e6
-      d <- matrix(inf, nrow = ny, ncol = nx)
-      d[edge] <- 0
-      wdiag <- sqrt(2)
-
-      for (r in seq_len(ny)) {
-        for (c in seq_len(nx)) {
-          v <- d[r, c]
-          if (r > 1L) v <- min(v, d[r - 1L, c] + 1)
-          if (c > 1L) v <- min(v, d[r, c - 1L] + 1)
-          if (r > 1L && c > 1L) v <- min(v, d[r - 1L, c - 1L] + wdiag)
-          if (r > 1L && c < nx) v <- min(v, d[r - 1L, c + 1L] + wdiag)
-          d[r, c] <- v
-        }
-      }
-      for (r in seq.int(ny, 1L, by = -1L)) {
-        for (c in seq.int(nx, 1L, by = -1L)) {
-          v <- d[r, c]
-          if (r < ny) v <- min(v, d[r + 1L, c] + 1)
-          if (c < nx) v <- min(v, d[r, c + 1L] + 1)
-          if (r < ny && c < nx) v <- min(v, d[r + 1L, c + 1L] + wdiag)
-          if (r < ny && c > 1L) v <- min(v, d[r + 1L, c - 1L] + wdiag)
-          d[r, c] <- v
-        }
-      }
-      d <- pmin(d, 50)
-      list(dist = d, edge = edge, n_edge = as.integer(n_edge), threshold = edge_info$threshold)
+      out <- build_distance_cache_from_edge_mask(edge_info$edge, max_dist = 50L)
+      if (is.null(out)) return(NULL)
+      out$threshold <- edge_info$threshold
+      out
     }
 
     histology_fit_crop_window <- function(msi_obj, tr_hist, tx, ty, search_range = 0L, pad_extra = 2L) {
@@ -4749,6 +5334,145 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       sc <- (-b$mean) - 1.10 * (1 - cov)^2
       if (!is.finite(sc)) return(-Inf)
       sc
+    }
+
+    binary_signal_to_mask <- function(signal, threshold = NULL) {
+      if (is.null(signal) || !is.matrix(signal)) {
+        return(matrix(FALSE, nrow = 0L, ncol = 0L))
+      }
+      sig <- suppressWarnings(matrix(as.numeric(signal), nrow = nrow(signal), ncol = ncol(signal)))
+      keep <- is.finite(sig)
+      out <- matrix(FALSE, nrow = nrow(sig), ncol = ncol(sig))
+      if (!any(keep)) return(out)
+
+      sig_keep <- sig[keep]
+      sig_max <- suppressWarnings(max(sig_keep, na.rm = TRUE))
+      if (!is.finite(sig_max) || sig_max <= 0) return(out)
+
+      if (length(threshold) != 1L || !is.finite(threshold)) {
+        sig_rng <- suppressWarnings(range(sig_keep, na.rm = TRUE))
+        if (!all(is.finite(sig_rng))) return(out)
+        threshold <- if (diff(sig_rng) <= 1e-8) {
+          sig_rng[2] / 2
+        } else {
+          mean(sig_rng)
+        }
+      }
+      out[keep] <- sig[keep] > as.numeric(threshold)
+      out
+    }
+
+    combine_weighted_scores <- function(values, weights = NULL) {
+      vals <- as.numeric(values)
+      if (length(vals) == 0L) return(NA_real_)
+      if (is.null(weights) || length(weights) != length(vals)) {
+        weights <- rep(1, length(vals))
+      }
+      weights <- as.numeric(weights)
+      keep <- is.finite(vals) & is.finite(weights) & weights > 0
+      if (!any(keep)) return(NA_real_)
+      sum(vals[keep] * weights[keep]) / sum(weights[keep])
+    }
+
+    build_structure_signal_map <- function(signal, valid_mask = NULL, sigma = 4, positive_only = FALSE) {
+      if (is.null(signal) || !is.matrix(signal) || nrow(signal) < 2L || ncol(signal) < 2L) {
+        return(NULL)
+      }
+
+      ny <- nrow(signal)
+      nx <- ncol(signal)
+      sig <- suppressWarnings(matrix(as.numeric(signal), nrow = ny, ncol = nx))
+      sig[!is.finite(sig)] <- 0
+
+      if (is.null(valid_mask)) {
+        valid <- is.finite(signal)
+      } else {
+        valid <- matrix(as.logical(valid_mask), nrow = ny, ncol = nx)
+      }
+      valid[!is.finite(valid)] <- FALSE
+      if (sum(valid, na.rm = TRUE) < 25L) return(NULL)
+
+      sigma <- suppressWarnings(as.numeric(sigma))
+      if (!is.finite(sigma) || sigma <= 0) sigma <- 4
+
+      sig_masked <- sig
+      sig_masked[!valid] <- NA_real_
+      smooth <- gaussian_smooth_matrix(sig_masked, sigma = sigma)
+      detail <- sig - smooth
+      detail[!valid] <- NA_real_
+      detail_work <- if (isTRUE(positive_only)) pmax(detail, 0) else abs(detail)
+
+      right <- cbind(sig[, -1, drop = FALSE], sig[, nx, drop = FALSE])
+      down <- rbind(sig[-1, , drop = FALSE], sig[ny, , drop = FALSE])
+      right_valid <- cbind(valid[, -1, drop = FALSE], FALSE)
+      down_valid <- rbind(valid[-1, , drop = FALSE], rep(FALSE, nx))
+      grad <- abs(right - sig) + abs(down - sig)
+      grad[!(valid & (right_valid | down_valid))] <- NA_real_
+
+      detail_sig <- matrix(rescale01(as.vector(detail_work), enhance = FALSE), nrow = ny, ncol = nx)
+      grad_sig <- matrix(rescale01(as.vector(grad), enhance = FALSE), nrow = ny, ncol = nx)
+      out <- (0.70 * detail_sig) + (0.30 * grad_sig)
+      out[!is.finite(out)] <- 0
+      out[!valid] <- 0
+
+      list(
+        signal = out,
+        valid = valid,
+        detail = detail,
+        gradient = grad
+      )
+    }
+
+    build_distance_cache_from_edge_mask <- function(edge_mask, max_dist = 50L) {
+      if (is.null(edge_mask) || !is.matrix(edge_mask) || nrow(edge_mask) < 2L || ncol(edge_mask) < 2L) {
+        return(NULL)
+      }
+      edge <- matrix(as.logical(edge_mask), nrow = nrow(edge_mask), ncol = ncol(edge_mask))
+      edge[!is.finite(edge)] <- FALSE
+      n_edge <- suppressWarnings(sum(edge, na.rm = TRUE))
+      if (!is.finite(n_edge) || n_edge < 5L) return(NULL)
+
+      ny <- nrow(edge)
+      nx <- ncol(edge)
+      inf <- 1e6
+      d <- matrix(inf, nrow = ny, ncol = nx)
+      d[edge] <- 0
+      wdiag <- sqrt(2)
+
+      for (r in seq_len(ny)) {
+        for (c in seq_len(nx)) {
+          v <- d[r, c]
+          if (r > 1L) v <- min(v, d[r - 1L, c] + 1)
+          if (c > 1L) v <- min(v, d[r, c - 1L] + 1)
+          if (r > 1L && c > 1L) v <- min(v, d[r - 1L, c - 1L] + wdiag)
+          if (r > 1L && c < nx) v <- min(v, d[r - 1L, c + 1L] + wdiag)
+          d[r, c] <- v
+        }
+      }
+      for (r in seq.int(ny, 1L, by = -1L)) {
+        for (c in seq.int(nx, 1L, by = -1L)) {
+          v <- d[r, c]
+          if (r < ny) v <- min(v, d[r + 1L, c] + 1)
+          if (c < nx) v <- min(v, d[r, c + 1L] + 1)
+          if (r < ny && c < nx) v <- min(v, d[r + 1L, c + 1L] + wdiag)
+          if (r < ny && c > 1L) v <- min(v, d[r + 1L, c - 1L] + wdiag)
+          d[r, c] <- v
+        }
+      }
+
+      max_dist <- suppressWarnings(as.numeric(max_dist))
+      if (!is.finite(max_dist) || max_dist < 1) max_dist <- 50
+      d <- pmin(d, max_dist)
+      list(dist = d, edge = edge, n_edge = as.integer(n_edge))
+    }
+
+    build_mask_boundary_distance_cache <- function(mask) {
+      if (is.null(mask) || !is.matrix(mask)) return(NULL)
+      mask <- matrix(as.logical(mask), nrow = nrow(mask), ncol = ncol(mask))
+      mask[!is.finite(mask)] <- FALSE
+      if (sum(mask, na.rm = TRUE) < 10L) return(NULL)
+      boundary <- mask & !erode8(mask)
+      build_distance_cache_from_edge_mask(boundary)
     }
 
     get_intensity_matrix_fast <- function(msi_obj) {
@@ -5173,7 +5897,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         return()
       }
       pick_rank <- suppressWarnings(as.integer(input$optimize_xy_choice))
-      if (!is.finite(pick_rank)) pick_rank <- cand$rank[1]
+      if (length(pick_rank) != 1L || !is.finite(pick_rank)) pick_rank <- cand$rank[1]
       row <- cand[cand$rank == pick_rank, , drop = FALSE]
       if (nrow(row) == 0) row <- cand[1, , drop = FALSE]
 
@@ -5198,8 +5922,11 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         return(tags$small("Histology-fit preview: run Histology Fit to generate up to 5 candidates."))
       }
       labels <- sprintf(
-        "#%d dX=%.2f dY=%.2f score=%.4f | int=%.4f | corr=%.4f | edge=%.4f",
-        cand$rank, cand$dX, cand$dY, cand$score, cand$intensity_score, cand$signed_corr, cand$edge_score
+        "%s%s#%d dX=%.2f dY=%.2f score=%.4f | int=%.4f | corr=%.4f | edge=%.4f%s",
+        ifelse(!is.null(cand$selected) & cand$selected, "[selected] ", ""),
+        ifelse(!is.null(cand$start_position) & cand$start_position, "[start] ", ""),
+        cand$rank, cand$dX, cand$dY, cand$score, cand$intensity_score, cand$signed_corr, cand$edge_score,
+        ifelse(!is.null(cand$peak_score) & cand$peak_score, " | raw peak", "")
       )
       vals <- as.character(cand$rank)
       names(vals) <- labels
@@ -5218,7 +5945,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         return()
       }
       pick_rank <- suppressWarnings(as.integer(input$histology_fit_choice))
-      if (!is.finite(pick_rank)) pick_rank <- cand$rank[1]
+      if (length(pick_rank) != 1L || !is.finite(pick_rank)) pick_rank <- cand$rank[1]
       row <- cand[cand$rank == pick_rank, , drop = FALSE]
       if (nrow(row) == 0) row <- cand[1, , drop = FALSE]
 
@@ -5263,11 +5990,45 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       } else {
         NULL
       }
+      selected_mz_txt <- if (!is.null(info$selected_mz_preview) && nzchar(as.character(info$selected_mz_preview)[1])) {
+        sprintf("Selected ions preview: %s", as.character(info$selected_mz_preview)[1])
+      } else {
+        NULL
+      }
+      pca_weight_txt <- if (!is.null(info$component_ids) && !is.null(info$component_weights)) {
+        comp_ids <- suppressWarnings(as.integer(info$component_ids))
+        comp_w <- suppressWarnings(as.numeric(info$component_weights))
+        keep <- is.finite(comp_ids) & is.finite(comp_w)
+        if (any(keep)) {
+          comp_ids <- comp_ids[keep]
+          comp_w <- comp_w[keep]
+          sprintf(
+            "Component weights: %s",
+            paste(sprintf("PC%d %.2f", comp_ids, comp_w), collapse = ", ")
+          )
+        } else {
+          NULL
+        }
+      } else {
+        NULL
+      }
+      loading_txt <- if (!is.null(info$top_positive_mz) && nzchar(as.character(info$top_positive_mz)[1])) {
+        sprintf(
+          "Blended PCA loadings: + %s | - %s",
+          as.character(info$top_positive_mz)[1],
+          if (!is.null(info$top_negative_mz) && nzchar(as.character(info$top_negative_mz)[1])) as.character(info$top_negative_mz)[1] else "n/a"
+        )
+      } else {
+        NULL
+      }
       tags$div(
         tags$strong(if (!is.null(info$label) && nzchar(as.character(info$label)[1])) as.character(info$label)[1] else "Histology-fit target"),
         if (!is.null(detail_txt)) tags$p(style = "margin: 6px 0 0 0;", detail_txt),
         tags$p(style = "margin: 6px 0 0 0;", sprintf("Signal type: %s", if (!is.null(info$type) && nzchar(as.character(info$type)[1])) as.character(info$type)[1] else "n/a")),
-        if (!is.null(feature_txt)) tags$p(style = "margin: 6px 0 0 0;", feature_txt)
+        if (!is.null(feature_txt)) tags$p(style = "margin: 6px 0 0 0;", feature_txt),
+        if (!is.null(pca_weight_txt)) tags$p(style = "margin: 6px 0 0 0;", pca_weight_txt),
+        if (!is.null(loading_txt)) tags$p(style = "margin: 6px 0 0 0;", loading_txt),
+        if (!is.null(selected_mz_txt)) tags$p(style = "margin: 6px 0 0 0;", selected_mz_txt)
       )
     })
 
@@ -5287,7 +6048,13 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         col_mat[keep] <- unname(col_map[lab_mat[keep]])
         rast <- as.raster(col_mat)
       } else {
-        rast <- signal_matrix_to_raster(sig, palette_name = input$msi_palette)
+        palette_use <- if (!is.null(info$type) &&
+          identical(as.character(info$type)[1], "categorical_spatial_map")) {
+          "Inferno"
+        } else {
+          input$msi_palette
+        }
+        rast <- signal_matrix_to_raster(sig, palette_name = palette_use)
       }
       if (is.null(rast)) return(invisible(NULL))
       if (is.null(main) || !nzchar(trimws(as.character(main)[1]))) {
@@ -5335,8 +6102,12 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
     observeEvent(input$run_histology_fit, {
       req(msi_for_pdata())
+      histology_fit_notify <- function(msg, type = "message", duration = 7) {
+        message(sprintf("[Histology Image Fit] %s", msg))
+        showNotification(msg, type = type, duration = duration)
+      }
       if (is.null(input$histology_upload) || !nzchar(input$histology_upload$name)) {
-        showNotification("Load a histology image before running Histology Fit.", type = "warning", duration = 7)
+        histology_fit_notify("Load a histology image before running Histology Fit.", type = "warning", duration = 7)
         return()
       }
       xh$histology_fit_grid <- NULL
@@ -5355,6 +6126,13 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       if (!is.finite(stp) || stp < 1L) stp <- 2L
       rng <- as.integer(min(500L, max(1L, rng)))
       stp <- as.integer(min(50L, max(1L, stp)))
+      message(sprintf(
+        "[Histology Image Fit] Starting local XY refinement at X=%.2f Y=%.2f range=%d step=%d",
+        tx0,
+        ty0,
+        rng,
+        stp
+      ))
       histology_fit_relation <- resolve_histology_intensity_relation(input$histology_fit_intensity_relation)
 
       msi <- make_msi_raster()
@@ -5378,7 +6156,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         sig_info <- try(histology_fit_signal_matrix(msi), silent = TRUE)
         if (inherits(sig_info, "try-error") || is.null(sig_info) || !is.matrix(sig_info$signal)) {
           xh$histology_fit_target_info <- NULL
-          showNotification("Could not build Histology Fit target signal. Check current display mode or selected pData field.", type = "error", duration = 8)
+          histology_fit_notify("Could not build Histology Fit target signal. Check current display mode or selected pData field.", type = "error", duration = 8)
           return()
         }
         xh$histology_fit_target_info <- list(
@@ -5390,6 +6168,12 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           detail = if (!is.null(sig_info$detail)) sig_info$detail else NA_character_,
           feature_count = if (!is.null(sig_info$feature_count)) sig_info$feature_count else NA_integer_,
           mz_values = if (!is.null(sig_info$mz_values)) sig_info$mz_values else NULL,
+          component_ids = if (!is.null(sig_info$component_ids)) sig_info$component_ids else NULL,
+          component_variance = if (!is.null(sig_info$component_variance)) sig_info$component_variance else NULL,
+          component_weights = if (!is.null(sig_info$component_weights)) sig_info$component_weights else NULL,
+          top_positive_mz = if (!is.null(sig_info$top_positive_mz)) sig_info$top_positive_mz else NULL,
+          top_negative_mz = if (!is.null(sig_info$top_negative_mz)) sig_info$top_negative_mz else NULL,
+          selected_mz_preview = if (!is.null(sig_info$selected_mz_preview)) sig_info$selected_mz_preview else NULL,
           label_matrix = if (!is.null(sig_info$label_matrix)) sig_info$label_matrix else NULL,
           color_map = if (!is.null(sig_info$color_map)) sig_info$color_map else NULL
         )
@@ -5417,11 +6201,16 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         )
         if (inherits(tr_hist, "try-error") || is.null(tr_hist) || is.null(tr_hist$raster)) {
           xh$histology_fit_target_info <- NULL
-          showNotification("Could not transform histology image for Histology Fit.", type = "error", duration = 8)
+          histology_fit_notify("Could not transform histology image for Histology Fit.", type = "error", duration = 8)
           return()
         }
         fit_window <- histology_fit_crop_window(msi, tr_hist, tx = tx0, ty = ty0, search_range = rng, pad_extra = stp)
         signal_use <- signal[fit_window$rows, fit_window$cols, drop = FALSE]
+        target_type <- if (!is.null(sig_info$type) && nzchar(as.character(sig_info$type)[1])) {
+          as.character(sig_info$type)[1]
+        } else {
+          NA_character_
+        }
         label_use <- if (!is.null(sig_info$type) &&
           identical(as.character(sig_info$type)[1], "categorical_label_map") &&
           !is.null(sig_info$label_matrix) &&
@@ -5430,12 +6219,77 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         } else {
           NULL
         }
-        edge_cache <- if (!is.null(sig_info$type) && as.character(sig_info$type)[1] %in% c("binary_mask", "categorical_label_map")) {
+        signal_mask <- NULL
+        binary_mask_cache <- NULL
+        binary_mask_reason <- NA_character_
+        binary_mask_n <- NA_integer_
+        binary_mask_total <- as.integer(length(signal_use))
+        binary_mask_frac <- NA_real_
+        if (identical(target_type, "binary_mask")) {
+          signal_mask <- binary_signal_to_mask(signal_use)
+          n_mask <- suppressWarnings(sum(signal_mask, na.rm = TRUE))
+          binary_mask_n <- suppressWarnings(as.integer(n_mask))
+          if (is.finite(n_mask) && is.finite(binary_mask_total) && binary_mask_total > 0L) {
+            binary_mask_frac <- n_mask / binary_mask_total
+          }
+          if (!is.finite(n_mask) || n_mask <= 0L) {
+            binary_mask_reason <- "mask has no positive pixels in the scoring window"
+          } else if (n_mask < 25L) {
+            binary_mask_reason <- sprintf("mask is too small in the scoring window (%d positive pixels)", as.integer(n_mask))
+          } else if (n_mask > (length(signal_mask) - 25L)) {
+            binary_mask_reason <- sprintf(
+              "mask nearly fills the scoring window (%d / %d positive pixels)",
+              as.integer(n_mask),
+              as.integer(length(signal_mask))
+            )
+          } else {
+            binary_mask_cache <- build_histology_mask_fit_cache(signal_mask, band_px = 6L)
+            if (is.null(binary_mask_cache)) {
+              binary_mask_reason <- "mask cache could not be built"
+            }
+          }
+          if (!is.null(binary_mask_cache)) {
+            message(sprintf(
+              "[Histology Image Fit] Binary mask stats window=%s positive_pixels=%d total_pixels=%d fraction=%.4f mask_scoring=enabled",
+              fit_window$label,
+              if (is.finite(binary_mask_n)) binary_mask_n else -1L,
+              if (is.finite(binary_mask_total)) binary_mask_total else -1L,
+              if (is.finite(binary_mask_frac)) binary_mask_frac else NA_real_
+            ))
+          } else {
+            histology_fit_notify(
+              sprintf(
+                "Binary-mask Histology Fit could not initialize mask scoring for window %s. %s.",
+                fit_window$label,
+                if (!is.na(binary_mask_reason) && nzchar(binary_mask_reason)) binary_mask_reason else "Mask statistics were invalid"
+              ),
+              type = "warning",
+              duration = 10
+            )
+            return()
+          }
+        }
+        target_structure_use <- if (is.null(label_use) && !identical(target_type, "binary_mask")) {
+          build_structure_signal_map(signal_use, valid_mask = is.finite(signal_use), positive_only = FALSE)
+        } else {
           NULL
+        }
+        edge_cache <- if (!is.null(label_use)) {
+          NULL
+        } else if (identical(target_type, "binary_mask")) {
+          build_mask_boundary_distance_cache(signal_mask)
+        } else if (!is.null(target_structure_use) && !is.null(target_structure_use$signal)) {
+          build_edge_distance_cache(target_structure_use$signal)
         } else {
           build_edge_distance_cache(signal_use)
         }
-        message(sprintf("[Histology Image Fit] Scoring window=%s", fit_window$label))
+        message(sprintf(
+          "[Histology Image Fit] Scoring window=%s target_type=%s mask_scoring=%s structure_scoring=%s",
+          fit_window$label,
+          if (!is.null(target_type) && nzchar(target_type)) target_type else "n/a",
+          if (!is.null(binary_mask_cache)) "enabled" else "disabled",
+          if (!is.null(target_structure_use) || identical(target_type, "binary_mask")) "enabled" else "disabled"
+        ))
 
         score_histology_pair <- function(dx, dy) {
           tx_abs <- clamp(tx0 + as.numeric(dx), -1000, 1000)
@@ -5487,23 +6341,96 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
             ))
           }
 
+          hp_structure <- build_structure_signal_map(hp_signal, valid_mask = hp_valid, positive_only = TRUE)
+
           if (!is.null(label_use)) {
             sc_corr <- NA_real_
             sc_nmi <- NA_real_
             sc_intensity <- categorical_signal_association(hp_signal[keep], label_use[keep], min_group_n = 5L)
             sc_edge <- NA_real_
             n_edge <- 0L
+          } else if (!is.null(binary_mask_cache)) {
+            sc_corr <- signed_rank_correlation(hp_signal[keep], signal_use[keep])
+            sc_nmi <- normalized_mutual_information(hp_signal[keep], signal_use[keep], nbins = 24L)
+            sc_mask_raw <- combine_weighted_scores(
+              c(
+                score_mask_shift(binary_mask_cache, hp_signal, dx = 0L, dy = 0L),
+                score_mask_centrality_shift(binary_mask_cache, hp_signal, dx = 0L, dy = 0L)
+              ),
+              c(0.35, 0.65)
+            )
+            sc_mask_structure <- if (!is.null(hp_structure) && !is.null(hp_structure$signal)) {
+              combine_weighted_scores(
+                c(
+                  score_mask_shift(binary_mask_cache, hp_structure$signal, dx = 0L, dy = 0L),
+                  score_mask_centrality_shift(binary_mask_cache, hp_structure$signal, dx = 0L, dy = 0L)
+                ),
+                c(0.25, 0.75)
+              )
+            } else {
+              NA_real_
+            }
+            sc_mask <- combine_weighted_scores(
+              c(sc_mask_raw, sc_mask_structure),
+              c(0.85, 0.15)
+            )
+            sc_intensity <- switch(
+              histology_fit_relation,
+              direct = sc_mask,
+              inverse = if (is.finite(sc_mask)) -sc_mask else NA_real_,
+              either = if (is.finite(sc_mask)) abs(sc_mask) else NA_real_,
+              if (is.finite(sc_mask)) abs(sc_mask) else NA_real_
+            )
+            edge_info <- if (!is.null(hp_structure) && !is.null(hp_structure$signal)) {
+              build_edge_mask(hp_structure$signal, valid_mask = hp_structure$valid)
+            } else {
+              build_edge_mask(hp_signal, valid_mask = hp_valid)
+            }
+            sc_edge <- if (!is.null(edge_info)) score_edge_mask_against_distance(edge_info$edge, edge_cache) else NA_real_
+            n_edge <- if (is.null(edge_info) || is.null(edge_info$n_edge)) 0L else as.integer(edge_info$n_edge)
           } else {
             sc_corr <- signed_rank_correlation(hp_signal[keep], signal_use[keep])
             sc_nmi <- normalized_mutual_information(hp_signal[keep], signal_use[keep], nbins = 24L)
-            sc_intensity <- switch(
+            sc_relation <- switch(
               histology_fit_relation,
               direct = sc_corr,
               inverse = if (is.finite(sc_corr)) -sc_corr else NA_real_,
               either = if (is.finite(sc_corr)) abs(sc_corr) else NA_real_,
               if (is.finite(sc_corr)) abs(sc_corr) else NA_real_
             )
-            edge_info <- build_edge_mask(hp_signal, valid_mask = hp_valid)
+            sc_structure_corr <- NA_real_
+            sc_structure_nmi <- NA_real_
+            if (!is.null(hp_structure) &&
+              !is.null(target_structure_use) &&
+              !is.null(target_structure_use$signal) &&
+              is.matrix(target_structure_use$signal)) {
+              keep_structure <- hp_structure$valid & target_structure_use$valid
+              keep_structure_n <- suppressWarnings(sum(keep_structure, na.rm = TRUE))
+              if (is.finite(keep_structure_n) && keep_structure_n >= 25L) {
+                sc_structure_corr <- signed_rank_correlation(
+                  hp_structure$signal[keep_structure],
+                  target_structure_use$signal[keep_structure]
+                )
+                sc_structure_nmi <- normalized_mutual_information(
+                  hp_structure$signal[keep_structure],
+                  target_structure_use$signal[keep_structure],
+                  nbins = 24L
+                )
+              }
+            }
+            sc_structure <- combine_weighted_scores(
+              c(sc_structure_corr, sc_structure_nmi),
+              c(0.65, 0.35)
+            )
+            sc_intensity <- combine_weighted_scores(
+              c(sc_relation, sc_structure),
+              c(0.30, 0.70)
+            )
+            edge_info <- if (!is.null(hp_structure) && !is.null(hp_structure$signal)) {
+              build_edge_mask(hp_structure$signal, valid_mask = hp_structure$valid)
+            } else {
+              build_edge_mask(hp_signal, valid_mask = hp_valid)
+            }
             sc_edge <- if (!is.null(edge_info)) score_edge_mask_against_distance(edge_info$edge, edge_cache) else NA_real_
             n_edge <- if (is.null(edge_info) || is.null(edge_info$n_edge)) 0L else as.integer(edge_info$n_edge)
           }
@@ -5520,7 +6447,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           )
         }
 
-        score_histology_grid <- function(dx_set, dy_set, progress_weight = 0, detail = NULL) {
+        score_histology_grid <- function(dx_set, dy_set, progress_weight = 0, detail = NULL, allow_parallel = TRUE) {
           empty_df <- data.frame(
             dX = integer(0),
             dY = integer(0),
@@ -5542,10 +6469,18 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           if (nrow(grid_pairs) == 0L) return(empty_df)
 
           res_list <- vector("list", nrow(grid_pairs))
-          if (isTRUE(can_parallel_histology) && nrow(grid_pairs) >= (2L * ncores_use)) {
+          use_parallel <- isTRUE(allow_parallel) && isTRUE(can_parallel_histology) && nrow(grid_pairs) >= (2L * ncores_use)
+          if (isTRUE(use_parallel)) {
             chunk_size <- max(64L, 16L * ncores_use)
             chunks <- split(seq_len(nrow(grid_pairs)), ceiling(seq_len(nrow(grid_pairs)) / chunk_size))
             parallel_failed <- FALSE
+            message(sprintf(
+              "[Histology Image Fit] Parallel grid launch pairs=%d chunks=%d chunk_size=%d cores=%d",
+              nrow(grid_pairs),
+              length(chunks),
+              chunk_size,
+              ncores_use
+            ))
             for (chunk_idx in chunks) {
               chunk_df <- grid_pairs[chunk_idx, , drop = FALSE]
               out_chunk <- try(
@@ -5628,19 +6563,33 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           stp_used <- max(1, as.integer(stp_local))
           edge_band <- max(1, as.integer(2L * stp_used))
 
+          out$shift_px <- sqrt(out$dX^2 + out$dY^2)
           out$dist_norm <- sqrt((out$dX / rng_used)^2 + (out$dY / rng_used)^2)
           out$dist_norm <- pmax(0, pmin(out$dist_norm, 2))
           out$edge_margin <- pmin(rng_used - abs(out$dX), rng_used - abs(out$dY))
           out$edge_norm <- pmax(0, pmin(1, out$edge_margin / edge_band))
-          pen_shift <- 0.08 * (out$dist_norm^2)
-          pen_edge <- 0.18 * ((1 - out$edge_norm)^2)
+          # Histology-fit surfaces often have broad ridges. Use a stronger
+          # displacement prior so small score fluctuations do not pull the fit
+          # far from a plausible starting alignment.
+          if (identical(target_type, "binary_mask")) {
+            pen_shift <- 0.40 * out$dist_norm + 0.60 * (out$dist_norm^2)
+            pen_edge <- 0.10 * ((1 - out$edge_norm)^2)
+          } else {
+            pen_shift <- 0.18 * out$dist_norm + 0.18 * (out$dist_norm^2)
+            pen_edge <- 0.18 * ((1 - out$edge_norm)^2)
+          }
 
           z_raw <- robust_z(out$raw_score)
           z_edge <- robust_z(out$edge_score)
           has_raw <- any(is.finite(out$raw_score))
           has_edge <- any(is.finite(out$edge_score))
-          w_raw <- if (has_raw && has_edge) 0.45 else if (has_raw) 1 else 0
-          w_edge <- if (has_raw && has_edge) 0.55 else if (has_edge) 1 else 0
+          if (identical(target_type, "binary_mask")) {
+            w_raw <- if (has_raw) 1 else 0
+            w_edge <- 0
+          } else {
+            w_raw <- if (has_raw && has_edge) 0.45 else if (has_raw) 1 else 0
+            w_edge <- if (has_raw && has_edge) 0.55 else if (has_edge) 1 else 0
+          }
           out$score <- (w_raw * z_raw) + (w_edge * z_edge) - pen_shift - pen_edge
           out
         }
@@ -5650,6 +6599,13 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           ord <- order(df$score, decreasing = TRUE)
           df_ord <- df[ord, , drop = FALSE]
           best <- df_ord[1, , drop = FALSE]
+          score_vals <- suppressWarnings(as.numeric(df_ord$score))
+          score_vals <- score_vals[is.finite(score_vals)]
+          score_mad <- if (length(score_vals) > 1L) {
+            suppressWarnings(stats::mad(score_vals, center = stats::median(score_vals), constant = 1, na.rm = TRUE))
+          } else {
+            NA_real_
+          }
 
           edge_thr <- max(1L, as.integer(stp_local))
           near_edge <- (abs(best$dX[1]) >= (rng_local - edge_thr)) || (abs(best$dY[1]) >= (rng_local - edge_thr))
@@ -5668,6 +6624,40 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
               }
             }
           }
+
+          # Stability tie-break: if several candidates are effectively tied,
+          # prefer the smallest movement from the current translation.
+          tie_tol <- max(
+            0.08,
+            if (is.finite(score_mad) && score_mad > 0) min(0.50, 0.35 * score_mad) else 0
+          )
+          near_best <- df_ord[is.finite(df_ord$score) & df_ord$score >= (best$score[1] - tie_tol), , drop = FALSE]
+          if (nrow(near_best) > 1L) {
+            near_best$shift_px <- sqrt(near_best$dX^2 + near_best$dY^2)
+            near_best <- near_best[order(near_best$shift_px, -near_best$score), , drop = FALSE]
+            if (is.finite(near_best$score[1])) {
+              best <- near_best[1, , drop = FALSE]
+            }
+          }
+
+          if (identical(target_type, "binary_mask")) {
+            local_radius <- max(4L, 2L * as.integer(stp_local))
+            local_df <- df_ord[df_ord$shift_px <= local_radius, , drop = FALSE]
+            if (nrow(local_df) > 0L) {
+              local_best <- local_df[which.max(local_df$score), , drop = FALSE]
+              shift_best <- sqrt(best$dX[1]^2 + best$dY[1]^2)
+              local_tol <- max(
+                0.45,
+                if (is.finite(score_mad) && score_mad > 0) min(1.10, 0.90 * score_mad) else 0
+              )
+              if (is.finite(shift_best) && shift_best > local_radius) {
+                local_tol <- local_tol + 0.02 * (shift_best - local_radius)
+              }
+              if (is.finite(local_best$score[1]) && local_best$score[1] >= (best$score[1] - local_tol)) {
+                best <- local_best
+              }
+            }
+          }
           best
         }
 
@@ -5678,8 +6668,46 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           if (can_parallel_histology) "parallel" else "serial",
           ncores_use
         ))
-        coarse_df <- score_histology_grid(dx_vals, dy_vals, progress_weight = 0.48, detail = "Scoring coarse XY grid")
+        center_probe <- score_histology_pair(dx = 0L, dy = 0L)
+        message(sprintf(
+          "[Histology Image Fit] Center probe dX=0 dY=0 raw=%s corr=%s nmi=%s edge=%s overlap=%d n_edge=%d",
+          if (is.finite(center_probe$raw_score)) sprintf("%.4f", center_probe$raw_score) else "NA",
+          if (is.finite(center_probe$corr_score)) sprintf("%.4f", center_probe$corr_score) else "NA",
+          if (is.finite(center_probe$nmi_score)) sprintf("%.4f", center_probe$nmi_score) else "NA",
+          if (is.finite(center_probe$edge_score)) sprintf("%.4f", center_probe$edge_score) else "NA",
+          as.integer(center_probe$overlap %||% 0L),
+          as.integer(center_probe$n_edge %||% 0L)
+        ))
+        coarse_df <- score_histology_grid(dx_vals, dy_vals, progress_weight = 0.48, detail = "Scoring coarse XY grid", allow_parallel = TRUE)
+        coarse_finite_n <- if (is.null(coarse_df) || nrow(coarse_df) == 0L) {
+          0L
+        } else {
+          as.integer(sum(is.finite(coarse_df$raw_score) | is.finite(coarse_df$edge_score), na.rm = TRUE))
+        }
+        message(sprintf(
+          "[Histology Image Fit] Coarse grid results total=%d finite_candidates=%d",
+          if (is.null(coarse_df)) 0L else nrow(coarse_df),
+          coarse_finite_n
+        ))
+        if (isTRUE(can_parallel_histology) && coarse_finite_n == 0L) {
+          message("[Histology Image Fit] Parallel coarse grid produced no finite candidates; retrying serial.")
+          coarse_df <- score_histology_grid(dx_vals, dy_vals, progress_weight = 0.48, detail = "Retrying coarse XY grid in serial", allow_parallel = FALSE)
+          coarse_finite_n <- if (is.null(coarse_df) || nrow(coarse_df) == 0L) {
+            0L
+          } else {
+            as.integer(sum(is.finite(coarse_df$raw_score) | is.finite(coarse_df$edge_score), na.rm = TRUE))
+          }
+          message(sprintf(
+            "[Histology Image Fit] Serial coarse grid results total=%d finite_candidates=%d",
+            if (is.null(coarse_df)) 0L else nrow(coarse_df),
+            coarse_finite_n
+          ))
+        }
         cand_df <- collapse_histology_candidates(coarse_df, rng_local = rng, stp_local = stp)
+        message(sprintf(
+          "[Histology Image Fit] Collapsed coarse candidates=%d",
+          if (is.null(cand_df)) 0L else nrow(cand_df)
+        ))
         best_row <- pick_best_histology_candidate(cand_df, rng_local = rng, stp_local = stp)
         if (is.null(best_row) || nrow(best_row) == 0L || !is.finite(best_row$score[1])) {
           xh$histology_fit_grid <- NULL
@@ -5687,7 +6715,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           xh$histology_fit_summary <- NULL
           xh$histology_fit_signature <- NULL
           xh$histology_fit_target_info <- NULL
-          showNotification(
+          histology_fit_notify(
             "Histology Fit could not find a valid local translation score. Try a smaller range, different MSI display, or a different histology feature mode.",
             type = "warning",
             duration = 8
@@ -5701,9 +6729,37 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         fine_dy <- seq.int(best_dy - stp, best_dy + stp, by = 1L)
         fine_dx <- fine_dx[fine_dx >= -rng & fine_dx <= rng]
         fine_dy <- fine_dy[fine_dy >= -rng & fine_dy <= rng]
-        fine_df <- score_histology_grid(fine_dx, fine_dy, progress_weight = 0.14, detail = "Scoring local XY refinement")
+        fine_df <- score_histology_grid(fine_dx, fine_dy, progress_weight = 0.14, detail = "Scoring local XY refinement", allow_parallel = TRUE)
+        fine_finite_n <- if (is.null(fine_df) || nrow(fine_df) == 0L) {
+          0L
+        } else {
+          as.integer(sum(is.finite(fine_df$raw_score) | is.finite(fine_df$edge_score), na.rm = TRUE))
+        }
+        message(sprintf(
+          "[Histology Image Fit] Fine grid results total=%d finite_candidates=%d",
+          if (is.null(fine_df)) 0L else nrow(fine_df),
+          fine_finite_n
+        ))
+        if (isTRUE(can_parallel_histology) && fine_finite_n == 0L && length(fine_dx) > 0L && length(fine_dy) > 0L) {
+          message("[Histology Image Fit] Parallel fine grid produced no finite candidates; retrying serial.")
+          fine_df <- score_histology_grid(fine_dx, fine_dy, progress_weight = 0.14, detail = "Retrying local XY refinement in serial", allow_parallel = FALSE)
+          fine_finite_n <- if (is.null(fine_df) || nrow(fine_df) == 0L) {
+            0L
+          } else {
+            as.integer(sum(is.finite(fine_df$raw_score) | is.finite(fine_df$edge_score), na.rm = TRUE))
+          }
+          message(sprintf(
+            "[Histology Image Fit] Serial fine grid results total=%d finite_candidates=%d",
+            if (is.null(fine_df)) 0L else nrow(fine_df),
+            fine_finite_n
+          ))
+        }
         all_df <- if (nrow(fine_df) > 0L) rbind(coarse_df, fine_df) else coarse_df
         cand_df <- collapse_histology_candidates(all_df, rng_local = rng, stp_local = stp)
+        message(sprintf(
+          "[Histology Image Fit] Collapsed all candidates=%d",
+          if (is.null(cand_df)) 0L else nrow(cand_df)
+        ))
         best_row <- pick_best_histology_candidate(cand_df, rng_local = rng, stp_local = stp)
         if (is.null(best_row) || nrow(best_row) == 0L || !is.finite(best_row$score[1])) {
           xh$histology_fit_grid <- NULL
@@ -5711,7 +6767,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           xh$histology_fit_summary <- NULL
           xh$histology_fit_signature <- NULL
           xh$histology_fit_target_info <- NULL
-          showNotification(
+          histology_fit_notify(
             "Histology Fit could not refine a valid translation score. Try changing the signal source or search range.",
             type = "warning",
             duration = 8
@@ -5722,16 +6778,91 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         cand_df$translate_x <- clamp(tx0 + cand_df$dX, -1000, 1000)
         cand_df$translate_y <- clamp(ty0 + cand_df$dY, -1000, 1000)
         xh$histology_fit_grid <- cand_df
+        start_row <- cand_df[cand_df$dX == 0L & cand_df$dY == 0L, , drop = FALSE]
+        if (nrow(start_row) == 0L) {
+          start_row <- data.frame(
+            score = NA_real_,
+            raw_score = NA_real_,
+            corr_score = NA_real_,
+            nmi_score = NA_real_,
+            edge_score = NA_real_,
+            overlap = NA_integer_,
+            n_edge = NA_integer_,
+            stringsAsFactors = FALSE
+          )
+        } else {
+          start_row <- start_row[1, , drop = FALSE]
+        }
+
+        if (is.finite(start_row$score[1]) && is.finite(best_row$score[1])) {
+          cand_scores <- suppressWarnings(as.numeric(cand_df$score))
+          cand_scores <- cand_scores[is.finite(cand_scores)]
+          score_mad <- if (length(cand_scores) > 1L) {
+            suppressWarnings(stats::mad(cand_scores, center = stats::median(cand_scores), constant = 1, na.rm = TRUE))
+          } else {
+            NA_real_
+          }
+          gain_tol <- max(
+            0.12,
+            if (is.finite(score_mad) && score_mad > 0) min(0.60, 0.50 * score_mad) else 0
+          )
+          best_shift_px <- sqrt(best_row$dX[1]^2 + best_row$dY[1]^2)
+          if (is.finite(best_shift_px) && best_shift_px > max(2, stp)) {
+            gain_tol <- gain_tol + 0.015 * (best_shift_px - max(2, stp))
+            if (identical(target_type, "binary_mask")) {
+              gain_tol <- gain_tol + 0.030 * (best_shift_px - max(2, stp))
+            }
+          }
+          score_gain_now <- best_row$score[1] - start_row$score[1]
+          if (identical(target_type, "binary_mask")) {
+            raw_gain_now <- best_row$raw_score[1] - start_row$raw_score[1]
+            raw_gain_tol <- 0.008 + 0.0015 * max(0, best_shift_px - max(1, stp))
+            if (is.finite(best_shift_px) &&
+              best_shift_px > max(1, stp) &&
+              is.finite(raw_gain_now) &&
+              raw_gain_now < raw_gain_tol) {
+              message(sprintf(
+                "[Histology Image Fit] Retaining start translation for binary mask: raw gain %.4f below threshold %.4f for shift %.2f px",
+                raw_gain_now, raw_gain_tol, best_shift_px
+              ))
+              best_row <- start_row
+            }
+          }
+          if (is.finite(best_shift_px) &&
+            best_shift_px > max(2, stp) &&
+            is.finite(score_gain_now) &&
+            score_gain_now < gain_tol) {
+            message(sprintf(
+              "[Histology Image Fit] Retaining start translation: gain %.4f below stability threshold %.4f for shift %.2f px",
+              score_gain_now, gain_tol, best_shift_px
+            ))
+            best_row <- start_row
+          }
+        }
 
         best_idx <- which(cand_df$dX == best_row$dX[1] & cand_df$dY == best_row$dY[1])
         ord_hist <- order(cand_df$score, decreasing = TRUE)
         if (length(best_idx) > 0L) {
           ord_hist <- c(best_idx[1], ord_hist[ord_hist != best_idx[1]])
         }
-        cand_top <- cand_df[ord_hist, , drop = FALSE]
-        if (nrow(cand_top) > 5L) cand_top <- cand_top[seq_len(5L), , drop = FALSE]
+        score_ord <- order(cand_df$score, decreasing = TRUE)
+        start_idx <- which(cand_df$dX == 0L & cand_df$dY == 0L)
+        display_idx <- unique(c(
+          if (length(best_idx) > 0L) best_idx[1] else integer(0),
+          score_ord[1],
+          if (length(start_idx) > 0L) start_idx[1] else integer(0),
+          ord_hist
+        ))
+        cand_top <- cand_df[display_idx, , drop = FALSE]
+        if (nrow(cand_top) > 6L) cand_top <- cand_top[seq_len(6L), , drop = FALSE]
         cand_top$rank <- seq_len(nrow(cand_top))
-        cand_top_out <- cand_top[, c("rank", "dX", "dY", "score", "raw_score", "corr_score", "nmi_score", "edge_score", "overlap", "n_edge", "translate_x", "translate_y"), drop = FALSE]
+        score_rank_map <- integer(nrow(cand_df))
+        score_rank_map[score_ord] <- seq_along(score_ord)
+        cand_top$score_rank <- score_rank_map[match(paste(cand_top$dX, cand_top$dY), paste(cand_df$dX, cand_df$dY))]
+        cand_top$selected <- (cand_top$dX == best_row$dX[1]) & (cand_top$dY == best_row$dY[1])
+        cand_top$peak_score <- cand_top$score_rank == 1L
+        cand_top$start_position <- (cand_top$dX == 0L) & (cand_top$dY == 0L)
+        cand_top_out <- cand_top[, c("rank", "score_rank", "selected", "peak_score", "start_position", "dX", "dY", "score", "raw_score", "corr_score", "nmi_score", "edge_score", "overlap", "n_edge", "translate_x", "translate_y"), drop = FALSE]
         names(cand_top_out)[names(cand_top_out) == "raw_score"] <- "intensity_score"
         names(cand_top_out)[names(cand_top_out) == "corr_score"] <- "signed_corr"
         names(cand_top_out)[names(cand_top_out) == "nmi_score"] <- "nmi"
@@ -5739,6 +6870,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
         tx_new <- clamp(tx0 + best_row$dX[1], -1000, 1000)
         ty_new <- clamp(ty0 + best_row$dY[1], -1000, 1000)
+        peak_row <- cand_df[score_ord[1], , drop = FALSE]
 
         xh$histology_fit_summary <- list(
           intensity_relation = histology_fit_relation,
@@ -5756,6 +6888,11 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           search_step = stp,
           start_translate_x = tx0,
           start_translate_y = ty0,
+          start_score = start_row$score[1],
+          start_intensity_score = start_row$raw_score[1],
+          start_signed_correlation = start_row$corr_score[1],
+          start_nmi = start_row$nmi_score[1],
+          start_edge_score = start_row$edge_score[1],
           best_translate_x = tx_new,
           best_translate_y = ty_new,
           best_dX = best_row$dX[1],
@@ -5765,6 +6902,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           best_signed_correlation = best_row$corr_score[1],
           best_nmi = best_row$nmi_score[1],
           best_edge_score = best_row$edge_score[1],
+          score_gain = best_row$score[1] - start_row$score[1],
+          peak_dX = peak_row$dX[1],
+          peak_dY = peak_row$dY[1],
+          peak_score = peak_row$score[1],
           overlap_pixels = best_row$overlap[1],
           histology_edge_pixels = best_row$n_edge[1],
           n_candidates = nrow(all_df)
@@ -5841,7 +6982,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         return()
       }
       pick_rank <- suppressWarnings(as.integer(input$stat_fit_choice))
-      if (!is.finite(pick_rank)) pick_rank <- cand$rank[1]
+      if (length(pick_rank) != 1L || !is.finite(pick_rank)) pick_rank <- cand$rank[1]
       row <- cand[cand$rank == pick_rank, , drop = FALSE]
       if (nrow(row) == 0) row <- cand[1, , drop = FALSE]
 
@@ -6894,12 +8035,29 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
     })
 
-    get_histology_fit_best_row <- function(g2) {
+    get_histology_fit_selected_row <- function(g2, sm = NULL) {
+      if (!is.null(sm) &&
+        !is.null(sm$best_dX) &&
+        !is.null(sm$best_dY) &&
+        is.finite(sm$best_dX) &&
+        is.finite(sm$best_dY)) {
+        hit <- g2[g2$dX == sm$best_dX & g2$dY == sm$best_dY, , drop = FALSE]
+        if (nrow(hit) > 0L) return(hit[1, , drop = FALSE])
+      }
+      if ("selected" %in% names(g2)) {
+        hit <- g2[!is.na(g2$selected) & g2$selected, , drop = FALSE]
+        if (nrow(hit) > 0L) return(hit[1, , drop = FALSE])
+      }
       idx <- which.max(g2$score)
       g2[idx, , drop = FALSE]
     }
 
-    build_histology_fit_heatmap <- function(g2, best, with_tooltip = FALSE, anchor_tx = NA_real_, anchor_ty = NA_real_) {
+    get_histology_fit_peak_row <- function(g2) {
+      idx <- which.max(g2$score)
+      g2[idx, , drop = FALSE]
+    }
+
+    build_histology_fit_heatmap <- function(g2, best, peak = NULL, with_tooltip = FALSE, anchor_tx = NA_real_, anchor_ty = NA_real_) {
       origin <- data.frame(dX = 0, dY = 0)
       rel <- get_histology_fit_intensity_relation()
       g_plot <- regularize_histology_fit_plot_grid(g2)
@@ -6930,6 +8088,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       p +
         ggplot2::geom_rect(color = NA) +
         ggplot2::geom_point(data = origin, ggplot2::aes(x = dX, y = dY), inherit.aes = FALSE, shape = 3, size = 3, stroke = 1.1, color = "deepskyblue3") +
+        if (!is.null(peak) && nrow(peak) > 0L) ggplot2::geom_point(data = peak, ggplot2::aes(x = dX, y = dY), inherit.aes = FALSE, shape = 1, size = 4.2, stroke = 1.1, color = "orange2") else NULL +
         ggplot2::geom_point(data = best, ggplot2::aes(x = dX, y = dY), inherit.aes = FALSE, shape = 4, size = 4, stroke = 1.2, color = "red") +
         ggplot2::coord_equal() +
         ggplot2::scale_fill_viridis_c(option = "magma", na.value = "grey85") +
@@ -6940,6 +8099,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
             "Fill = composite score | intensity relation: ",
             histology_intensity_relation_label(rel),
             " | blue + = current position (dX=0,dY=0)",
+            " | red X = selected fit",
+            " | orange circle = raw score peak",
             anchor_txt,
             filled_note
           ),
@@ -6956,11 +8117,16 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         validate(need(!is.null(grid) && nrow(grid) > 0, "Run Histology Fit to view diagnostic heatmap."))
         g2 <- grid[is.finite(grid$score), , drop = FALSE]
         validate(need(nrow(g2) > 0, "No valid Histology Fit points to plot."))
-        best <- get_histology_fit_best_row(g2)
         s <- xh$histology_fit_summary
+        best <- get_histology_fit_selected_row(g2, sm = s)
+        peak <- get_histology_fit_peak_row(g2)
+        if (nrow(best) > 0L && nrow(peak) > 0L && identical(best$dX[1], peak$dX[1]) && identical(best$dY[1], peak$dY[1])) {
+          peak <- NULL
+        }
         p <- build_histology_fit_heatmap(
           g2,
           best,
+          peak = peak,
           with_tooltip = TRUE,
           anchor_tx = if (!is.null(s$start_translate_x)) as.numeric(s$start_translate_x) else NA_real_,
           anchor_ty = if (!is.null(s$start_translate_y)) as.numeric(s$start_translate_y) else NA_real_
@@ -6974,11 +8140,16 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         validate(need(!is.null(grid) && nrow(grid) > 0, "Run Histology Fit to view diagnostic heatmap."))
         g2 <- grid[is.finite(grid$score), , drop = FALSE]
         validate(need(nrow(g2) > 0, "No valid Histology Fit points to plot."))
-        best <- get_histology_fit_best_row(g2)
         s <- xh$histology_fit_summary
+        best <- get_histology_fit_selected_row(g2, sm = s)
+        peak <- get_histology_fit_peak_row(g2)
+        if (nrow(best) > 0L && nrow(peak) > 0L && identical(best$dX[1], peak$dX[1]) && identical(best$dY[1], peak$dY[1])) {
+          peak <- NULL
+        }
         build_histology_fit_heatmap(
           g2,
           best,
+          peak = peak,
           with_tooltip = FALSE,
           anchor_tx = if (!is.null(s$start_translate_x)) as.numeric(s$start_translate_x) else NA_real_,
           anchor_ty = if (!is.null(s$start_translate_y)) as.numeric(s$start_translate_y) else NA_real_
@@ -6992,11 +8163,15 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       validate(need(!is.null(grid) && nrow(grid) > 0, "Run Histology Fit to view contour diagnostics."))
       g2 <- grid[is.finite(grid$score), , drop = FALSE]
       validate(need(nrow(g2) > 0, "No valid Histology Fit score values to plot."))
-      best <- get_histology_fit_best_row(g2)
       g_plot <- regularize_histology_fit_plot_grid(g2)
       rel <- get_histology_fit_intensity_relation()
       origin <- data.frame(dX = 0, dY = 0)
         s <- xh$histology_fit_summary
+        best <- get_histology_fit_selected_row(g2, sm = s)
+        peak <- get_histology_fit_peak_row(g2)
+        if (nrow(best) > 0L && nrow(peak) > 0L && identical(best$dX[1], peak$dX[1]) && identical(best$dY[1], peak$dY[1])) {
+          peak <- NULL
+        }
         anchor_txt <- if (!is.null(s$start_translate_x) && !is.null(s$start_translate_y) &&
           is.finite(s$start_translate_x) && is.finite(s$start_translate_y)) {
           sprintf(" | anchor tx=%.1f, ty=%.1f", as.numeric(s$start_translate_x), as.numeric(s$start_translate_y))
@@ -7006,6 +8181,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         ggplot2::ggplot(g_plot, ggplot2::aes(x = dX, y = dY, z = score)) +
           ggplot2::geom_contour(bins = 12, linewidth = 0.5) +
           ggplot2::geom_point(data = origin, ggplot2::aes(x = dX, y = dY), inherit.aes = FALSE, shape = 3, size = 3, stroke = 1.1, color = "deepskyblue3") +
+          if (!is.null(peak) && nrow(peak) > 0L) ggplot2::geom_point(data = peak, ggplot2::aes(x = dX, y = dY), inherit.aes = FALSE, shape = 1, size = 4.2, stroke = 1.1, color = "orange2") else NULL +
           ggplot2::geom_point(data = best, ggplot2::aes(x = dX, y = dY), inherit.aes = FALSE, shape = 4, size = 4, stroke = 1.2, color = "red") +
           ggplot2::coord_equal() +
           ggplot2::theme_minimal() +
@@ -7015,6 +8191,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
             "Contours = composite score | intensity relation: ",
             histology_intensity_relation_label(rel),
             " | blue + = current position (dX=0,dY=0)",
+            " | red X = selected fit",
+            " | orange circle = raw score peak",
             anchor_txt
           ),
             x = "dX",
@@ -7633,9 +8811,11 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         names(cluster_labels) <- uniq_ref
         mapped_lab <- cluster_labels[mapped_hex]
 
+        msi <- make_msi_raster()
         obj <- msi_for_pdata()
         pd <- as.data.frame(Cardinal::pData(obj))
         validate(need(nrow(pd) == length(mapped_lab), "Length mismatch between pData and mapped clusters."))
+        mapped_lab <- flip_values_vertically_to_match_display(mapped_lab, msi)
         pd[[col_name]] <- factor(mapped_lab, levels = cluster_labels)
 
         Cardinal::pData(obj) <- build_position_pdata(obj, pd)
@@ -7696,27 +8876,12 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
       poly$map_label <- get_polygon_labels(poly, current_label_field)
       axis_mode <- resolve_polygon_axis_mode(poly, input$polygon_axis_mode, get_histology_image_optional())
-      src_dims <- get_overlay_source_dims()
-      poly_t <- transform_polygon_sf(
-        poly_sf = poly,
-        nx = msi$nx,
-        ny = msi$ny,
-        scale_x = input$scale_x,
-        scale_y = input$scale_y,
-        translate_x = input$translate_x,
-        translate_y = input$translate_y,
-        rotate_deg = effective_polygon_rotate_deg(),
-        flip_y = isTRUE(input$flip_histology_y),
-        swap_xy = identical(axis_mode, "yx"),
-        scale_mode = input$overlay_scale_mode,
-        source_width = if (!is.null(src_dims)) src_dims$width else NA_real_,
-        source_height = if (!is.null(src_dims)) src_dims$height else NA_real_
-      )
+      poly_t <- transform_polygons_for_current_registration(poly, tx = input$translate_x, ty = input$translate_y, axis_mode = axis_mode)$display
 
       pts_df <- data.frame(
-        x = msi$x_norm,
-        y = msi$y_norm,
-        idx = seq_along(msi$x_norm)
+        x = msi$x_display,
+        y = msi$y_display,
+        idx = seq_along(msi$x_display)
       )
       poly_crs <- normalize_crs(try(sf::st_crs(poly_t), silent = TRUE))
       if (is.null(poly_crs)) {
@@ -7809,21 +8974,12 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         nucleus_poly <- nucleus_poly_try
         if (nrow(nucleus_poly) > 0) {
           nucleus_axis_mode <- resolve_polygon_axis_mode(nucleus_poly, input$polygon_axis_mode, get_histology_image_optional())
-          nucleus_t <- transform_polygon_sf(
-            poly_sf = nucleus_poly,
-            nx = msi$nx,
-            ny = msi$ny,
-            scale_x = input$scale_x,
-            scale_y = input$scale_y,
-            translate_x = input$translate_x,
-            translate_y = input$translate_y,
-            rotate_deg = effective_polygon_rotate_deg(),
-            flip_y = isTRUE(input$flip_histology_y),
-            swap_xy = identical(nucleus_axis_mode, "yx"),
-            scale_mode = input$overlay_scale_mode,
-            source_width = if (!is.null(src_dims)) src_dims$width else NA_real_,
-            source_height = if (!is.null(src_dims)) src_dims$height else NA_real_
-          )
+          nucleus_t <- transform_polygons_for_current_registration(
+            nucleus_poly,
+            tx = input$translate_x,
+            ty = input$translate_y,
+            axis_mode = nucleus_axis_mode
+          )$display
 
           nucleus_uid <- paste0("nucleus_", sprintf("%05d", seq_len(nrow(nucleus_t))))
           nucleus_area <- suppressWarnings(as.numeric(sf::st_area(nucleus_t)))
@@ -7900,6 +9056,22 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       obj <- msi_for_pdata()
       pd <- as.data.frame(Cardinal::pData(obj))
       validate(need(nrow(pd) == length(mapped_lab), "Length mismatch between pData and polygon mapping."))
+      mapped_lab <- flip_values_vertically_to_match_display(mapped_lab, msi)
+      mapped_uid <- flip_values_vertically_to_match_display(mapped_uid, msi)
+      hit_cell <- mapped_uid != outside_label
+      if (!is.null(mapped_lab_original) && length(mapped_lab_original) == length(mapped_lab)) {
+        mapped_lab_original <- flip_values_vertically_to_match_display(mapped_lab_original, msi)
+      }
+      if (!is.null(mapped_compartment_label) && length(mapped_compartment_label) == length(mapped_lab)) {
+        mapped_compartment_label <- flip_values_vertically_to_match_display(mapped_compartment_label, msi)
+      }
+      if (!is.null(mapped_compartment_class) && length(mapped_compartment_class) == length(mapped_lab)) {
+        mapped_compartment_class <- flip_values_vertically_to_match_display(mapped_compartment_class, msi)
+      }
+      if (!is.null(mapped_nucleus_uid) && length(mapped_nucleus_uid) == length(mapped_lab)) {
+        mapped_nucleus_uid <- flip_values_vertically_to_match_display(mapped_nucleus_uid, msi)
+      }
+
       pd[[col_name]] <- mapped_lab
       if (!is.null(mapped_lab_original) && length(mapped_lab_original) == nrow(pd) && !is.null(orig_col_name)) {
         pd[[orig_col_name]] <- mapped_lab_original
@@ -8022,8 +9194,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       graphics::plot.window(xlim = c(1, msi$nx), ylim = c(msi$ny, 1), asp = 1, xaxs = "i", yaxs = "i")
       graphics::rasterImage(msi$raster, 1, 1, msi$nx, msi$ny, interpolate = FALSE)
 
-      if (identical(ov$layer, "polygon")) {
-        poly <- ov$polygons
+      draw_polygons <- function(poly) {
+        if (is.null(poly) || nrow(poly) == 0L) return(invisible(NULL))
         label_vec <- as.character(poly$map_label)
         label_vec[is.na(label_vec) | trimws(label_vec) == ""] <- "polygon"
         uniq_labels <- unique(label_vec)
@@ -8050,15 +9222,32 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
             reset = FALSE
           )
         }
+        invisible(NULL)
+      }
+
+      if (identical(ov$layer, "polygon")) {
+        draw_polygons(ov$polygons)
         graphics::title(main = sprintf("Polygon Overlay on MSI (%s)", msi_label))
+      } else if (identical(ov$layer, "combined")) {
+        if (!is.null(ov$histology)) {
+          bbox_disp <- overlay_source_bbox_to_display(ov$histology)
+          if (!is.null(bbox_disp)) {
+            graphics::rasterImage(
+              ov$histology$raster,
+              bbox_disp[["xmin"]],
+              bbox_disp[["ymin"]],
+              bbox_disp[["xmax"]],
+              bbox_disp[["ymax"]],
+              interpolate = TRUE
+            )
+          }
+        }
+        draw_polygons(ov$polygons)
+        graphics::title(main = sprintf("Combined Histology + Polygon Overlay on MSI (%s)", msi_label))
       } else {
-        cx <- (msi$nx / 2) + input$translate_x
-        cy <- (msi$ny / 2) + input$translate_y
-        xleft <- cx - ov$width / 2
-        xright <- cx + ov$width / 2
-        ybottom <- cy - ov$height / 2
-        ytop <- cy + ov$height / 2
-        graphics::rasterImage(ov$raster, xleft, ybottom, xright, ytop, interpolate = TRUE)
+        bbox_disp <- overlay_source_bbox_to_display(ov)
+        validate(need(!is.null(bbox_disp), "Overlay display bounds are unavailable."))
+        graphics::rasterImage(ov$raster, bbox_disp[["xmin"]], bbox_disp[["ymin"]], bbox_disp[["xmax"]], bbox_disp[["ymax"]], interpolate = TRUE)
         if (identical(ov$layer, "cluster")) {
           graphics::title(main = sprintf("Cluster Overlay on MSI (%s)", msi_label))
         } else {
@@ -8096,11 +9285,16 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       req(transformed_overlay())
       msi <- make_msi_raster()
       ov <- transformed_overlay()
+      ov_hist <- if (identical(ov$layer, "combined")) ov$histology else ov
+      reg_tr <- registration_transform()
       poly_corr <- list(fx = 1, fy = 1, source = "disabled")
 
       list(
         working_directory = setup_values()[["wd"]],
         overlay_shown = input$overlay_layer,
+        frame_status = reg_tr$frame_status,
+        slide_key = reg_tr$slide_key,
+        overlay_source_frame_type = reg_tr$overlay_source_frame_type,
         msi_canvas = sprintf("%d x %d", msi$nx, msi$ny),
         msi_display_mode = msi$mode,
         msi_display_label = msi$display_label,
@@ -8120,13 +9314,13 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         scale_correction_x = if (is.finite(poly_corr$fx)) poly_corr$fx else 1,
         scale_correction_y = if (is.finite(poly_corr$fy)) poly_corr$fy else 1,
         scale_correction_mode = "disabled (physical scaling only)",
-        source_image_dim = if (!is.null(ov$source_width) && !is.null(ov$source_height)) paste0(ov$source_width, " x ", ov$source_height) else NA_character_,
-        transformed_overlay_dim = if (!is.null(ov$width) && !is.null(ov$height)) paste0(ov$width, " x ", ov$height) else NA_character_,
-        suggested_export_factor_fit_x = if (!is.null(ov$source_width) && is.finite(ov$source_width) && ov$source_width > 0 && is.finite(input$histology_um_per_px) && input$histology_um_per_px > 0 && is.finite(input$msi_um_per_px) && input$msi_um_per_px > 0) {
-          msi$nx / (ov$source_width * (input$histology_um_per_px / input$msi_um_per_px))
+        source_image_dim = if (!is.null(ov_hist$source_width) && !is.null(ov_hist$source_height)) paste0(ov_hist$source_width, " x ", ov_hist$source_height) else NA_character_,
+        transformed_overlay_dim = if (!is.null(ov_hist$width) && !is.null(ov_hist$height)) paste0(ov_hist$width, " x ", ov_hist$height) else NA_character_,
+        suggested_export_factor_fit_x = if (!is.null(ov_hist$source_width) && is.finite(ov_hist$source_width) && ov_hist$source_width > 0 && is.finite(input$histology_um_per_px) && input$histology_um_per_px > 0 && is.finite(input$msi_um_per_px) && input$msi_um_per_px > 0) {
+          msi$nx / (ov_hist$source_width * (input$histology_um_per_px / input$msi_um_per_px))
         } else NA_real_,
-        suggested_export_factor_fit_y = if (!is.null(ov$source_height) && is.finite(ov$source_height) && ov$source_height > 0 && is.finite(input$histology_um_per_px) && input$histology_um_per_px > 0 && is.finite(input$msi_um_per_px) && input$msi_um_per_px > 0) {
-          msi$ny / (ov$source_height * (input$histology_um_per_px / input$msi_um_per_px))
+        suggested_export_factor_fit_y = if (!is.null(ov_hist$source_height) && is.finite(ov_hist$source_height) && ov_hist$source_height > 0 && is.finite(input$histology_um_per_px) && input$histology_um_per_px > 0 && is.finite(input$msi_um_per_px) && input$msi_um_per_px > 0) {
+          msi$ny / (ov_hist$source_height * (input$histology_um_per_px / input$msi_um_per_px))
         } else NA_real_,
         msi_palette = input$msi_palette,
         rgb_render_mode = input$rgb_render_mode,
@@ -8315,6 +9509,32 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       )
     }
 
+    saved_translation_frame_mode <- function(kv = NULL) {
+      kv <- if (is.null(kv)) list() else as.list(kv)
+      mode <- ""
+      if (!is.null(kv[["registration_translation_frame"]]) && length(kv[["registration_translation_frame"]]) > 0L) {
+        mode <- tolower(trimws(as.character(kv[["registration_translation_frame"]])[1]))
+      }
+      if (!nzchar(mode)) mode <- "legacy_unknown"
+      mode
+    }
+
+    current_frame_is_saved_subset <- function(current_frame, saved_frame, tol = 1e-8) {
+      if (is.null(current_frame) || is.null(saved_frame)) return(FALSE)
+      vals <- c(
+        current_frame$xmin, current_frame$xmax, current_frame$ymin, current_frame$ymax,
+        saved_frame$xmin, saved_frame$xmax, saved_frame$ymin, saved_frame$ymax
+      )
+      if (!all(is.finite(vals))) return(FALSE)
+      inside_x <- current_frame$xmin >= (saved_frame$xmin - tol) &&
+        current_frame$xmax <= (saved_frame$xmax + tol)
+      inside_y <- current_frame$ymin >= (saved_frame$ymin - tol) &&
+        current_frame$ymax <= (saved_frame$ymax + tol)
+      smaller_extent <- (current_frame$nx <= saved_frame$nx) && (current_frame$ny <= saved_frame$ny) &&
+        ((current_frame$nx < saved_frame$nx) || (current_frame$ny < saved_frame$ny))
+      isTRUE(inside_x && inside_y && smaller_extent)
+    }
+
     estimate_saved_overlay_canvas <- function(kv = NULL) {
       kv <- if (is.null(kv)) list() else as.list(kv)
       scale_mode <- if (!is.null(kv[["overlay_scale_mode"]]) && length(kv[["overlay_scale_mode"]]) > 0L) {
@@ -8362,6 +9582,32 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       )
     }
 
+    parse_saved_overlay_center_source <- function(kv = NULL) {
+      kv <- if (is.null(kv)) list() else as.list(kv)
+      cx <- suppressWarnings(as.numeric(kv[["overlay_center_source_x"]]))
+      cy <- suppressWarnings(as.numeric(kv[["overlay_center_source_y"]]))
+      cx <- if (length(cx) > 0L) cx[1] else NA_real_
+      cy <- if (length(cy) > 0L) cy[1] else NA_real_
+      if (all(is.finite(c(cx, cy)))) {
+        return(list(x = cx, y = cy, source = "saved_center"))
+      }
+
+      saved_frame <- parse_saved_msi_coord_frame(kv)
+      tx_num <- suppressWarnings(as.numeric(kv[["translate_x"]]))
+      ty_num <- suppressWarnings(as.numeric(kv[["translate_y"]]))
+      tx_num <- if (length(tx_num) > 0L) tx_num[1] else NA_real_
+      ty_num <- if (length(ty_num) > 0L) ty_num[1] else NA_real_
+      if (!is.null(saved_frame) && all(is.finite(c(saved_frame$xmin, saved_frame$xmax, saved_frame$ymin, saved_frame$ymax, tx_num, ty_num)))) {
+        return(list(
+          x = ((saved_frame$xmin + saved_frame$xmax) / 2) + tx_num,
+          y = ((saved_frame$ymin + saved_frame$ymax) / 2) + ty_num,
+          source = "saved_frame_plus_translate"
+        ))
+      }
+
+      NULL
+    }
+
     adjust_loaded_translate_xy <- function(tx, ty, kv = NULL, upload_name = NULL) {
       tx_num <- suppressWarnings(as.numeric(tx))
       ty_num <- suppressWarnings(as.numeric(ty))
@@ -8377,6 +9623,39 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
 
       saved_frame <- parse_saved_msi_coord_frame(kv)
+      translation_mode <- saved_translation_frame_mode(kv)
+      if (current_frame_is_saved_subset(current_frame, saved_frame)) {
+        return(list(
+          tx = tx_num,
+          ty = ty_num,
+          adjusted = FALSE,
+          mode = "preserved_subset_coords",
+          current_frame = current_frame,
+          saved_frame = saved_frame,
+          saved_translation_mode = translation_mode
+        ))
+      }
+
+      saved_center <- parse_saved_overlay_center_source(kv)
+      if (!is.null(saved_center) && all(is.finite(c(saved_center$x, saved_center$y)))) {
+        current_center_x <- (current_frame$xmin + current_frame$xmax) / 2
+        current_center_y <- (current_frame$ymin + current_frame$ymax) / 2
+        tx_adj <- saved_center$x - current_center_x
+        ty_adj <- saved_center$y - current_center_y
+        delta_tx <- if (is.finite(tx_num) && is.finite(tx_adj)) abs(tx_adj - tx_num) else 0
+        delta_ty <- if (is.finite(ty_num) && is.finite(ty_adj)) abs(ty_adj - ty_num) else 0
+        adjusted <- (delta_tx > 1e-8) || (delta_ty > 1e-8)
+        return(list(
+          tx = if (is.finite(tx_adj)) clamp(tx_adj, -1000, 1000) else tx_adj,
+          ty = if (is.finite(ty_adj)) clamp(ty_adj, -1000, 1000) else ty_adj,
+          adjusted = adjusted,
+          mode = as.character(saved_center$source),
+          current_frame = current_frame,
+          saved_frame = parse_saved_msi_coord_frame(kv),
+          saved_translation_mode = translation_mode
+        ))
+      }
+
       mode <- "saved_frame"
       if (is.null(saved_frame)) {
         saved_frame <- estimate_saved_overlay_canvas(kv)
@@ -8427,7 +9706,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         adjusted = adjusted,
         mode = mode,
         current_frame = current_frame,
-        saved_frame = saved_frame
+        saved_frame = saved_frame,
+        saved_translation_mode = translation_mode
       )
     }
 
@@ -8439,6 +9719,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       kv <- read_registration_params(input$registration_params_upload$datapath)
       validate(need(!is.null(kv) && length(kv) > 0, "Could not parse registration parameter file."))
       kv <- as.list(kv)
+      xh$loaded_registration_reference_frame <- parse_saved_msi_coord_frame(kv)
 
       if ("msi_plot_mode" %in% names(kv) && !is.null(kv[["msi_plot_mode"]])) {
         mode <- tolower(trimws(as.character(kv[["msi_plot_mode"]])[1]))
@@ -8500,6 +9781,9 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       if (!is.null(kv[["histology_resample_factor"]])) {
         v <- suppressWarnings(as.numeric(kv[["histology_resample_factor"]]))
         if (is.finite(v) && v > 0) updateNumericInput(session, "histology_resample_factor", value = v)
+      } else if (!is.null(kv[["histology_downsample_factor"]])) {
+        v <- suppressWarnings(as.numeric(kv[["histology_downsample_factor"]]))
+        if (is.finite(v) && v > 0) updateNumericInput(session, "histology_resample_factor", value = v)
       }
 
       if (!is.null(kv[["scale_x"]])) {
@@ -8550,18 +9834,45 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           updateSliderInput(session, "translate_y", value = tr_info$ty)
           updateNumericInput(session, "translate_y_num", value = tr_info$ty)
         }
-        if (isTRUE(tr_info$adjusted)) {
-          msg <- if (identical(tr_info$mode, "saved_frame")) {
-            "Adjusted loaded translation to the current cropped MSI coordinate frame using saved MSI extents."
-          } else if (identical(tr_info$mode, "heuristic_overlay_estimate")) {
-            "Adjusted loaded translation to the current cropped MSI coordinate frame using an estimated full-image canvas."
-          } else {
-            NULL
-          }
-          if (!is.null(msg)) {
-            showNotification(msg, type = "message", duration = 7)
-          }
+        msg <- if (identical(tr_info$mode, "saved_center")) {
+          "Adjusted loaded translation to the current cropped MSI coordinate frame using the saved overlay center in MSI source coordinates."
+        } else if (identical(tr_info$mode, "saved_frame_plus_translate")) {
+          "Adjusted loaded translation to the current cropped MSI coordinate frame using the saved full-image frame and translation."
+        } else if (identical(tr_info$mode, "saved_frame")) {
+          "Adjusted loaded translation to the current cropped MSI coordinate frame using saved MSI extents."
+        } else if (identical(tr_info$mode, "heuristic_overlay_estimate")) {
+          "Adjusted loaded translation to the current cropped MSI coordinate frame using an estimated full-image canvas."
+        } else if (identical(tr_info$mode, "preserved_subset_coords")) {
+          "Preserved loaded translation because the current MSI frame appears to be a coordinate-preserving subset of the saved full-image frame."
+        } else if (identical(tr_info$mode, "no_saved_frame")) {
+          "Loaded translation without crop rebasing because no saved MSI frame metadata was available."
+        } else if (identical(tr_info$mode, "no_current_frame")) {
+          "Loaded translation without crop rebasing because the current MSI coordinate frame was unavailable."
+        } else {
+          sprintf("Loaded translation using mode '%s'.", tr_info$mode %||% "unknown")
         }
+        if (!is.null(msg) && isTRUE(tr_info$adjusted)) {
+          showNotification(msg, type = "message", duration = 7)
+        }
+        cur_frame_txt <- if (!is.null(tr_info$current_frame) && all(is.finite(unlist(tr_info$current_frame[c("xmin", "xmax", "ymin", "ymax")]))) ) {
+          sprintf("[%.0f, %.0f] x [%.0f, %.0f]", tr_info$current_frame$xmin, tr_info$current_frame$xmax, tr_info$current_frame$ymin, tr_info$current_frame$ymax)
+        } else {
+          "n/a"
+        }
+        saved_frame_txt <- if (!is.null(tr_info$saved_frame) && all(is.finite(unlist(tr_info$saved_frame[c("xmin", "xmax", "ymin", "ymax")]))) ) {
+          sprintf("[%.0f, %.0f] x [%.0f, %.0f]", tr_info$saved_frame$xmin, tr_info$saved_frame$xmax, tr_info$saved_frame$ymin, tr_info$saved_frame$ymax)
+        } else {
+          "n/a"
+        }
+        cat(sprintf(
+          "[Registration Params] translate load mode=%s adjusted=%s tx=%.3f ty=%.3f current_frame=%s saved_frame=%s\n",
+          tr_info$mode %||% "unknown",
+          if (isTRUE(tr_info$adjusted)) "TRUE" else "FALSE",
+          if (is.finite(tr_info$tx)) tr_info$tx else NA_real_,
+          if (is.finite(tr_info$ty)) tr_info$ty else NA_real_,
+          cur_frame_txt,
+          saved_frame_txt
+        ))
       }
       if (!is.null(kv[["histology_alpha"]])) {
         v <- suppressWarnings(as.numeric(kv[["histology_alpha"]]))
@@ -8585,7 +9896,17 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       if (!is.null(kv[["flip_histology_y"]])) updateCheckboxInput(session, "flip_histology_y", value = to_bool(kv[["flip_histology_y"]]))
       if (!is.null(kv[["polygon_color_by_label"]])) updateCheckboxInput(session, "polygon_color_by_label", value = to_bool(kv[["polygon_color_by_label"]]))
       if (!is.null(kv[["enhance_contrast"]])) updateCheckboxInput(session, "enhance_contrast", value = to_bool(kv[["enhance_contrast"]], TRUE))
-      if (!is.null(kv[["gaussian_smooth"]])) updateCheckboxInput(session, "gaussian_smooth", value = to_bool(kv[["gaussian_smooth"]], TRUE))
+      if (!is.null(kv[["gaussian_smooth"]])) updateCheckboxInput(session, "gaussian_smooth", value = to_bool(kv[["gaussian_smooth"]], FALSE))
+      if (!is.null(kv[["registration_saved_overlay_layer"]]) || !is.null(kv[["overlay_layer"]])) {
+        overlay_val <- if (!is.null(kv[["registration_saved_overlay_layer"]])) kv[["registration_saved_overlay_layer"]] else kv[["overlay_layer"]]
+        overlay_val <- tolower(trimws(as.character(overlay_val)[1]))
+        if (overlay_val %in% c("combined", "polygon", "histology", "cluster")) {
+          updateRadioButtons(session, "overlay_layer", selected = overlay_val)
+        }
+      }
+      if (!is.null(kv[["orientation_override_active"]]) && to_bool(kv[["orientation_override_active"]], FALSE)) {
+        updateCheckboxInput(session, "show_advanced_registration", value = TRUE)
+      }
 
       if (!is.null(kv[["polygon_axis_mode"]])) {
         v <- tolower(trimws(kv[["polygon_axis_mode"]]))
@@ -8721,7 +10042,17 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         }
       }, once = TRUE)
 
-      showNotification("Loaded registration parameters.", type = "message", duration = 5)
+      saved_slide_key <- normalize_slide_key(kv[["slide_key"]])
+      current_slide_key <- normalize_slide_key(registration_transform()$slide_key)
+      if (!is.na(saved_slide_key) && !is.na(current_slide_key) && !identical(saved_slide_key, current_slide_key)) {
+        showNotification(
+          sprintf("Loaded registration parameters from slide key '%s', but current assets resolve to '%s'. Treating this as best-effort transfer.", saved_slide_key, current_slide_key),
+          type = "warning",
+          duration = 8
+        )
+      } else {
+        showNotification("Loaded registration parameters.", type = "message", duration = 5)
+      }
     })
 
     observeEvent(input$set_scale_from_resolution, {
@@ -8768,12 +10099,11 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
     }, ignoreInit = TRUE)
 
     observeEvent(input$move_up, {
-      # Positive translate_y moves overlay down in current coordinate convention.
-      nudge_translation(dx = 0, dy = -move_step())
+      nudge_translation(dx = 0, dy = move_step())
     }, ignoreInit = TRUE)
 
     observeEvent(input$move_down, {
-      nudge_translation(dx = 0, dy = move_step())
+      nudge_translation(dx = 0, dy = -move_step())
     }, ignoreInit = TRUE)
 
     observeEvent(input$save_mapped_imzml, {
@@ -8971,6 +10301,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
     }, ignoreInit = TRUE)
 
     observeEvent(input$reset_transform, {
+      xh$loaded_registration_reference_frame <- NULL
       xh$histology_fit_relation_auto <- TRUE
       xh$histology_fit_relation_last_default <- NULL
       xh$histology_fit_relation_updating <- FALSE
@@ -8991,12 +10322,14 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       updateNumericInput(session, "translate_y_num", value = 0)
 
       updateCheckboxInput(session, "flip_histology_y", value = FALSE)
-      updateSelectInput(session, "polygon_axis_mode", selected = "yx")
+      updateCheckboxInput(session, "show_advanced_registration", value = FALSE)
+      updateSelectInput(session, "polygon_axis_mode", selected = "auto")
       updateSelectInput(session, "overlay_scale_mode", selected = "absolute")
+      updateRadioButtons(session, "overlay_layer", selected = "combined")
       updateCheckboxInput(session, "fine_move", value = FALSE)
       updateCheckboxInput(session, "polygon_color_by_label", value = FALSE)
       updateCheckboxInput(session, "enhance_contrast", value = TRUE)
-      updateCheckboxInput(session, "gaussian_smooth", value = TRUE)
+      updateCheckboxInput(session, "gaussian_smooth", value = FALSE)
       updateCheckboxInput(session, "show_fit_info", value = TRUE)
       updateSliderInput(session, "polygon_linewidth", value = 1)
       updateSelectInput(session, "cluster_palette", selected = "Alphabet")
