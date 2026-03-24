@@ -2,17 +2,31 @@
 
 UMAPEmbeddingUI <- function(id) {
   ns <- NS(id)
-  
+
+  col_choices <- c(hcl.pals())
+  initial_cols <- c("Inferno", "Plasma", "Spectral", "Cividis", "Viridis",
+                    "Zissou 1", "Purple-Green", "Berlin", "PiYG", "Grays",
+                    "Batlow", "turku", "YlOrRd", "Terrain",
+                    "PrGn", "Green-Brown", "Hawaii", "Cork", "Rocket", "RdYlBu")
+  col_choices <- c(initial_cols, setdiff(col_choices, initial_cols))
+
   tabPanel("UMAP Embeddings",
            value = ns("tab3b"),
            sidebarLayout(
              sidebarPanel(
                uiOutput(ns("mz_selector")),
                uiOutput(ns("color_selector")),
-               
+
+               selectInput(
+                 ns("color_palette_embed"),
+                 "Color Palette:",
+                 choices = col_choices,
+                 selected = "Viridis"
+               ),
+
                # Add color choices UI element
                uiOutput(ns("color_choices")),
-               
+
                sliderInput(
                  ns("point_size"), 
                  "Point Size:", 

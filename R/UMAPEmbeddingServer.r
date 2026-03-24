@@ -718,7 +718,7 @@ UMAPEmbeddingServer <- function(id, setup_values, preproc_values, preproc_values
         }
         
         # Create color palette and map values
-        color_palette <- pals::viridis(100)
+        color_palette <- grDevices::hcl.colors(100, palette = input$color_palette_embed)
         midpoint <- input$color_midpoint
         rescaled_numbers <- (normalized_intensities - midpoint) / (1 - midpoint) + 0.5
         rescaled_numbers <- pmax(0, pmin(1, rescaled_numbers))
@@ -847,7 +847,8 @@ UMAPEmbeddingServer <- function(id, setup_values, preproc_values, preproc_values
                   tol = 0.005,
                   units = "mz",
                   enhance = "hist",
-                  smooth = "gaussian"
+                  smooth = "gaussian",
+                  col = grDevices::hcl.colors(100, palette = input$color_palette_embed)
                 )
               }
             } else {
