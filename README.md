@@ -66,6 +66,7 @@ OR
 ```r
 #Development branch (recent updates)
 remotes::install_git("https://github.com/Weljie-Lab-UPenn/MSI.EAGLE", ref = 'dev')
+```
 
 ## Usage
 
