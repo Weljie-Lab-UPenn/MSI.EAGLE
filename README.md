@@ -34,14 +34,16 @@ If you don't have Git installed, download and install it from: https://git-scm.c
 ### Step 3: Install MSI.EAGLE
 
 ```r
-Main version (stable):
+#Main branch (stable):
 remotes::install_git("https://github.com/Weljie-Lab-UPenn/MSI.EAGLE")
-
-Development version (recent updates)
-remotes::install_git("https://github.com/Weljie-Lab-UPenn/MSI.EAGLE", ref = 'dev')
-
 ```
 
+OR
+
+```r
+#Development branch (recent updates)
+remotes::install_git("https://github.com/Weljie-Lab-UPenn/MSI.EAGLE", ref = 'dev')
+```
 ## Usage
 
 ### Basic Setup
