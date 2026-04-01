@@ -4,7 +4,28 @@ output: github_document
 
 # MSI.EAGLE
 
-An interactive Shiny application for processing mass spectrometry imaging (MSI) data. MSI.EAGLE leverages processing features from Cardinal and adds additional analysis options for comprehensive MSI data analysis.
+MSI.EAGLE is an interactive platform for mass spectrometry imaging (MSI)
+analysis, designed for both routine MSI workflows and advanced multimodal
+workflows. It combines MSI preprocessing, visualization, embedding, and
+statistics with optional polygon-informed single-cell analysis and
+registration modules in one reproducible interface.
+
+## Why MSI.EAGLE
+
+- General MSI workflow by default: load imzML/RDS data, preprocess, visualize ions, and run clustering/statistics without requiring histology or polygons.
+- Optional single-cell workflows: import cell polygons from microscopy, map them to MSI pixels, and store cell-level fields in `pData`.
+- Spatially aware UMAP and clustering: explore embedding space and tissue space together.
+- Multimodal registration: align histology images, cluster maps, and polygons to MSI with tunable, saveable transforms.
+- Quantitative registration diagnostics: score candidate transforms and review fit statistics before applying.
+- Reproducible export: save/load registration parameters and write updated MSI datasets with mapped metadata.
+
+## Core Workflows
+
+1. Load imzML or RDS MSI datasets.
+2. Preprocess and peak-pick using Cardinal-based methods.
+3. Generate UMAP/clustering and derive phenotypes.
+4. Optionally register histology, cluster, and polygon overlays and map polygon/cell annotations into `pData`.
+5. Run group statistics at pixel or sample level and export results.
 
 ## Installation
 
