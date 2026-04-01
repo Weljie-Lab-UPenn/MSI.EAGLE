@@ -1,6 +1,27 @@
 # MSI.EAGLE
 
-An interactive Shiny application for processing mass spectrometry imaging (MSI) data. MSI.EAGLE leverages processing features from Cardinal and adds additional analysis options for comprehensive MSI data analysis.
+MSI.EAGLE is an interactive platform for mass spectrometry imaging (MSI)
+analysis, designed for both routine MSI workflows and advanced multimodal
+workflows. It combines MSI preprocessing, visualization, embedding, and
+statistics with optional polygon-informed single-cell analysis and
+registration modules in one reproducible interface.
+
+## Why MSI.EAGLE
+
+- General MSI workflow by default: load imzML/RDS data, preprocess, visualize ions, and run clustering/statistics without requiring histology or polygons.
+- Optional single-cell workflows: import cell polygons from microscopy, map them to MSI pixels, and store cell-level fields in `pData`.
+- Spatially aware UMAP and clustering: explore embedding space and tissue space together.
+- Multimodal registration: align histology images, cluster maps, and polygons to MSI with tunable, saveable transforms.
+- Quantitative registration diagnostics: score candidate transforms and review fit statistics before applying.
+- Reproducible export: save/load registration parameters and write updated MSI datasets with mapped metadata.
+
+## Core Workflows
+
+1. Load imzML or RDS MSI datasets.
+2. Preprocess and peak-pick using Cardinal-based methods.
+3. Generate UMAP/clustering and derive phenotypes.
+4. Optionally register histology, cluster, and polygon overlays and map polygon/cell annotations into `pData`.
+5. Run group statistics at pixel or sample level and export results.
 
 ## Installation
 
@@ -43,7 +64,7 @@ OR
 ```r
 #Development branch (recent updates)
 remotes::install_git("https://github.com/Weljie-Lab-UPenn/MSI.EAGLE", ref = 'dev')
-```
+
 ## Usage
 
 ### Basic Setup
@@ -65,17 +86,17 @@ rawd = 'path/to/rawfilesdirectory'
 wd = 'path/to/workingdirectory'
 
 # Configure number of CPU cores to use
-# Option 1: Use all but 2 processors (recommended for Mac)
-ncores = as.integer(parallel::detectCores()/2)
+# Option 1: Use half of available processors
+ncores <- as.integer(parallel::detectCores()/2)
 
-# Option 2: Use 1-2 workers (recommended for PC)
-ncores = 2
+# Option 2: Use all but 2 processors (recommended)
+ncores <- as.integer(parallel::detectCores()) - 2
 
 # Launch the application
 MSI.EAGLE()
 ```
 ## Documentation
-For detailed instructions, tutorials, and examples, see our [Manuals and Vignettes](https://github.com/Weljie-Lab-UPenn/MSI.EAGLE/tree/ed0654b7793bde229a47bfa7b5717bd3dcdc9517/Manuals%20and%20Vignettes).
+For detailed instructions, tutorials, and examples, see our Manuals and Vignettes.
 
 ## Requirements
 
