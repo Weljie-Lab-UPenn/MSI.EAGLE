@@ -2,10 +2,11 @@
 
 # MSI.EAGLE
 
-<!-- badges: start -->
-<!-- badges: end -->
-
-MSI.EAGLE is an interactive platform for mass spectrometry imaging (MSI) analysis, designed for both routine MSI workflows and advanced multimodal workflows. It combines MSI preprocessing, visualization, embedding, and statistics with optional polygon-informed single-cell analysis and registration modules in one reproducible interface.
+MSI.EAGLE is an interactive platform for mass spectrometry imaging (MSI)
+analysis, designed for both routine MSI workflows and advanced multimodal
+workflows. It combines MSI preprocessing, visualization, embedding, and
+statistics with optional polygon-informed single-cell analysis and
+registration modules in one reproducible interface.
 
 ## Why MSI.EAGLE
 
@@ -26,47 +27,86 @@ MSI.EAGLE is an interactive platform for mass spectrometry imaging (MSI) analysi
 
 ## Installation
 
-``` r
+### Prerequisites
+
+Before installing MSI.EAGLE, you need to install R and R Studio: https://rstudio-education.github.io/hopr/starting.html
+
+Then the required Bioconductor packages and Git.
+
+### Step 1: Install Required R Packages
+
+```r
+# Install remotes package
 install.packages("remotes")
 
-if (!requireNamespace("BiocManager", quietly = TRUE))
-  install.packages("BiocManager")
+# Install BiocManager if not already installed
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
 
+# Install required Bioconductor packages
 BiocManager::install(c("BiocParallel", "Cardinal"))
 
-# Optional demo data:
+# Optional: Install CardinalWorkflows for demo data
 BiocManager::install("CardinalWorkflows")
+```
 
-# MSI.EAGLE:
+### Step 2: Install Git
+
+If you don't have Git installed, download and install it from: https://git-scm.com/book/en/v2/Getting-Started-Installing-Git
+
+### Step 3: Install MSI.EAGLE
+
+```r
+#Main branch (stable):
 remotes::install_git("https://github.com/Weljie-Lab-UPenn/MSI.EAGLE")
 ```
 
-## Quick Start
+OR
 
-``` r
-# optional globals used by the app
-rawd <- "path/to/rawfilesdirectory"
-wd <- "path/to/workingdirectory" # can be same as rawd
+```r
+#Development branch (recent updates)
+remotes::install_git("https://github.com/Weljie-Lab-UPenn/MSI.EAGLE", ref = 'dev')
 
-# use all but 2 available processors (minimum 1)
-ncores <- max(1L, as.integer(parallel::detectCores()) - 2L)
+## Usage
+
+### Basic Setup
+
+In R Studio:
+1) Create a new R script, and copy and paste the start code below into it.
+2) Add the file path to the folder containing your .imzML and .ibd raw data files (rawd), and the path to the folder where your results will be saved (wd).
+3) Then, click "Source with Echo" to run the application.
+
+```r
+#MSI.EAGLE Start
 
 library(MSI.EAGLE)
-# MSI.EAGLE() # uncomment to start the app
+
+# Set path to raw data files
+rawd = 'path/to/rawfilesdirectory'
+
+# Set working directory (can be same as raw data directory)
+wd = 'path/to/workingdirectory'
+
+# Configure number of CPU cores to use
+# Option 1: Use half of available processors
+ncores <- as.integer(parallel::detectCores()/2)
+
+# Option 2: Use all but 2 processors (recommended)
+ncores <- as.integer(parallel::detectCores()) - 2
+
+# Launch the application
+MSI.EAGLE()
 ```
+## Documentation
+For detailed instructions, tutorials, and examples, see our Manuals and Vignettes.
 
-## Access to Private Repositories
+## Requirements
 
-If needed, store your GitHub Personal Access Token (PAT) in `.Renviron`:
+- R version 3.6 or higher
+- Bioconductor packages: Cardinal, BiocParallel
+- Git (for installation)
+- Sufficient RAM for mass spectrometry imaging data processing
 
-``` r
-usethis::edit_r_environ()
-```
+## Support
 
-Add:
-
-``` text
-GITHUB_PAT=your_personal_access_token
-```
-
-Then restart R.
+For issues and questions, please use the GitHub Issues page for this repository.
