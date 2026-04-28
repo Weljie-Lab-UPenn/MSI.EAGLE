@@ -19,17 +19,138 @@ PeakPickServer <- function(id, setup_values) {
     chunks = reactive({
       setup_values()[["chunks"]]
     })
+
+    configure_cardinal_parallel <- function(context = "Peak picking") {
+      if (identical(Sys.info()[["sysname"]], "Darwin")) {
+        old_vsize <- try(mem.maxVSize(), silent = TRUE)
+        if (!inherits(old_vsize, "try-error") && is.finite(old_vsize) && old_vsize < 32768) {
+          new_vsize <- try(mem.maxVSize(Inf), silent = TRUE)
+          message(sprintf(
+            "[PeakPick] Raised macOS R vector memory limit from %s MB to %s MB",
+            as.character(old_vsize),
+            as.character(new_vsize)
+          ))
+        }
+      }
+
+      bp <- par_mode()
+      n_chunks <- suppressWarnings(as.integer(chunks()))
+      if (is.null(bp)) {
+        bp <- BiocParallel::SerialParam()
+      }
+      if (!is.finite(n_chunks) || n_chunks < 1L) {
+        n_chunks <- 20L
+      }
+
+      bp_class <- class(bp)[1]
+      bp_workers <- tryCatch(BiocParallel::bpworkers(bp), error = function(e) NA_integer_)
+      bp_set <- try(Cardinal::setCardinalBPPARAM(bp), silent = TRUE)
+      if (inherits(bp_set, "try-error")) {
+        message(sprintf(
+          "[PeakPick] %s parallel config failed for backend=%s workers=%s: %s",
+          context,
+          bp_class,
+          as.character(bp_workers),
+          as.character(bp_set)
+        ))
+        showNotification(
+          sprintf("%s could not start %s with %s workers; falling back to serial Cardinal processing. Check BiocParallel worker/port permissions.",
+                  context, bp_class, as.character(bp_workers)),
+          type = "error",
+          duration = 12
+        )
+        bp <- BiocParallel::SerialParam()
+        Cardinal::setCardinalBPPARAM(bp)
+        bp_class <- class(bp)[1]
+        bp_workers <- BiocParallel::bpworkers(bp)
+      }
+      Cardinal::setCardinalNChunks(n_chunks)
+
+      message(sprintf(
+        "[PeakPick] %s parallel config: backend=%s workers=%s chunks=%d",
+        context,
+        bp_class,
+        as.character(bp_workers),
+        n_chunks
+      ))
+
+      if (identical(bp_class, "SerialParam") || isTRUE(bp_workers <= 1L)) {
+        showNotification(
+          sprintf("%s is using serial Cardinal processing. Select MulticoreParam/SnowParam and set cores > 1 in Data Setup to use multiple cores.", context),
+          type = "warning",
+          duration = 8
+        )
+      } else {
+        showNotification(
+          sprintf("%s using %s with %d workers and %d chunks.", context, bp_class, bp_workers, n_chunks),
+          type = "message",
+          duration = 6
+        )
+      }
+
+      invisible(bp)
+    }
+
+    notify_peak_processing_error <- function(err, context = "Peak processing") {
+      err_txt <- paste(as.character(err), collapse = "\n")
+      message(sprintf("[PeakPick] %s failed: %s", context, err_txt))
+      if (grepl("seq_len|seq_rel|must be coercible to non-negative integer", err_txt, ignore.case = TRUE)) {
+        showNotification(
+          paste(
+            context,
+            "could not build a valid m/z axis. Leave both m/z bounds blank for auto-detection or provide finite min/max values with max greater than min."
+          ),
+          type = "error",
+          duration = 14
+        )
+      } else if (grepl("vector memory limit|mem.maxVSize|cannot allocate vector|BiocParallel errors", err_txt, ignore.case = TRUE)) {
+        showNotification(
+          paste(
+            context,
+            "ran out of worker memory. Try fewer cores, more chunks, or a narrower m/z range; on macOS the app also raises R's vector memory limit before launching workers."
+          ),
+          type = "error",
+          duration = 14
+        )
+      } else {
+        showNotification(sprintf("%s failed, check files and parameters.", context), type = "error", duration = 10)
+      }
+    }
+
+    resolve_mass_range <- function(mz_min, mz_max, context = "Peak picking") {
+      rng <- suppressWarnings(as.numeric(c(mz_min, mz_max)))
+      if (length(rng) != 2L || any(!is.finite(rng))) {
+        message(sprintf("[PeakPick] %s mass.range set to auto-detect (blank or non-finite bounds)", context))
+        return(NULL)
+      }
+      rng <- sort(rng)
+      if (rng[1] >= rng[2]) {
+        showNotification(
+          sprintf("%s m/z range is invalid: min and max must be different finite values.", context),
+          type = "error",
+          duration = 10
+        )
+        stop("Invalid m/z range: min and max must be different finite values.")
+      }
+      message(sprintf("[PeakPick] %s mass.range using %.6f..%.6f", context, rng[1], rng[2]))
+      rng
+    }
     
     has.new.files <- function() {
-      unique(list.files(setup_values()[["wd"]]), recursive=T)
+      unique(list.files(setup_values()[["wd"]], recursive = TRUE))
     }
     get.files <- function() {
       list.files(setup_values()[["wd"]], recursive=T)
     }
     
-    # store as a reactive instead of output
+    is_intel_mac <- identical(Sys.info()[["sysname"]], "Darwin") &&
+      grepl("x86_64|i386", R.version$arch, ignore.case = TRUE)
+    file_poll_ms <- if (is_intel_mac) 10000 else 10
+
+    # Slow down recursive directory polling only on Intel Macs, where
+    # cloud-synced working directories can cause noticeable UI lag.
     my_files <-
-      reactivePoll(10, session, checkFunc = has.new.files, valueFunc = get.files)
+      reactivePoll(file_poll_ms, session, checkFunc = has.new.files, valueFunc = get.files)
 
     listed_files <- reactive({
       files <- my_files()
@@ -531,8 +652,7 @@ PeakPickServer <- function(id, setup_values) {
                          return()
                        }
                        
-                       setCardinalBPPARAM(par_mode())
-                       setCardinalNChunks(chunks())
+                       configure_cardinal_parallel("Fresh peak picking")
                        
                        # commented code not relevant to Cardinal 3.6
                        # coord_list_reduced <-
@@ -568,23 +688,30 @@ PeakPickServer <- function(id, setup_values) {
                        
                        #use Cardinal 3.6 peak processing method
                        
-                       msa<-convertMSImagingArrays2Experiment(Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)),
-                                                                                              mass.range = c(setup_values()[["mz_min"]], setup_values()[["mz_max"]]), 
+                       fresh_mass_range <- resolve_mass_range(setup_values()[["mz_min"]], setup_values()[["mz_max"]], "Fresh peak picking")
+                       msa<-try(convertMSImagingArrays2Experiment(Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)),
+                                                                                              mass.range = fresh_mass_range, 
                                                                                               #x1$mass.range,
                                                                                               resolution = setup_values()[["res"]], 
-                                                                                              units = "ppm")
+                                                                                              units = "ppm"), silent = TRUE)
+                       if (inherits(msa, "try-error")) {
+                         notify_peak_processing_error(msa, "Fresh peak picking m/z conversion")
+                         return()
+                       }
                        
                        mse_queue<- msa |>
                          normalize() |>
                          #smooth() |>
                          #reduceBaseline() |>
-                         peakPick(SNR=input$SNR, method=input$method, type="area", tolerance=NA, units="ppm")
+                         peakPick(SNR=input$SNR, method=input$pp_method, type="area", tolerance=NA, units="ppm") |>
+                         process()
                         
                        #plot the middle spectrum?
                        print(plot(mse_queue, i=round(dim(coord(msa))[1]/2,0), linewidth=2))
                        
                        test_mz_reduced<-try(
                           peakAlign(mse_queue, tolerance= setup_values()[["tol"]], units=setup_values()[["units"]]) %>%
+                          process() %>%
                           subsetFeatures( freq > input$freq_min)%>% 
                           summarizeFeatures()
                        )
@@ -621,8 +748,7 @@ PeakPickServer <- function(id, setup_values) {
                        # )
                        
                        if(class(test_mz_reduced) %in% "try-error"){
-                         message("peak picking failed, check files")
-                         showNotification("peakpicking failed, check files")
+                         notify_peak_processing_error(test_mz_reduced, "Fresh peak picking")
                          return()
                        }
                        # 
@@ -670,8 +796,7 @@ PeakPickServer <- function(id, setup_values) {
                        log_file_load("reference peak list", input$peakPickfile, pick_path, test_mz_reduced)
                        
                        print(test_mz_reduced)
-                       setCardinalBPPARAM(par_mode())
-                       setCardinalNChunks(chunks())
+                       configure_cardinal_parallel("Reference peak binning")
                        
                        
                        a<-Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays))
@@ -684,8 +809,7 @@ PeakPickServer <- function(id, setup_values) {
                        )
                        
                        if(class(overview_peaks) %in% "try-error"){
-                         message("Peak binning from reference failed, please check files")
-                         showNotification("Peak binning from reference failed, please check files", type="error")
+                         notify_peak_processing_error(overview_peaks, "Reference peak binning")
                          return()
                        }
                        
@@ -700,28 +824,18 @@ PeakPickServer <- function(id, setup_values) {
                        
                        
                        
-                       if(!is.null(x1$mass.range)) {
-                         #check mz_min and mz_max to make sure they are not the same
-                         if (setup_values()[["mz_min"]] == setup_values()[["mz_max"]]) {
-                           print("mz_min and mz_max are the same, please change")
-                           showNotification("mz_min and mz_max are the same, please change", type="error")
-                           return()
-                         }
-                       }
-                       
-                       
                        #do.call(cbind, x1$raw_list[c(1:3))
                        
-                       setCardinalBPPARAM(par_mode())
-                       setCardinalNChunks(chunks())
+                       configure_cardinal_parallel("Mean-spectrum peak finding")
                        print("binning raw files from mean spectrum")
+                       mean_mass_range <- resolve_mass_range(setup_values()[["mz_min"]], setup_values()[["mz_max"]], "Mean-spectrum peak finding")
                        test_mz_mean <- try(
                          #for debugging
                          #Cardinal::combine(x1$raw_list[c(1:3,5:8)]) %>%
                          Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)) %>%
                          
                            convertMSImagingArrays2Experiment(
-                             mass.range=c(setup_values()[["mz_min"]], setup_values()[["mz_max"]])) %>% 
+                             mass.range=mean_mass_range) %>% 
                              #mass.range=x1$mass.range) %>%
                            # normalize() %>% 
                            # process() %>%
@@ -734,18 +848,19 @@ PeakPickServer <- function(id, setup_values) {
                        
                        #check class of test_mz_mean
                        if(class(test_mz_mean) %in% "try-error") {
-                         print("mean spectrum peak picking failed, check input files")
-                         showNotification("Mean spectrum peak picking failed, check input files.", type = "error")
+                         notify_peak_processing_error(test_mz_mean, "Mean-spectrum peak finding")
                          return()
                        }
                        
+                       configure_cardinal_parallel("Mean-spectrum peak binning")
                        test_mz_reduced<-try(Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)) %>% 
                                               normalize() %>% 
                                               peakProcess(
                                                  ref=mz(test_mz_mean),
                                                  SN=input$SNR,
                                                  type="area",
-                                                 tolerance=setup_values()[["tol"]], units=setup_values()[["units"]]) %>% 
+                                                 tolerance=setup_values()[["tol"]], units=setup_values()[["units"]]) %>%
+                                               process() %>% 
                                                summarizeFeatures()
                        )
 
@@ -753,13 +868,9 @@ PeakPickServer <- function(id, setup_values) {
 
 
                        if(class(test_mz_reduced) %in% "try-error") {
-                         print("peak picking failed, check input files")
-                         showNotification("Mean spectrum peak picking failed, check input files.", type = "error")
+                         notify_peak_processing_error(test_mz_reduced, "Mean-spectrum peak binning")
                          return()
                        }
-                       
-                       setCardinalBPPARAM(par_mode())
-                       setCardinalNChunks(chunks())
                        
                        overview_peaks <-
                          test_mz_reduced

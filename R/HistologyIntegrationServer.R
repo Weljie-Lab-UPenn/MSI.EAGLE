@@ -11,11 +11,15 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       restore_msi_mode = NULL,
       restore_mz_select = NULL,
       restore_mz_value = NULL,
+      restore_mz_sort_mode = NULL,
       restore_rgb_select = NULL,
       restore_rgb_values = NULL,
       restore_rgb_auto_n = NULL,
       rgb_mz_applied = NULL,
+      last_valid_mz_select = NULL,
       restore_overlay_pdata_field = NULL,
+      mz_ion_table = NULL,
+      mz_ion_signature = NULL,
       stat_fit_grid = NULL,
       stat_fit_candidates = NULL,
       stat_fit_summary = NULL,
@@ -214,17 +218,152 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
     })
 
+    msi_dataset_signature <- function(msi_obj) {
+      rn <- try(runNames(msi_obj), silent = TRUE)
+      if (inherits(rn, "try-error") || is.null(rn)) rn <- character(0)
+      mz_axis <- suppressWarnings(as.numeric(Cardinal::mz(msi_obj)))
+      mz_axis <- mz_axis[is.finite(mz_axis)]
+      mz_min <- if (length(mz_axis) > 0L) round(min(mz_axis), 6) else NA_real_
+      mz_max <- if (length(mz_axis) > 0L) round(max(mz_axis), 6) else NA_real_
+      paste(
+        suppressWarnings(as.integer(nrow(msi_obj))),
+        suppressWarnings(as.integer(ncol(msi_obj))),
+        paste(rn, collapse = "|"),
+        mz_min,
+        mz_max,
+        sep = "::"
+      )
+    }
+
+    format_mz_choice_label <- function(mz, detect_fraction = NA_real_, mean_intensity = NA_real_) {
+      mz_txt <- format(mz, digits = 10, scientific = FALSE, trim = TRUE)
+      if (!is.finite(detect_fraction) || !is.finite(mean_intensity)) {
+        return(mz_txt)
+      }
+      paste0(
+        mz_txt,
+        " | detect ",
+        sprintf("%.1f%%", 100 * detect_fraction),
+        " | mean ",
+        format(signif(mean_intensity, 4), scientific = TRUE, trim = TRUE)
+      )
+    }
+
+    build_mz_ion_table <- function(msi_obj, include_intensity = TRUE) {
+      mz_axis <- try(Cardinal::mz(msi_obj), silent = TRUE)
+      mz_axis <- suppressWarnings(as.numeric(mz_axis))
+      if (inherits(mz_axis, "try-error") || length(mz_axis) == 0L) {
+        return(data.frame())
+      }
+
+      keep_idx <- which(is.finite(mz_axis))
+      if (length(keep_idx) == 0L) {
+        return(data.frame())
+      }
+
+      tab <- data.frame(
+        feature_index = as.integer(keep_idx),
+        feature_key = as.character(keep_idx),
+        mz = mz_axis[keep_idx],
+        detect_fraction = NA_real_,
+        mean_intensity = NA_real_,
+        stringsAsFactors = FALSE
+      )
+
+      if (isTRUE(include_intensity)) {
+        xmat <- try(get_intensity_matrix_fast(msi_obj), silent = TRUE)
+        if (!inherits(xmat, "try-error") && !is.null(xmat) && nrow(xmat) >= max(keep_idx)) {
+          xmat <- xmat[keep_idx, , drop = FALSE]
+          tab$detect_fraction <- rowMeans(is.finite(xmat) & xmat > 0, na.rm = TRUE)
+          tab$mean_intensity <- rowMeans(xmat, na.rm = TRUE)
+          rm(xmat)
+        }
+      }
+
+      tab$choice_label <- vapply(
+        seq_len(nrow(tab)),
+        function(i) {
+          format_mz_choice_label(
+            mz = tab$mz[i],
+            detect_fraction = tab$detect_fraction[i],
+            mean_intensity = tab$mean_intensity[i]
+          )
+        },
+        character(1)
+      )
+      tab
+    }
+
+    rebuild_mz_ion_cache <- function(msi_obj) {
+      xh$mz_ion_signature <- msi_dataset_signature(msi_obj)
+      tab <- try(build_mz_ion_table(msi_obj, include_intensity = TRUE), silent = TRUE)
+      if (inherits(tab, "try-error") || !is.data.frame(tab) || nrow(tab) == 0L) {
+        tab <- try(build_mz_ion_table(msi_obj, include_intensity = FALSE), silent = TRUE)
+      }
+      if (inherits(tab, "try-error") || !is.data.frame(tab)) {
+        tab <- data.frame()
+      }
+      xh$mz_ion_table <- tab
+      invisible(tab)
+    }
+
+    resolve_mz_sort_mode <- function() {
+      pending <- isolate(xh$restore_mz_sort_mode)
+      if (!is.null(pending)) {
+        pending <- as.character(pending)[1]
+        if (!is.na(pending) && pending %in% c("Intensity", "m/z")) {
+          return(pending)
+        }
+      }
+      current <- as.character(input$mz_sort_mode)[1]
+      if (is.na(current) || !current %in% c("Intensity", "m/z")) "Intensity" else current
+    }
+
+    ordered_mz_ion_table <- function(sort_mode = NULL, tab = NULL) {
+      if (is.null(tab)) tab <- isolate(xh$mz_ion_table)
+      if (is.null(tab) || !is.data.frame(tab) || nrow(tab) == 0L) {
+        return(data.frame())
+      }
+
+      mode <- if (is.null(sort_mode)) resolve_mz_sort_mode() else as.character(sort_mode)[1]
+      if (is.na(mode) || !mode %in% c("Intensity", "m/z")) mode <- "Intensity"
+
+      has_intensity <- any(is.finite(tab$detect_fraction)) && any(is.finite(tab$mean_intensity))
+      if (identical(mode, "Intensity") && isTRUE(has_intensity)) {
+        detect_rank <- ifelse(is.finite(tab$detect_fraction), tab$detect_fraction, -Inf)
+        mean_rank <- ifelse(is.finite(tab$mean_intensity), tab$mean_intensity, -Inf)
+        ord <- order(-detect_rank, -mean_rank, tab$mz, tab$feature_index, na.last = TRUE)
+      } else {
+        ord <- order(tab$mz, tab$feature_index, na.last = TRUE)
+      }
+      tab[ord, , drop = FALSE]
+    }
+
+    mz_selectize_choices <- function(sort_mode = NULL, tab = NULL) {
+      tab <- ordered_mz_ion_table(sort_mode = sort_mode, tab = tab)
+      if (!is.data.frame(tab) || nrow(tab) == 0L) {
+        return(character(0))
+      }
+      choices <- tab$feature_key
+      names(choices) <- tab$choice_label
+      choices
+    }
+
     refresh_mz_ion_inputs <- function(msi_obj) {
-      mzv <- try(Cardinal::mz(msi_obj), silent = TRUE)
-      if (inherits(mzv, "try-error") || length(mzv) == 0) {
+      sig_now <- try(msi_dataset_signature(msi_obj), silent = TRUE)
+      tab <- isolate(xh$mz_ion_table)
+      if (inherits(sig_now, "try-error") || is.null(sig_now) || !identical(isolate(xh$mz_ion_signature), sig_now) ||
+          !is.data.frame(tab) || nrow(tab) == 0L) {
+        tab <- try(build_mz_ion_table(msi_obj, include_intensity = FALSE), silent = TRUE)
+      }
+      if (inherits(tab, "try-error") || !is.data.frame(tab) || nrow(tab) == 0L) {
         return(invisible(FALSE))
       }
-      mz_num <- suppressWarnings(as.numeric(mzv))
 
-      idx_vals <- as.character(seq_along(mzv))
-      labels <- format(mzv, digits = 10, scientific = FALSE, trim = TRUE)
-      choices <- idx_vals
-      names(choices) <- labels
+      choices <- mz_selectize_choices(sort_mode = resolve_mz_sort_mode(), tab = tab)
+      idx_vals <- unname(choices)
+      if (length(idx_vals) == 0L) return(invisible(FALSE))
+      mz_num <- suppressWarnings(as.numeric(tab$mz))
 
       cur <- isolate(input$mz_select)
       sel <- if (!is.null(cur) && cur %in% idx_vals) cur else idx_vals[1]
@@ -242,7 +381,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         fin <- which(is.finite(mz_num))
         near <- fin[which.min(abs(mz_num[fin] - restore_mz_val))]
         if (isTRUE(length(near) == 1L && is.finite(near))) {
-          sel <- idx_vals[near]
+          sel <- tab$feature_key[near]
         }
         xh$restore_mz_value <- NULL
       }
@@ -272,7 +411,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           ))
           rr <- rr[is.finite(rr) & rr >= 1L & rr <= length(idx_vals)]
           if (length(rr) > 0) {
-            rgb_sel <- idx_vals[rr][seq_len(min(3L, length(rr)))]
+            rgb_sel <- tab$feature_key[rr][seq_len(min(3L, length(rr)))]
           }
           xh$restore_rgb_values <- NULL
         }
@@ -302,7 +441,24 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
     observeEvent(msi_data(), {
       obj <- try(msi_data(), silent = TRUE)
       if (inherits(obj, "try-error") || is.null(obj)) return()
+      rebuild_mz_ion_cache(obj)
       refresh_mz_ion_inputs(obj)
+    }, ignoreInit = FALSE)
+
+    observeEvent(input$mz_sort_mode, {
+      xh$restore_mz_sort_mode <- NULL
+      obj <- try(msi_data(), silent = TRUE)
+      if (inherits(obj, "try-error") || is.null(obj)) return()
+      refresh_mz_ion_inputs(obj)
+    }, ignoreInit = TRUE)
+
+    observeEvent(input$mz_select, {
+      cur <- as.character(input$mz_select)[1]
+      tab <- isolate(xh$mz_ion_table)
+      if (!is.data.frame(tab) || nrow(tab) == 0L) return()
+      if (!is.na(cur) && nzchar(cur) && cur %in% tab$feature_key) {
+        xh$last_valid_mz_select <- cur
+      }
     }, ignoreInit = FALSE)
 
     observeEvent(input$msi_plot_mode, {
@@ -316,19 +472,36 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }, once = TRUE)
     }, ignoreInit = TRUE)
 
+    observeEvent(input$mz_nav_step, {
+      mode_now <- tolower(trimws(as.character(input$msi_plot_mode)[1]))
+      if (!identical(mode_now, "mz")) return()
+
+      step <- suppressWarnings(as.integer(input$mz_nav_step)[1])
+      if (!is.finite(step) || step == 0L) return()
+      step <- if (step < 0L) -1L else 1L
+
+      tab <- ordered_mz_ion_table(sort_mode = resolve_mz_sort_mode())
+      if (!is.data.frame(tab) || nrow(tab) == 0L) return()
+
+      cur <- as.character(input$mz_select)[1]
+      pos <- match(cur, tab$feature_key)
+      if (!is.finite(pos)) pos <- 1L
+      next_pos <- ((pos - 1L + step) %% nrow(tab)) + 1L
+      updateSelectizeInput(session, "mz_select", selected = tab$feature_key[next_pos])
+    }, ignoreInit = TRUE)
+
     observeEvent(input$rgb_add_from_mz, {
-      obj <- try(msi_for_pdata(), silent = TRUE)
+      obj <- try(msi_data(), silent = TRUE)
       if (inherits(obj, "try-error")) {
         showNotification("Load MSI data first.", type = "warning", duration = 5)
         return()
       }
-      mzv <- suppressWarnings(as.numeric(Cardinal::mz(obj)))
-      if (length(mzv) == 0) {
+      choices <- mz_selectize_choices(sort_mode = resolve_mz_sort_mode())
+      idx_vals <- unname(choices)
+      if (length(idx_vals) == 0L) {
         showNotification("No m/z values available to add.", type = "warning", duration = 5)
         return()
       }
-
-      idx_vals <- as.character(seq_along(mzv))
       cur <- intersect(as.character(isolate(input$rgb_mz_select)), idx_vals)
       add_one <- as.character(isolate(input$mz_select))[1]
       if (length(add_one) == 0 || is.na(add_one) || !nzchar(add_one) || !add_one %in% idx_vals) {
@@ -342,21 +515,14 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         showNotification("RGB supports up to 3 channels. Keeping the most recent 3 selections.", type = "message", duration = 6)
       }
 
-      labels <- format(mzv, digits = 10, scientific = FALSE, trim = TRUE)
-      choices <- idx_vals
-      names(choices) <- labels
       updateSelectizeInput(session, "rgb_mz_select", choices = choices, selected = next_sel, server = TRUE)
     }, ignoreInit = TRUE)
 
     observeEvent(input$rgb_clear_mz, {
-      obj <- try(msi_for_pdata(), silent = TRUE)
+      obj <- try(msi_data(), silent = TRUE)
       if (inherits(obj, "try-error")) return()
-      mzv <- suppressWarnings(as.numeric(Cardinal::mz(obj)))
-      if (length(mzv) == 0) return()
-      idx_vals <- as.character(seq_along(mzv))
-      labels <- format(mzv, digits = 10, scientific = FALSE, trim = TRUE)
-      choices <- idx_vals
-      names(choices) <- labels
+      choices <- mz_selectize_choices(sort_mode = resolve_mz_sort_mode())
+      if (length(choices) == 0L) return()
       updateSelectizeInput(session, "rgb_mz_select", choices = choices, selected = character(0), server = TRUE)
       showNotification("RGB channel selection cleared. Click 'Apply RGB channels' to refresh the plot.", type = "message", duration = 5)
     }, ignoreInit = TRUE)
@@ -368,11 +534,12 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         return()
       }
       mzv <- suppressWarnings(as.numeric(Cardinal::mz(obj)))
-      if (length(mzv) == 0) {
+      valid_idx <- which(is.finite(mzv))
+      if (length(valid_idx) == 0L) {
         showNotification("No m/z values available to apply.", type = "warning", duration = 5)
         return()
       }
-      idx_vals <- as.character(seq_along(mzv))
+      idx_vals <- as.character(valid_idx)
       sel <- intersect(as.character(isolate(input$rgb_mz_select)), idx_vals)
       sel <- unique(sel)
       if (length(sel) > 3) sel <- sel[seq_len(3L)]
@@ -394,13 +561,14 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       if (inherits(obj, "try-error")) return("RGB channels: no MSI loaded")
 
       mzv <- suppressWarnings(as.numeric(Cardinal::mz(obj)))
-      if (length(mzv) == 0) return("RGB channels: no m/z values available")
+      valid_idx <- which(is.finite(mzv))
+      if (length(valid_idx) == 0L) return("RGB channels: no m/z values available")
 
       idx_pending <- suppressWarnings(as.integer(input$rgb_mz_select))
-      idx_pending <- idx_pending[is.finite(idx_pending) & idx_pending >= 1L & idx_pending <= length(mzv)]
+      idx_pending <- idx_pending[is.finite(idx_pending) & idx_pending %in% valid_idx]
       idx_pending <- unique(idx_pending)
       idx_applied <- suppressWarnings(as.integer(isolate(xh$rgb_mz_applied)))
-      idx_applied <- idx_applied[is.finite(idx_applied) & idx_applied >= 1L & idx_applied <= length(mzv)]
+      idx_applied <- idx_applied[is.finite(idx_applied) & idx_applied %in% valid_idx]
       idx_applied <- unique(idx_applied)
       if (length(idx_pending) == 0 && length(idx_applied) == 0) return("RGB channels: none selected")
 
@@ -425,7 +593,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
       obj <- msi_for_pdata()
       mz_axis <- suppressWarnings(as.numeric(Cardinal::mz(obj)))
-      validate(need(length(mz_axis) >= 2, "MSI data needs at least 2 m/z values to build RGB channels."))
+      validate(need(sum(is.finite(mz_axis)) >= 2, "MSI data needs at least 2 m/z values to build RGB channels."))
 
       n_pick <- suppressWarnings(as.integer(input$rgb_auto_n))
       if (!n_pick %in% c(2L, 3L)) n_pick <- 3L
@@ -435,7 +603,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         idx <- try(suggest_rgb_indices(obj, n_channels = n_pick), silent = TRUE)
         if (inherits(idx, "try-error")) idx <- integer(0)
         idx <- as.integer(idx[is.finite(idx)])
-        idx <- idx[idx >= 1L & idx <= length(mz_axis)]
+        idx <- idx[idx >= 1L & idx <= length(mz_axis) & is.finite(mz_axis[idx])]
 
         if (length(idx) < 2L) {
           showNotification("Could not generate a robust RGB suggestion from this dataset. Please pick channels manually.", type = "warning", duration = 7)
@@ -444,10 +612,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
         idx <- idx[seq_len(min(length(idx), n_pick))]
         incProgress(0.4, detail = "Applying selection")
-        idx_vals <- as.character(seq_along(mz_axis))
-        labels <- format(mz_axis, digits = 10, scientific = FALSE, trim = TRUE)
-        choices <- idx_vals
-        names(choices) <- labels
+        choices <- mz_selectize_choices(sort_mode = resolve_mz_sort_mode())
         updateSelectizeInput(session, "rgb_mz_select", choices = choices, selected = as.character(idx), server = TRUE)
 
         mz_lab <- format(mz_axis[idx], digits = 10, scientific = FALSE, trim = TRUE)
@@ -2246,12 +2411,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
     }
 
     current_translate_xy <- function() {
-      tx_num <- suppressWarnings(as.numeric(input$translate_x_num))
-      ty_num <- suppressWarnings(as.numeric(input$translate_y_num))
       tx_sl <- suppressWarnings(as.numeric(input$translate_x))
       ty_sl <- suppressWarnings(as.numeric(input$translate_y))
-      tx <- if (is.finite(tx_num)) tx_num else tx_sl
-      ty <- if (is.finite(ty_num)) ty_num else ty_sl
+      tx <- tx_sl
+      ty <- ty_sl
       if (!is.finite(tx)) tx <- 0
       if (!is.finite(ty)) ty <- 0
       list(tx = tx, ty = ty)
@@ -2699,6 +2862,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         msi_canvas_nx = if (!is.null(coord_frame)) coord_frame$nx else NA_integer_,
         msi_canvas_ny = if (!is.null(coord_frame)) coord_frame$ny else NA_integer_,
         msi_plot_mode = input$msi_plot_mode,
+        mz_sort_mode = input$mz_sort_mode,
         mz_select = input$mz_select,
         mz_value = mz_sel_val,
         rgb_mz_select = paste(as.character(rgb_sel_idx), collapse = ","),
@@ -3000,15 +3164,15 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         }
       }
 
-      mzv <- try(Cardinal::mz(obj), silent = TRUE)
-      mzv <- suppressWarnings(as.numeric(mzv))
-      mzv <- mzv[is.finite(mzv)]
-      validate(need(length(mzv) > 0, "MSI data has no m/z axis for selected display mode."))
+      mz_axis <- try(Cardinal::mz(obj), silent = TRUE)
+      mz_axis <- suppressWarnings(as.numeric(mz_axis))
+      valid_mz_idx <- which(is.finite(mz_axis))
+      validate(need(length(valid_mz_idx) > 0, "MSI data has no m/z axis for selected display mode."))
 
       # 2) RGB mode
       if (identical(mode_req, "rgb")) {
         idx_rgb <- suppressWarnings(as.integer(xh$rgb_mz_applied))
-        idx_rgb <- unique(idx_rgb[is.finite(idx_rgb) & idx_rgb >= 1L & idx_rgb <= length(mzv)])
+        idx_rgb <- unique(idx_rgb[is.finite(idx_rgb) & idx_rgb %in% valid_mz_idx])
         if (length(idx_rgb) %in% c(2, 3)) {
           sp <- try(as.matrix(Cardinal::spectra(obj)[idx_rgb, , drop = FALSE]), silent = TRUE)
           if (!inherits(sp, "try-error") && nrow(sp) == length(idx_rgb) && ncol(sp) == ncol(obj)) {
@@ -3016,7 +3180,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
             vals_g <- sp[2, ]
             vals_b <- if (length(idx_rgb) == 3) sp[3, ] else rep(0, ncol(obj))
             ras <- build_rgb_raster(vals_r, vals_g, vals_b)
-            rgb_mz <- mzv[idx_rgb]
+            rgb_mz <- mz_axis[idx_rgb]
             rgb_label <- if (length(rgb_mz) == 2) {
               sprintf("RGB: R=%.5f, G=%.5f, B=0", rgb_mz[1], rgb_mz[2])
             } else {
@@ -3080,7 +3244,14 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
       # 3) Single m/z mode (default fallback)
       idx <- suppressWarnings(as.integer(input$mz_select))
-      if (!is.finite(idx) || idx < 1L || idx > length(mzv)) idx <- 1L
+      if (!is.finite(idx) || !idx %in% valid_mz_idx) {
+        idx_last <- suppressWarnings(as.integer(isolate(xh$last_valid_mz_select))[1])
+        if (is.finite(idx_last) && idx_last %in% valid_mz_idx) {
+          idx <- idx_last
+        } else {
+          idx <- valid_mz_idx[1]
+        }
+      }
 
       vals <- try(as.numeric(Cardinal::spectra(obj)[idx, ]), silent = TRUE)
       validate(need(!inherits(vals, "try-error"), "Could not extract MSI intensities for selected m/z."))
@@ -3095,13 +3266,13 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         xmax = xmax,
         ymin = ymin,
         ymax = ymax,
-        mz_selected = mzv[idx],
+        mz_selected = mz_axis[idx],
         mz_index = idx,
         rgb_mz = NULL,
         pdata_field = NULL,
         mode = "mz",
         mode_requested = mode_req,
-        display_label = sprintf("m/z %.5f", mzv[idx]),
+        display_label = sprintf("m/z %.5f", mz_axis[idx]),
         opt_signal = sig_opt,
         x_source = x_source,
         y_source = y_source,
@@ -9728,6 +9899,13 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           xh$restore_msi_mode <- mode
         }
       }
+      if ("mz_sort_mode" %in% names(kv) && !is.null(kv[["mz_sort_mode"]])) {
+        v <- trimws(as.character(kv[["mz_sort_mode"]])[1])
+        if (!is.na(v) && v %in% c("Intensity", "m/z")) {
+          xh$restore_mz_sort_mode <- v
+          updateSelectInput(session, "mz_sort_mode", selected = v)
+        }
+      }
       if ("mz_value" %in% names(kv) && !is.null(kv[["mz_value"]])) {
         v <- suppressWarnings(as.numeric(kv[["mz_value"]]))
         if (is.finite(v)) {
@@ -10244,6 +10422,24 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
     }, ignoreInit = TRUE)
 
+    observeEvent(input$apply_translate_num, {
+      tx_val <- suppressWarnings(as.numeric(isolate(input$translate_x_num)))
+      ty_val <- suppressWarnings(as.numeric(isolate(input$translate_y_num)))
+      tx_cur <- suppressWarnings(as.numeric(isolate(input$translate_x)))
+      ty_cur <- suppressWarnings(as.numeric(isolate(input$translate_y)))
+
+      if (!is.finite(tx_val)) tx_val <- if (is.finite(tx_cur)) tx_cur else 0
+      if (!is.finite(ty_val)) ty_val <- if (is.finite(ty_cur)) ty_cur else 0
+
+      tx_val <- clamp(tx_val, -1000, 1000)
+      ty_val <- clamp(ty_val, -1000, 1000)
+
+      updateSliderInput(session, "translate_x", value = tx_val)
+      updateSliderInput(session, "translate_y", value = ty_val)
+      updateNumericInput(session, "translate_x_num", value = tx_val)
+      updateNumericInput(session, "translate_y_num", value = ty_val)
+    }, ignoreInit = TRUE)
+
     observeEvent(input$histology_alpha_num, {
       req(input$histology_alpha_num)
       val <- clamp(input$histology_alpha_num, 0, 1)
@@ -10281,22 +10477,6 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       val <- clamp(input$rotate_deg_num, -180, 180)
       if (!isTRUE(all.equal(val, input$rotate_deg))) {
         updateSliderInput(session, "rotate_deg", value = val)
-      }
-    }, ignoreInit = TRUE)
-
-    observeEvent(input$translate_x_num, {
-      req(input$translate_x_num)
-      val <- clamp(input$translate_x_num, -1000, 1000)
-      if (!isTRUE(all.equal(val, input$translate_x))) {
-        updateSliderInput(session, "translate_x", value = val)
-      }
-    }, ignoreInit = TRUE)
-
-    observeEvent(input$translate_y_num, {
-      req(input$translate_y_num)
-      val <- clamp(input$translate_y_num, -1000, 1000)
-      if (!isTRUE(all.equal(val, input$translate_y))) {
-        updateSliderInput(session, "translate_y", value = val)
       }
     }, ignoreInit = TRUE)
 

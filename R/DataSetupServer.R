@@ -3,6 +3,25 @@ DataSetupServer <- function(id, rawd, wd) {
   moduleServer(id, function(input, output, session) {
     
     ns = session$ns #for dyanamic variable namespace
+
+    resolve_mass_range_input <- function(mz_min, mz_max, context = "Data import") {
+      rng <- suppressWarnings(as.numeric(c(mz_min, mz_max)))
+      if (length(rng) != 2L || any(!is.finite(rng))) {
+        message(sprintf("[%s] mass.range set to NULL for auto-detection", context))
+        return(NULL)
+      }
+      rng <- sort(rng)
+      if (rng[1] >= rng[2]) {
+        showNotification(
+          sprintf("%s m/z range is invalid: min and max must be different finite values.", context),
+          type = "error",
+          duration = 10
+        )
+        stop("Invalid m/z range: min and max must be different finite values.")
+      }
+      message(sprintf("[%s] mass.range using %.6f..%.6f", context, rng[1], rng[2]))
+      rng
+    }
     
     log_msi_import_summary <- function(obj, file_name, file_path = NULL, elapsed_s = NA_real_) {
       fmt_int <- function(x) {
@@ -308,15 +327,8 @@ DataSetupServer <- function(id, rawd, wd) {
       withProgress(message = 'Importing data', value = 1, {
         
         
-        #if input$mass_range_min and max are  NULL, set mass.range to NULL
-        if (!is.numeric(input$mass_range_min) | !is.numeric(input$mass_range_max)) {
-          message("mass range is set to NULL")
-          mass.range <- NULL
-          x1$mass.range <- NULL
-        } else {
-          mass.range <- c(input$mass_range_min, input$mass_range_max)
-          x1$mass.range <- mass.range
-        }
+        mass.range <- resolve_mass_range_input(input$mass_range_min, input$mass_range_max, "DataSetup")
+        x1$mass.range <- mass.range
 
         x1$raw_list <- sapply(files_selected(), function(x)
         {

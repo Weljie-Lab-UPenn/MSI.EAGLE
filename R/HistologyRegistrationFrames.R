@@ -36,6 +36,28 @@ read_histology_metadata_sidecar <- function(path) {
   )
 }
 
+parse_histology_crop_from_name <- function(path_or_name) {
+  txt <- trimws(as.character(path_or_name)[1])
+  if (is.na(txt) || !nzchar(txt)) return(NULL)
+  base <- basename(txt)
+  m <- regexec(
+    "(?i)\\((?:[^)]*?)x\\s*=\\s*([-0-9.]+)\\s*,\\s*y\\s*=\\s*([-0-9.]+)\\s*,\\s*w\\s*=\\s*([-0-9.]+)\\s*,\\s*h\\s*=\\s*([-0-9.]+)(?:[^)]*?)\\)",
+    base,
+    perl = TRUE
+  )
+  hit <- regmatches(base, m)[[1]]
+  if (length(hit) != 5L) return(NULL)
+  vals <- suppressWarnings(as.numeric(hit[2:5]))
+  if (!all(is.finite(vals))) return(NULL)
+  list(
+    x = vals[1],
+    y = vals[2],
+    width = vals[3],
+    height = vals[4],
+    source = "filename_crop"
+  )
+}
+
 polygon_geometry_bbox <- function(poly_sf) {
   if (is.null(poly_sf) || nrow(poly_sf) == 0L) return(NULL)
   bb <- try(sf::st_bbox(poly_sf), silent = TRUE)
@@ -135,6 +157,10 @@ overlay_frame_from_inputs <- function(
     origin_y = NA_real_,
     source_width = NA_real_,
     source_height = NA_real_,
+    image_origin_x = NA_real_,
+    image_origin_y = NA_real_,
+    image_source_width = NA_real_,
+    image_source_height = NA_real_,
     image_width = if (!is.null(info)) suppressWarnings(as.numeric(info$width)) else NA_real_,
     image_height = if (!is.null(info)) suppressWarnings(as.numeric(info$height)) else NA_real_,
     overlay_downsample_factor = downsample,
@@ -149,13 +175,25 @@ overlay_frame_from_inputs <- function(
     if (all(is.finite(c(metadata$export_frame_x_px, metadata$export_frame_y_px)))) {
       out$origin_x <- metadata$export_frame_x_px
       out$origin_y <- metadata$export_frame_y_px
+      out$image_origin_x <- metadata$export_frame_x_px
+      out$image_origin_y <- metadata$export_frame_y_px
     }
     if (all(is.finite(c(metadata$export_frame_width_px, metadata$export_frame_height_px)))) {
       out$source_width <- metadata$export_frame_width_px
       out$source_height <- metadata$export_frame_height_px
+      out$image_source_width <- metadata$export_frame_width_px
+      out$image_source_height <- metadata$export_frame_height_px
       out$source_frame_type <- "whole_slide"
       out$frame_status <- "guaranteed"
     }
+  }
+
+  crop_info <- parse_histology_crop_from_name(histology_file_name)
+  if (!is.null(crop_info)) {
+    out$image_origin_x <- crop_info$x
+    out$image_origin_y <- crop_info$y
+    out$image_source_width <- crop_info$width * downsample
+    out$image_source_height <- crop_info$height * downsample
   }
 
   if (!is.null(roi_bbox)) {
@@ -180,6 +218,15 @@ overlay_frame_from_inputs <- function(
     if (identical(out$source_frame_type, "legacy")) out$source_frame_type <- "image_bbox"
   }
 
+  if (!is.finite(out$image_source_width) || out$image_source_width <= 0) {
+    out$image_source_width <- out$image_width * downsample
+  }
+  if (!is.finite(out$image_source_height) || out$image_source_height <= 0) {
+    out$image_source_height <- out$image_height * downsample
+  }
+  if (!is.finite(out$image_origin_x)) out$image_origin_x <- out$origin_x %||% 0
+  if (!is.finite(out$image_origin_y)) out$image_origin_y <- out$origin_y %||% 0
+
   out
 }
 
@@ -187,26 +234,45 @@ overlay_frame_from_inputs <- function(
   if (is.null(x) || length(x) == 0L || all(is.na(x)) || !nzchar(trimws(as.character(x)[1]))) y else x
 }
 
-source_xy_to_display_xy <- function(x, y, coord_frame) {
+source_xy_to_display_xy <- function(x, y, coord_frame, flip_y = TRUE) {
   if (is.null(coord_frame)) return(list(x = x, y = y))
-  list(
-    x = as.numeric(x) - coord_frame$xmin + 1,
-    y = coord_frame$ymax - as.numeric(y) + 1
-  )
+  if (isTRUE(flip_y)) {
+    list(
+      x = as.numeric(x) - coord_frame$xmin + 1,
+      y = coord_frame$ymax - as.numeric(y) + 1
+    )
+  } else {
+    list(
+      x = as.numeric(x) - coord_frame$xmin + 1,
+      y = as.numeric(y) - coord_frame$ymin + 1
+    )
+  }
 }
 
-display_xy_to_source_xy <- function(x, y, coord_frame) {
+display_xy_to_source_xy <- function(x, y, coord_frame, flip_y = TRUE) {
   if (is.null(coord_frame)) return(list(x = x, y = y))
-  list(
-    x = coord_frame$xmin + as.numeric(x) - 1,
-    y = coord_frame$ymax - as.numeric(y) + 1
-  )
+  if (isTRUE(flip_y)) {
+    list(
+      x = coord_frame$xmin + as.numeric(x) - 1,
+      y = coord_frame$ymax - as.numeric(y) + 1
+    )
+  } else {
+    list(
+      x = coord_frame$xmin + as.numeric(x) - 1,
+      y = coord_frame$ymin + as.numeric(y) - 1
+    )
+  }
 }
 
-source_bbox_to_display_bbox <- function(bbox, coord_frame) {
+source_bbox_to_display_bbox <- function(bbox, coord_frame, flip_y = TRUE) {
   if (is.null(bbox) || is.null(coord_frame)) return(NULL)
-  tl <- source_xy_to_display_xy(bbox[["xmin"]], bbox[["ymax"]], coord_frame)
-  br <- source_xy_to_display_xy(bbox[["xmax"]], bbox[["ymin"]], coord_frame)
+  if (isTRUE(flip_y)) {
+    tl <- source_xy_to_display_xy(bbox[["xmin"]], bbox[["ymax"]], coord_frame, flip_y = TRUE)
+    br <- source_xy_to_display_xy(bbox[["xmax"]], bbox[["ymin"]], coord_frame, flip_y = TRUE)
+  } else {
+    tl <- source_xy_to_display_xy(bbox[["xmin"]], bbox[["ymin"]], coord_frame, flip_y = FALSE)
+    br <- source_xy_to_display_xy(bbox[["xmax"]], bbox[["ymax"]], coord_frame, flip_y = FALSE)
+  }
   c(
     xmin = tl$x,
     xmax = br$x,
@@ -215,14 +281,18 @@ source_bbox_to_display_bbox <- function(bbox, coord_frame) {
   )
 }
 
-source_sf_to_display_sf <- function(poly_sf, coord_frame) {
+source_sf_to_display_sf <- function(poly_sf, coord_frame, flip_y = TRUE) {
   if (is.null(poly_sf) || nrow(poly_sf) == 0L || is.null(coord_frame)) return(poly_sf)
   rebuild_one <- function(one_row) {
     cc <- sf::st_coordinates(one_row)
     if (nrow(cc) == 0L) return(NULL)
 
     x1 <- cc[, "X"] - coord_frame$xmin + 1
-    y1 <- coord_frame$ymax - cc[, "Y"] + 1
+    if (isTRUE(flip_y)) {
+      y1 <- coord_frame$ymax - cc[, "Y"] + 1
+    } else {
+      y1 <- cc[, "Y"] - coord_frame$ymin + 1
+    }
     cc_new <- cbind(x1, y1, cc[, setdiff(colnames(cc), c("X", "Y")), drop = FALSE])
 
     if ("L3" %in% colnames(cc_new)) {

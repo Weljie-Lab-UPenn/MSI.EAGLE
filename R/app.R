@@ -41,9 +41,25 @@ MSI.EAGLE <- function(...) {
     wd=getwd()
   }
   
-  #check for number of cores and set to #detected -2 by default
+  is_intel_mac <- identical(Sys.info()[["sysname"]], "Darwin") &&
+    grepl("x86_64|i386", R.version$arch, ignore.case = TRUE)
+
+  # On Intel Macs, prefer physical cores to avoid oversubscribing
+  # hyperthreaded CPUs; preserve existing behavior elsewhere.
   if(!exists("ncores")){
-    ncores=as.integer(parallel::detectCores())-2
+    if (is_intel_mac) {
+      physical_cores <- suppressWarnings(as.integer(
+        tryCatch(parallel::detectCores(logical = FALSE), error = function(e) NA_integer_)
+      ))
+      if (!is.finite(physical_cores) || physical_cores < 1L) {
+        physical_cores <- suppressWarnings(as.integer(
+          tryCatch(parallel::detectCores(), error = function(e) NA_integer_)
+        ))
+      }
+      ncores=max(1L, physical_cores - 1L)
+    } else {
+      ncores=max(1L, as.integer(parallel::detectCores())-2L)
+    }
   }
   
   #check of number of chunks and set if present

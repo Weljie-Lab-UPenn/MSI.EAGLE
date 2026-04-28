@@ -23,15 +23,20 @@ MaskedAnalysisServer <- function(id,  setup_values) {
     # replaced dir_list with my_files
     
     has.new.files <- function() {
-      unique(list.files(setup_values()[["wd"]]), recursive=T)
+      unique(list.files(setup_values()[["wd"]], recursive = TRUE))
     }
     get.files <- function() {
       list.files(setup_values()[["wd"]], recursive=T)
     }
     
-    # store as a reactive instead of output
+    is_intel_mac <- identical(Sys.info()[["sysname"]], "Darwin") &&
+      grepl("x86_64|i386", R.version$arch, ignore.case = TRUE)
+    file_poll_ms <- if (is_intel_mac) 10000 else 10
+
+    # Slow down recursive directory polling only on Intel Macs, where
+    # cloud-synced working directories can cause noticeable UI lag.
     my_files <-
-      reactivePoll(10, session, checkFunc = has.new.files, valueFunc = get.files)
+      reactivePoll(file_poll_ms, session, checkFunc = has.new.files, valueFunc = get.files)
 
     segmentation_file_choices <- reactive({
       files <- my_files()

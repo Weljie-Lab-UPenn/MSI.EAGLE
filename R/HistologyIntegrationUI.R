@@ -21,6 +21,54 @@ HistologyIntegrationUI <- function(id) {
         .compact-controls .btn { margin-right: 4px; margin-bottom: 4px; }
         .nudge-pad .btn { min-width: 42px; padding: 4px 8px; }
       ")),
+      tags$script(HTML(sprintf("
+        (function() {
+          var selectId = '%s';
+          var modeId = '%s';
+          var navId = '%s';
+
+          function bindMzArrowNav() {
+            var selectEl = document.getElementById(selectId);
+            if (!selectEl || !selectEl.selectize) {
+              window.setTimeout(bindMzArrowNav, 250);
+              return;
+            }
+            window.__histologyMzArrowNav = window.__histologyMzArrowNav || {};
+            if (window.__histologyMzArrowNav[navId]) return;
+            window.__histologyMzArrowNav[navId] = true;
+
+            document.addEventListener('keydown', function(event) {
+              if (event.defaultPrevented) return;
+              if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+              if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+              var modeEl = document.getElementById(modeId);
+              if (!modeEl || modeEl.value !== 'mz') return;
+              var selectize = selectEl.selectize;
+              if (!selectize || !selectize.$control || !selectize.$control[0]) return;
+              var control = selectize.$control[0];
+              var active = document.activeElement;
+              if (!active || (active !== control && !control.contains(active))) return;
+              var query = '';
+              if (selectize.control_input && typeof selectize.control_input.value === 'string') {
+                query = selectize.control_input.value.trim();
+              }
+              if (query.length > 0) return;
+              if (typeof Shiny === 'undefined' || !Shiny.setInputValue) return;
+              event.preventDefault();
+              Shiny.setInputValue(navId, event.key === 'ArrowLeft' ? -1 : 1, {priority: 'event'});
+            });
+          }
+
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', bindMzArrowNav, {once: true});
+          } else {
+            bindMzArrowNav();
+          }
+          document.addEventListener('shiny:connected', function() {
+            window.setTimeout(bindMzArrowNav, 0);
+          });
+        })();
+      ", ns("mz_select"), ns("msi_plot_mode"), ns("mz_nav_step")))),
       sidebarLayout(
         sidebarPanel(
           width = 3,
@@ -78,12 +126,26 @@ HistologyIntegrationUI <- function(id) {
               ),
               selected = "mz"
             ),
-            selectizeInput(
-              ns("mz_select"),
-              "Select m/z",
-              choices = character(0),
-              selected = NULL,
-              options = list(placeholder = "Load MSI data to populate m/z list")
+            fluidRow(
+              column(
+                8,
+                selectizeInput(
+                  ns("mz_select"),
+                  "Select m/z",
+                  choices = character(0),
+                  selected = NULL,
+                  options = list(placeholder = "Load MSI data to populate m/z list")
+                )
+              ),
+              column(
+                4,
+                selectInput(
+                  ns("mz_sort_mode"),
+                  "Ion order",
+                  choices = c("Intensity", "m/z"),
+                  selected = "Intensity"
+                )
+              )
             ),
             uiOutput(ns("msi_mode_controls")),
             selectInput(
@@ -191,7 +253,8 @@ HistologyIntegrationUI <- function(id) {
                   )
                 ),
                 numericInput(ns("translate_x_num"), "Translate X (num)", value = 0, min = -1000, max = 1000, step = 0.1),
-                numericInput(ns("translate_y_num"), "Translate Y (num)", value = 0, min = -1000, max = 1000, step = 0.1)
+                numericInput(ns("translate_y_num"), "Translate Y (num)", value = 0, min = -1000, max = 1000, step = 0.1),
+                actionButton(ns("apply_translate_num"), "Apply X/Y")
               ),
               column(
                 3,
