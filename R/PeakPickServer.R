@@ -135,6 +135,60 @@ PeakPickServer <- function(id, setup_values) {
       message(sprintf("[PeakPick] %s mass.range using %.6f..%.6f", context, rng[1], rng[2]))
       rng
     }
+
+    transfer_reference_feature_ids <- function(target_obj, reference_obj) {
+      if (is.null(target_obj) || is.null(reference_obj)) return(target_obj)
+      ref_fd <- try(as.data.frame(fData(reference_obj)), silent = TRUE)
+      if (inherits(ref_fd, "try-error") || !"ID" %in% colnames(ref_fd)) {
+        message("[PeakPick] Reference fData has no ID column to transfer.")
+        return(target_obj)
+      }
+
+      ref_mz <- suppressWarnings(as.numeric(mz(reference_obj)))
+      out_mz <- suppressWarnings(as.numeric(mz(target_obj)))
+      ref_id <- as.character(ref_fd$ID)
+      if (length(ref_mz) != length(ref_id) || length(ref_id) == 0L || length(out_mz) == 0L) {
+        message("[PeakPick] Reference ID transfer skipped because reference mz/ID lengths were invalid.")
+        return(target_obj)
+      }
+
+      out_id <- rep(NA_character_, length(out_mz))
+      if (length(out_mz) == length(ref_id)) {
+        out_id <- ref_id
+      } else {
+        tol <- suppressWarnings(as.numeric(setup_values()[["tol"]]))
+        units <- tolower(trimws(as.character(setup_values()[["units"]])[1]))
+        if (!is.finite(tol) || tol <= 0) tol <- Inf
+        for (ii in seq_along(out_mz)) {
+          if (!is.finite(out_mz[ii])) next
+          jj <- which.min(abs(ref_mz - out_mz[ii]))
+          if (length(jj) == 0L || !is.finite(ref_mz[jj])) next
+          delta <- abs(ref_mz[jj] - out_mz[ii])
+          delta_unit <- if (identical(units, "ppm")) delta / max(abs(out_mz[ii]), .Machine$double.eps) * 1e6 else delta
+          if (is.finite(delta_unit) && delta_unit <= tol) out_id[ii] <- ref_id[jj]
+        }
+      }
+
+      out_fd <- try(as.data.frame(fData(target_obj)), silent = TRUE)
+      if (inherits(out_fd, "try-error")) return(target_obj)
+      if (nrow(out_fd) != length(out_mz)) {
+        out_fd <- data.frame(row.names = seq_along(out_mz))
+      }
+      out_fd$ID <- out_id
+      out_fd_cols <- setdiff(colnames(out_fd), "mz")
+      out_fd_extra <- out_fd[, out_fd_cols, drop = FALSE]
+      assign_ids <- try({
+        fData(target_obj) <- Cardinal::MassDataFrame(mz = out_mz, out_fd_extra)
+        TRUE
+      }, silent = TRUE)
+      if (inherits(assign_ids, "try-error")) {
+        message("[PeakPick] Reference ID transfer failed while assigning target fData: ", as.character(assign_ids))
+        return(target_obj)
+      }
+      n_id <- sum(!is.na(out_id) & nzchar(out_id))
+      message(sprintf("[PeakPick] Transferred %d/%d feature IDs from reference fData.", n_id, length(out_id)))
+      target_obj
+    }
     
     has.new.files <- function() {
       unique(list.files(setup_values()[["wd"]], recursive = TRUE))
@@ -812,6 +866,8 @@ PeakPickServer <- function(id, setup_values) {
                          notify_peak_processing_error(overview_peaks, "Reference peak binning")
                          return()
                        }
+
+                       overview_peaks <- transfer_reference_feature_ids(overview_peaks, test_mz_reduced)
                        
                        #calculate mean spectrum for peak list
                      } else if (input$peak_pick_status == "pp_mean") {

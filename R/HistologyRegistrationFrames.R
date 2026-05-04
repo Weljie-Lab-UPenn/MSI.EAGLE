@@ -7,35 +7,6 @@ normalize_slide_key <- function(x) {
   key
 }
 
-read_histology_metadata_sidecar <- function(path) {
-  if (is.null(path) || length(path) == 0L) return(NULL)
-  path <- as.character(path)[1]
-  if (is.na(path) || !nzchar(path) || !file.exists(path)) return(NULL)
-  if (!requireNamespace("jsonlite", quietly = TRUE)) return(NULL)
-
-  raw <- try(jsonlite::fromJSON(path, simplifyVector = TRUE), silent = TRUE)
-  if (inherits(raw, "try-error") || is.null(raw)) return(NULL)
-
-  list(
-    slide_key = normalize_slide_key(raw[["slide_key"]]),
-    image_name = as.character(raw[["image_name"]])[1],
-    whole_slide_width_px = suppressWarnings(as.numeric(raw[["whole_slide_width_px"]])[1]),
-    whole_slide_height_px = suppressWarnings(as.numeric(raw[["whole_slide_height_px"]])[1]),
-    export_frame_x_px = suppressWarnings(as.numeric(raw[["export_frame_x_px"]])[1]),
-    export_frame_y_px = suppressWarnings(as.numeric(raw[["export_frame_y_px"]])[1]),
-    export_frame_width_px = suppressWarnings(as.numeric(raw[["export_frame_width_px"]])[1]),
-    export_frame_height_px = suppressWarnings(as.numeric(raw[["export_frame_height_px"]])[1]),
-    downsample_factor = suppressWarnings(as.numeric(raw[["downsample_factor"]])[1]),
-    pixel_size_um = suppressWarnings(as.numeric(raw[["pixel_size_um"]])[1]),
-    roi_label = as.character(raw[["roi_label"]])[1],
-    roi_bbox_xmin = suppressWarnings(as.numeric(raw[["roi_bbox_xmin"]])[1]),
-    roi_bbox_ymin = suppressWarnings(as.numeric(raw[["roi_bbox_ymin"]])[1]),
-    roi_bbox_xmax = suppressWarnings(as.numeric(raw[["roi_bbox_xmax"]])[1]),
-    roi_bbox_ymax = suppressWarnings(as.numeric(raw[["roi_bbox_ymax"]])[1]),
-    coordinate_convention = as.character(raw[["coordinate_convention"]])[1]
-  )
-}
-
 parse_histology_crop_from_name <- function(path_or_name) {
   txt <- trimws(as.character(path_or_name)[1])
   if (is.na(txt) || !nzchar(txt)) return(NULL)
@@ -120,7 +91,6 @@ detect_qupath_roi_anchor <- function(poly_sf) {
 overlay_frame_from_inputs <- function(
   hist_img = NULL,
   roi_poly = NULL,
-  metadata = NULL,
   histology_resample_factor = 1,
   polygon_file_name = NULL,
   histology_file_name = NULL
@@ -129,15 +99,6 @@ overlay_frame_from_inputs <- function(
   if (!is.finite(downsample) || downsample <= 0) downsample <- 1
 
   roi_bbox <- polygon_geometry_bbox(roi_poly)
-  if (is.null(roi_bbox) && !is.null(metadata)) {
-    meta_roi <- c(
-      xmin = metadata$roi_bbox_xmin,
-      ymin = metadata$roi_bbox_ymin,
-      xmax = metadata$roi_bbox_xmax,
-      ymax = metadata$roi_bbox_ymax
-    )
-    if (all(is.finite(meta_roi))) roi_bbox <- meta_roi
-  }
 
   info <- NULL
   if (!is.null(hist_img)) {
@@ -145,11 +106,7 @@ overlay_frame_from_inputs <- function(
     if (inherits(info, "try-error")) info <- NULL
   }
 
-  slide_key <- if (!is.null(metadata) && is.finite(match("slide_key", names(metadata)))) {
-    normalize_slide_key(metadata$slide_key)
-  } else {
-    normalize_slide_key(polygon_file_name %||% histology_file_name)
-  }
+  slide_key <- normalize_slide_key(polygon_file_name %||% histology_file_name)
 
   out <- list(
     slide_key = slide_key,
@@ -170,23 +127,6 @@ overlay_frame_from_inputs <- function(
     roi_anchor_bbox = roi_bbox,
     roi_source = "none"
   )
-
-  if (!is.null(metadata)) {
-    if (all(is.finite(c(metadata$export_frame_x_px, metadata$export_frame_y_px)))) {
-      out$origin_x <- metadata$export_frame_x_px
-      out$origin_y <- metadata$export_frame_y_px
-      out$image_origin_x <- metadata$export_frame_x_px
-      out$image_origin_y <- metadata$export_frame_y_px
-    }
-    if (all(is.finite(c(metadata$export_frame_width_px, metadata$export_frame_height_px)))) {
-      out$source_width <- metadata$export_frame_width_px
-      out$source_height <- metadata$export_frame_height_px
-      out$image_source_width <- metadata$export_frame_width_px
-      out$image_source_height <- metadata$export_frame_height_px
-      out$source_frame_type <- "whole_slide"
-      out$frame_status <- "guaranteed"
-    }
-  }
 
   crop_info <- parse_histology_crop_from_name(histology_file_name)
   if (!is.null(crop_info)) {

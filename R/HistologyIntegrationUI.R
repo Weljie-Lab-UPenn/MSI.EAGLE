@@ -3,12 +3,12 @@ HistologyIntegrationUI <- function(id) {
   polygon_color_input <- if (requireNamespace("colourpicker", quietly = TRUE)) {
     colourpicker::colourInput(
       ns("polygon_outline_color"),
-      "Polygon outline color",
+      "Single polygon outline color",
       value = "#73FFFF",
       allowTransparent = FALSE
     )
   } else {
-    textInput(ns("polygon_outline_color"), "Polygon outline color (hex)", value = "#73FFFF")
+    textInput(ns("polygon_outline_color"), "Single polygon outline color (hex)", value = "#73FFFF")
   }
 
   tabPanel(
@@ -101,19 +101,9 @@ HistologyIntegrationUI <- function(id) {
               accept = c(".geojson", ".json")
             ),
             fileInput(
-              ns("roi_polygon_file"),
-              "ROI rectangle file (optional)",
-              accept = c(".geojson", ".json")
-            ),
-            fileInput(
               ns("nucleus_polygon_file"),
               "Nucleus polygon file (optional)",
               accept = c(".geojson", ".json")
-            ),
-            fileInput(
-              ns("histology_metadata_file"),
-              "Histology metadata sidecar (optional .json)",
-              accept = c(".json")
             ),
             tags$small("If provided, polygon mapping will also annotate nucleus-versus-cytoplasm pixels in pData."),
             selectInput(
@@ -211,31 +201,14 @@ HistologyIntegrationUI <- function(id) {
             tags$h5("Registration"),
             fluidRow(
               column(
-                3,
-                selectInput(
-                  ns("overlay_scale_mode"),
-                  "Overlay scale mode",
-                  choices = c(
-                    "Absolute ratio (microscopy px to MSI px)" = "absolute",
-                    "Relative to fit-to-canvas" = "fit"
-                  ),
-                  selected = "absolute"
-                ),
-                numericInput(ns("histology_um_per_px"), "Histology um/pixel", value = 0.1138, min = 1e-06, step = 1e-04),
-                numericInput(ns("msi_um_per_px"), "MSI um/pixel", value = 2, min = 1e-06, step = 0.1),
-                numericInput(ns("histology_resample_factor"), "Histology export factor", value = 1, min = 0.01, step = 0.01),
-                actionButton(ns("set_scale_from_resolution"), "Set scale = histology/MSI")
-              ),
-              column(
-                3,
-                sliderInput(ns("scale_x"), "Scale X", min = 0.001, max = 50, value = 1, step = 0.0005),
-                numericInput(ns("scale_x_num"), "Scale X (num)", value = 1, min = 0.001, max = 50, step = 0.0005),
-                sliderInput(ns("scale_y"), "Scale Y", min = 0.001, max = 50, value = 1, step = 0.0005),
-                numericInput(ns("scale_y_num"), "Scale Y (num)", value = 1, min = 0.001, max = 50, step = 0.0005),
-                sliderInput(ns("rotate_deg"), "Rotation (degrees)", min = -180, max = 180, value = 0, step = 0.5),
-                numericInput(ns("rotate_deg_num"), "Rotation (num)", value = 0, min = -180, max = 180, step = 0.1),
+                4,
                 sliderInput(ns("translate_x"), "Translate X", min = -1000, max = 1000, value = 0, step = 1),
-                sliderInput(ns("translate_y"), "Translate Y", min = -1000, max = 1000, value = 0, step = 1)
+                sliderInput(ns("translate_y"), "Translate Y", min = -1000, max = 1000, value = 0, step = 1),
+                fluidRow(
+                  column(5, numericInput(ns("translate_x_num"), "Translate X (num)", value = 0, min = -1000, max = 1000, step = 0.1)),
+                  column(5, numericInput(ns("translate_y_num"), "Translate Y (num)", value = 0, min = -1000, max = 1000, step = 0.1)),
+                  column(2, tags$div(style = "margin-top: 24px;", actionButton(ns("apply_translate_num"), "Apply")))
+                )
               ),
               column(
                 3,
@@ -251,24 +224,11 @@ HistologyIntegrationUI <- function(id) {
                     ),
                     tags$tr(tags$td(""), tags$td(actionButton(ns("move_down"), "\u2193")), tags$td(""))
                   )
-                ),
-                numericInput(ns("translate_x_num"), "Translate X (num)", value = 0, min = -1000, max = 1000, step = 0.1),
-                numericInput(ns("translate_y_num"), "Translate Y (num)", value = 0, min = -1000, max = 1000, step = 0.1),
-                actionButton(ns("apply_translate_num"), "Apply X/Y")
+                )
               ),
               column(
-                3,
-                checkboxInput(ns("show_advanced_registration"), "Show advanced registration controls", value = FALSE),
-                conditionalPanel(
-                  condition = sprintf("input['%s']", ns("show_advanced_registration")),
-                  selectInput(
-                    ns("polygon_axis_mode"),
-                    "Polygon axis mode",
-                    choices = c("Auto (infer 90-degree swap)" = "auto", "Standard (X,Y)" = "xy", "Swap axes (Y,X)" = "yx"),
-                    selected = "auto"
-                  ),
-                  checkboxInput(ns("flip_histology_y"), "Flip histology Y", value = FALSE)
-                ),
+                5,
+                checkboxInput(ns("show_advanced_registration"), "Show scale/rotation parameters", value = FALSE),
                 checkboxInput(ns("polygon_color_by_label"), "Polygon color by label", value = FALSE),
                 polygon_color_input,
                 sliderInput(ns("polygon_linewidth"), "Polygon line width", min = 0.2, max = 6, value = 1, step = 0.1),
@@ -276,6 +236,49 @@ HistologyIntegrationUI <- function(id) {
                 numericInput(ns("histology_alpha_num"), "Histology alpha (num)", value = 0.5, min = 0, max = 1, step = 0.01),
                 sliderInput(ns("cluster_alpha"), "Cluster alpha", min = 0, max = 1, value = 0.7, step = 0.01),
                 numericInput(ns("cluster_alpha_num"), "Cluster alpha (num)", value = 0.7, min = 0, max = 1, step = 0.01)
+              )
+            ),
+            conditionalPanel(
+              condition = sprintf("input['%s']", ns("show_advanced_registration")),
+              fluidRow(
+                column(
+                  3,
+                  selectInput(
+                    ns("overlay_scale_mode"),
+                    "Overlay scale mode",
+                    choices = c(
+                      "Absolute ratio (microscopy px to MSI px)" = "absolute",
+                      "Relative to fit-to-canvas" = "fit"
+                    ),
+                    selected = "absolute"
+                  ),
+                  numericInput(ns("histology_um_per_px"), "Histology um/pixel", value = 0.1138, min = 1e-06, step = 1e-04),
+                  numericInput(ns("msi_um_per_px"), "MSI um/pixel", value = 2, min = 1e-06, step = 0.1),
+                  numericInput(ns("histology_resample_factor"), "Histology export factor", value = 1, min = 0.01, step = 0.01),
+                  actionButton(ns("set_scale_from_resolution"), "Set scale = histology/MSI")
+                ),
+                column(
+                  3,
+                  sliderInput(ns("scale_x"), "Scale X", min = 0.001, max = 50, value = 1, step = 0.0005),
+                  numericInput(ns("scale_x_num"), "Scale X (num)", value = 1, min = 0.001, max = 50, step = 0.0005)
+                ),
+                column(
+                  3,
+                  sliderInput(ns("scale_y"), "Scale Y", min = 0.001, max = 50, value = 1, step = 0.0005),
+                  numericInput(ns("scale_y_num"), "Scale Y (num)", value = 1, min = 0.001, max = 50, step = 0.0005)
+                ),
+                column(
+                  3,
+                  sliderInput(ns("rotate_deg"), "Rotation (degrees)", min = -180, max = 180, value = 0, step = 0.5),
+                  numericInput(ns("rotate_deg_num"), "Rotation (num)", value = 0, min = -180, max = 180, step = 0.1),
+                  selectInput(
+                    ns("polygon_axis_mode"),
+                    "Polygon axis mode",
+                    choices = c("Auto (infer 90-degree swap)" = "auto", "Standard (X,Y)" = "xy", "Swap axes (Y,X)" = "yx"),
+                    selected = "auto"
+                  ),
+                  checkboxInput(ns("flip_histology_y"), "Flip histology Y", value = FALSE)
+                )
               )
             ),
             checkboxInput(ns("show_fit_info"), "Show fit diagnostics/info", value = TRUE),
@@ -456,6 +459,9 @@ HistologyIntegrationUI <- function(id) {
                     )
                   )
                 ),
+                fluidRow(
+                  column(12, DT::dataTableOutput(ns("stat_fit_candidates_table")))
+                ),
                 conditionalPanel(
                   condition = sprintf("input['%s']", ns("show_fit_info")),
                   fluidRow(
@@ -502,6 +508,13 @@ HistologyIntegrationUI <- function(id) {
                     )
                   ),
                   column(8, uiOutput(ns("edge_fit_pdata_field_ui")))
+                ),
+                conditionalPanel(
+                  condition = sprintf("input['%s']", ns("show_fit_info")),
+                  fluidRow(
+                    column(6, uiOutput(ns("edge_fit_heatmap_ui"))),
+                    column(6, plotOutput(ns("edge_fit_contour"), height = "240px"))
+                  )
                 )
               ),
               tabPanel(

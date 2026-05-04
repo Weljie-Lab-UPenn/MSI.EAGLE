@@ -2623,22 +2623,29 @@ StatsPrepServer <- function(id,  setup_values) {
           # #remove vars that end in .1
           # vars <- vars[!grepl("\\.1$", vars)]
           # 
-          vars<- colnames(mean_spectra)[colnames(mean_spectra) %in% paste0(as.character(labels), ".mean")]
-          
-          if(length(vars)!=2){
-            print("Two group labels not found, checking for numeric Phenotype test variables")
-            
-            vars<- colnames(mean_spectra)[colnames(mean_spectra) %in% paste0("X", as.character(labels), ".mean")]
-            
-            if(length(vars)!=2) {
-              showNotification("Two group labels not found, check Phenotype test variables", type="error")
-              return()
-            }
+          label_chr <- as.character(labels)
+          label_chr <- label_chr[!is.na(label_chr)]
+          mean_cols <- colnames(mean_spectra)
+          mean_col_candidates <- rbind(
+            paste0(label_chr, ".mean"),
+            paste0("X", label_chr, ".mean"),
+            paste0(make.names(label_chr), ".mean")
+          )
+          vars <- rep(NA_character_, length(label_chr))
+          for (jj in seq_along(label_chr)) {
+            hit <- mean_col_candidates[, jj]
+            hit <- hit[hit %in% mean_cols]
+            if (length(hit) > 0L) vars[jj] <- hit[1]
           }
-          
-          
-          
-          log2FC = try(formatC(log2(mean_spectra[, vars[2]] / mean_spectra[, vars[1]]), format="fg", digits=3))
+
+          if(length(vars)!=2 || any(is.na(vars))){
+            showNotification("Two group mean columns not found, check Phenotype test variables", type="error")
+            return()
+          }
+
+          fc_num <- suppressWarnings(as.numeric(mean_spectra[, vars[2]]))
+          fc_den <- suppressWarnings(as.numeric(mean_spectra[, vars[1]]))
+          log2FC = try(formatC(log2(fc_num / fc_den), format="fg", digits=3))
           
           if(class(log2FC)=="try-error") {
             print('log2FC not computed, check data columns not named "mz", "count", "freq", "ID"')
@@ -2647,7 +2654,7 @@ StatsPrepServer <- function(id,  setup_values) {
           
           
           if (dim(dat)[1] == length(log2FC)) {
-            lab <- paste0("log2FC(", labels[2], "/", labels[1], ")")
+            lab <- paste0("log2FC(", label_chr[2], "/", label_chr[1], ")")
             dat <- cbind(dat, log2FC)
             names(dat)[names(dat) == "log2FC"] <- lab
             mean_vals_num <- as.data.frame(lapply(mean_spectra[, vars, drop = FALSE], function(v) as.numeric(v)))
