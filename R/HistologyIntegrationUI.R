@@ -20,6 +20,10 @@ HistologyIntegrationUI <- function(id) {
         .compact-controls .control-label { margin-bottom: 2px; font-size: 12px; }
         .compact-controls .btn { margin-right: 4px; margin-bottom: 4px; }
         .nudge-pad .btn { min-width: 42px; padding: 4px 8px; }
+        .registration-params { margin-top: 12px; max-width: 320px; }
+        .registration-params .btn { width: 100%; margin-right: 0; }
+        .registration-params .form-group { margin-bottom: 6px; }
+        .registration-params .input-group { width: 100%; }
       ")),
       tags$script(HTML(sprintf("
         (function() {
@@ -112,6 +116,7 @@ HistologyIntegrationUI <- function(id) {
               choices = c(
                 "Single m/z ion" = "mz",
                 "RGB ions (2-3)" = "rgb",
+                "TIC" = "tic",
                 "pData field" = "pdata"
               ),
               selected = "mz"
@@ -170,12 +175,6 @@ HistologyIntegrationUI <- function(id) {
             ),
             uiOutput(ns("mapping_source_ui")),
             actionButton(ns("map_to_pdata"), "Map selected source to pData"),
-            tags$div(style = "margin-top: 8px;", actionButton(ns("reset_transform"), "Reset transform")),
-            tags$div(style = "margin-top: 8px;", downloadButton(ns("download_registration_params"), "Save params (.txt)")),
-            tags$div(
-              style = "margin-top: 8px;",
-              fileInput(ns("registration_params_upload"), "Load params (.txt/.csv)", accept = c(".txt", ".csv"))
-            ),
             shinyFiles::shinySaveButton(ns("save_mapped_imzml"), "Save mapped imzML", "Save", filetype = list("")),
             tags$hr(),
             uiOutput(ns("pdata_field_ui")),
@@ -224,6 +223,12 @@ HistologyIntegrationUI <- function(id) {
                     ),
                     tags$tr(tags$td(""), tags$td(actionButton(ns("move_down"), "\u2193")), tags$td(""))
                   )
+                ),
+                tags$div(
+                  class = "registration-params",
+                  actionButton(ns("reset_transform"), "Reset transform"),
+                  downloadButton(ns("download_registration_params"), "Save params (.txt)"),
+                  fileInput(ns("registration_params_upload"), "Load params (.txt/.csv)", accept = c(".txt", ".csv"))
                 )
               ),
               column(
@@ -376,7 +381,10 @@ HistologyIntegrationUI <- function(id) {
                 fluidRow(
                   column(2, numericInput(ns("stat_fit_range"), "Range", value = 20, min = 1, max = 300, step = 1)),
                   column(2, numericInput(ns("stat_fit_step"), "Step", value = 2, min = 1, max = 50, step = 1)),
-                  column(2, numericInput(ns("stat_fit_buffer_px"), "Outside buffer (px)", value = 3, min = 1, max = 25, step = 1)),
+                  conditionalPanel(
+                    condition = sprintf("input['%s'] == 'inside_outside'", ns("stat_fit_metric_mode")),
+                    column(2, numericInput(ns("stat_fit_buffer_px"), "Outside buffer (px)", value = 3, min = 1, max = 25, step = 1))
+                  ),
                   column(2, numericInput(ns("stat_fit_min_pixels"), "Min pixels/group", value = 10, min = 2, max = 1000, step = 1)),
                   column(2, numericInput(ns("stat_fit_max_ions"), "Max ions", value = 200, min = 20, max = 2000, step = 10)),
                   column(2, numericInput(ns("stat_fit_alpha"), "Alpha", value = 0.1, min = 0.001, max = 0.5, step = 0.01))
@@ -394,28 +402,43 @@ HistologyIntegrationUI <- function(id) {
                       selected = "inside_outside"
                     )
                   ),
-                  column(
-                    4,
-                    selectInput(
-                      ns("stat_fit_outside_mode"),
-                      "Outside group",
-                      choices = c(
-                        "BBox complement (recommended)" = "bbox",
-                        "Local ring around polygon" = "local",
-                        "Global complement (all non-polygon pixels)" = "global"
-                      ),
-                      selected = "bbox"
-                    )
+                  conditionalPanel(
+                    condition = sprintf("input['%s'] == 'inside_outside'", ns("stat_fit_metric_mode")),
+                    column(
+                      4,
+                      selectInput(
+                        ns("stat_fit_outside_mode"),
+                        "Outside group",
+                        choices = c(
+                          "BBox complement (recommended)" = "bbox",
+                          "Local ring around polygon" = "local",
+                          "Global complement (all non-polygon pixels)" = "global"
+                        ),
+                        selected = "bbox"
+                      )
+                    ),
+                    column(3, selectInput(
+                      ns("stat_fit_objective"),
+                      "Stat objective",
+                      choices = c("Minimize score" = "min", "Maximize score" = "max"),
+                        selected = "min"
+                    )),
+                    column(2, numericInput(ns("stat_fit_bbox_pad"), "BBox pad (px)", value = 25, min = 0, max = 500, step = 1))
                   ),
-                  column(3, selectInput(
-                    ns("stat_fit_objective"),
-                    "Stat objective",
-                    choices = c("Minimize score" = "min", "Maximize score" = "max"),
-                      selected = "min"
-                  )),
-                  column(2, numericInput(ns("stat_fit_bbox_pad"), "BBox pad (px)", value = 25, min = 0, max = 500, step = 1))
+                  conditionalPanel(
+                    condition = sprintf("input['%s'] == 'polygon_cluster_groups'", ns("stat_fit_metric_mode")),
+                    column(
+                      3,
+                      tags$div(
+                        class = "form-group",
+                        tags$label("Stat objective"),
+                        tags$p(style = "margin-top: 8px; color: #777;", "Maximize score (fixed for ANOVA)")
+                      )
+                    )
+                  )
                 ),
                 fluidRow(
+                  column(4, uiOutput(ns("stat_fit_polygon_target_ui"))),
                   column(6, uiOutput(ns("stat_fit_group_field_ui")))
                 ),
                 fluidRow(
@@ -441,11 +464,14 @@ HistologyIntegrationUI <- function(id) {
                       checkboxInput(ns("stat_fit_use_adjusted"), "Use BH-adjusted p", value = TRUE)
                     )
                   ),
-                  column(
-                    2,
-                    tags$div(
-                      style = "margin-top: 24px;",
-                      checkboxInput(ns("stat_fit_use_abs_lfc"), "Use |log2FC|", value = TRUE)
+                  conditionalPanel(
+                    condition = sprintf("input['%s'] == 'inside_outside'", ns("stat_fit_metric_mode")),
+                    column(
+                      2,
+                      tags$div(
+                        style = "margin-top: 24px;",
+                        checkboxInput(ns("stat_fit_use_abs_lfc"), "Use |log2FC|", value = TRUE)
+                      )
                     )
                   )
                 ),
@@ -464,6 +490,17 @@ HistologyIntegrationUI <- function(id) {
                 ),
                 conditionalPanel(
                   condition = sprintf("input['%s']", ns("show_fit_info")),
+                  fluidRow(
+                    column(
+                      2,
+                      tags$div(
+                        style = "margin-top: 84px;",
+                        actionButton(ns("preview_stat_fit_target"), "Preview Stat target")
+                      )
+                    ),
+                    column(7, plotOutput(ns("stat_fit_target_plot"), height = "240px")),
+                    column(3, uiOutput(ns("stat_fit_target_info_ui")))
+                  ),
                   fluidRow(
                     column(6, uiOutput(ns("stat_fit_heatmap_ui"))),
                     column(6, plotOutput(ns("stat_fit_contour"), height = "240px"))
@@ -495,6 +532,7 @@ HistologyIntegrationUI <- function(id) {
                   )
                 ),
                 fluidRow(
+                  column(4, uiOutput(ns("edge_fit_polygon_target_ui"))),
                   column(
                     4,
                     selectInput(
@@ -511,6 +549,17 @@ HistologyIntegrationUI <- function(id) {
                 ),
                 conditionalPanel(
                   condition = sprintf("input['%s']", ns("show_fit_info")),
+                  fluidRow(
+                    column(
+                      2,
+                      tags$div(
+                        style = "margin-top: 84px;",
+                        actionButton(ns("preview_edge_fit_target"), "Preview Edge target")
+                      )
+                    ),
+                    column(7, plotOutput(ns("edge_fit_target_plot"), height = "240px")),
+                    column(3, uiOutput(ns("edge_fit_target_info_ui")))
+                  ),
                   fluidRow(
                     column(6, uiOutput(ns("edge_fit_heatmap_ui"))),
                     column(6, plotOutput(ns("edge_fit_contour"), height = "240px"))

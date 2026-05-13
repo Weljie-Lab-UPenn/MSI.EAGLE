@@ -25,11 +25,14 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       stat_fit_grid = NULL,
       stat_fit_candidates = NULL,
       stat_fit_summary = NULL,
+      stat_fit_signature = NULL,
+      stat_fit_target_info = NULL,
       histology_fit_grid = NULL,
       histology_fit_candidates = NULL,
       histology_fit_summary = NULL,
       histology_fit_signature = NULL,
       histology_fit_target_info = NULL,
+      edge_fit_target_info = NULL,
       histology_fit_relation_auto = TRUE,
       histology_fit_relation_last_default = NULL,
       histology_fit_relation_updating = FALSE,
@@ -161,6 +164,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
             selected = default_col
           )
         )
+      }
+
+      if (identical(mode, "tic")) {
+        return(tags$small("TIC mode uses or creates a cached pData column named TIC for total ion current per pixel."))
       }
 
       tags$small("Single-ion mode uses the selected m/z value above.")
@@ -760,6 +767,56 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       selectInput(ns("polygon_label_field"), "Polygon label field", choices = choices, selected = default)
     })
 
+    polygon_fit_target_choices <- function() {
+      choices <- c(
+        "Cells / usable cell polygons" = "cells",
+        "All usable polygons" = "all"
+      )
+      if (!is.null(input$nucleus_polygon_file) && nzchar(input$nucleus_polygon_file$name)) {
+        choices <- c(
+          "Cells / usable cell polygons" = "cells",
+          "Nuclei" = "nuclei",
+          "All usable polygons" = "all"
+        )
+      }
+      choices
+    }
+
+    render_polygon_fit_target_select <- function(input_id, label) {
+      choices <- polygon_fit_target_choices()
+      cur <- isolate(input[[input_id]])
+      selected <- if (!is.null(cur) && cur %in% unname(choices)) cur else "cells"
+      selectInput(
+        ns(input_id),
+        label,
+        choices = choices,
+        selected = selected
+      )
+    }
+
+    output$stat_fit_polygon_target_ui <- renderUI({
+      mode <- tolower(trimws(as.character(input$stat_fit_metric_mode)[1]))
+      if (identical(mode, "polygon_cluster_groups")) {
+        choices <- stat_fit_group_support_choices()
+        cur <- isolate(input$stat_fit_group_support)
+        selected <- if (!is.null(cur) && cur %in% unname(choices)) cur else if ("cells" %in% unname(choices)) "cells" else "labels"
+        return(tags$div(
+          selectInput(
+            ns("stat_fit_group_support"),
+            "Polygon support for ANOVA",
+            choices = choices,
+            selected = selected
+          ),
+          tags$small("Outside/unassigned labels are excluded; this support mask further restricts which pixels enter ANOVA.")
+        ))
+      }
+      render_polygon_fit_target_select("stat_fit_polygon_target", "Stat Fit polygon target")
+    })
+
+    output$edge_fit_polygon_target_ui <- renderUI({
+      render_polygon_fit_target_select("edge_fit_polygon_target", "Edge Fit polygon target")
+    })
+
     output$edge_fit_pdata_field_ui <- renderUI({
       req(input$edge_fit_signal_source)
       if (!identical(input$edge_fit_signal_source, "pdata")) return(NULL)
@@ -886,6 +943,86 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       pd_cols <- try(colnames(as.data.frame(Cardinal::pData(obj_try))), silent = TRUE)
       if (inherits(pd_cols, "try-error") || length(pd_cols) == 0L) return(FALSE)
       spec$field %in% pd_cols
+    }
+
+    stat_fit_exclude_group_labels <- function() {
+      c(
+        "outside_polygon", "outside", "outside_cell", "outside_cells",
+        "unassigned", "unassigned_cell", "unassigned_cells",
+        "unclustered_polygon", "unclustered", "none", "na", "nan"
+      )
+    }
+
+    stat_fit_group_support_choices <- function() {
+      choices <- c("Mapped labels only" = "labels")
+      has_polygon <- !is.null(input$polygon_file) && nzchar(input$polygon_file$name)
+      has_nuclei <- !is.null(input$nucleus_polygon_file) && nzchar(input$nucleus_polygon_file$name)
+      if (isTRUE(has_polygon)) {
+        choices <- c(
+          "Cells / usable cell polygons" = "cells",
+          "All usable polygons" = "all",
+          choices
+        )
+      }
+      if (isTRUE(has_nuclei)) {
+        choices <- c("Nuclei only" = "nuclei", choices)
+      }
+      choices[!duplicated(unname(choices))]
+    }
+
+    selected_stat_fit_group_support_mode <- function() {
+      choices <- stat_fit_group_support_choices()
+      mode <- tolower(trimws(as.character(input$stat_fit_group_support)[1]))
+      if (!mode %in% unname(choices)) {
+        mode <- if ("cells" %in% unname(choices)) "cells" else "labels"
+      }
+      if (identical(mode, "nuclei") && (is.null(input$nucleus_polygon_file) || !nzchar(input$nucleus_polygon_file$name))) {
+        mode <- if ("cells" %in% unname(choices)) "cells" else "labels"
+      }
+      mode
+    }
+
+    compact_group_code_matrix <- function(code_mat, group_levels) {
+      code_mat <- matrix(as.integer(code_mat), nrow = nrow(code_mat), ncol = ncol(code_mat))
+      used <- sort(unique(as.integer(code_mat[code_mat > 0L])))
+      used <- used[is.finite(used) & used >= 1L & used <= length(group_levels)]
+      if (length(used) == 0L) {
+        code_mat[,] <- 0L
+        return(list(code_mat = code_mat, group_levels = character(0)))
+      }
+      remap <- integer(max(used))
+      remap[used] <- seq_along(used)
+      keep <- code_mat > 0L & code_mat <= length(remap)
+      code_new <- matrix(0L, nrow = nrow(code_mat), ncol = ncol(code_mat))
+      code_new[keep] <- remap[code_mat[keep]]
+      list(code_mat = code_new, group_levels = as.character(group_levels[used]))
+    }
+
+    apply_stat_fit_group_support <- function(lab0, msi_obj, tx, ty, support_mode = selected_stat_fit_group_support_mode()) {
+      support_mode <- tolower(trimws(as.character(support_mode)[1]))
+      if (!support_mode %in% c("labels", "cells", "nuclei", "all")) support_mode <- "labels"
+      lab0$group_support <- support_mode
+      lab0$group_support_label <- "Mapped labels only"
+      lab0$group_support_pixels <- NA_integer_
+      if (identical(support_mode, "labels")) return(lab0)
+
+      target <- build_polygon_fit_target(msi_obj = msi_obj, tx = tx, ty = ty, target_mode = support_mode)
+      if (is.null(target) || is.null(target$mask) || !is.matrix(target$mask)) {
+        stop("Could not build selected polygon support for Stat Fit group labels.")
+      }
+      support_mask <- matrix(as.logical(target$mask), nrow = nrow(lab0$code_mat), ncol = ncol(lab0$code_mat))
+      support_mask[is.na(support_mask)] <- FALSE
+      lab0$code_mat[!support_mask] <- 0L
+      compact <- compact_group_code_matrix(lab0$code_mat, lab0$group_levels)
+      lab0$code_mat <- compact$code_mat
+      lab0$group_levels <- compact$group_levels
+      lab0$n_groups <- length(compact$group_levels)
+      lab0$n_assigned <- as.integer(sum(lab0$code_mat > 0L, na.rm = TRUE))
+      lab0$group_support <- support_mode
+      lab0$group_support_label <- as.character(target$label %||% support_mode)
+      lab0$group_support_source <- as.character(target$source %||% support_mode)
+      lab0$group_support_pixels <- as.integer(sum(support_mask, na.rm = TRUE))
+      lab0
     }
 
     output$stat_fit_group_field_ui <- renderUI({
@@ -2405,6 +2542,34 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       list(tx = tx, ty = ty)
     }
 
+    current_stat_fit_signature <- function() {
+      txy <- current_translate_xy()
+      polygon_name <- ""
+      nucleus_name <- ""
+      if (!is.null(input$polygon_file) && !is.null(input$polygon_file$name)) {
+        polygon_name <- sig_chr(input$polygon_file$name)
+      }
+      if (!is.null(input$nucleus_polygon_file) && !is.null(input$nucleus_polygon_file$name)) {
+        nucleus_name <- sig_chr(input$nucleus_polygon_file$name)
+      }
+      list(
+        translate_x = sig_num(txy$tx),
+        translate_y = sig_num(txy$ty),
+        rotate_deg = sig_num(input$rotate_deg),
+        scale_x = sig_num(input$scale_x),
+        scale_y = sig_num(input$scale_y),
+        overlay_scale_mode = sig_chr(input$overlay_scale_mode),
+        flip_histology_y = isTRUE(input$flip_histology_y),
+        polygon_axis_mode = sig_chr(input$polygon_axis_mode),
+        polygon_file = polygon_name,
+        nucleus_polygon_file = nucleus_name,
+        stat_fit_polygon_target = sig_chr(input$stat_fit_polygon_target),
+        stat_fit_group_support = sig_chr(input$stat_fit_group_support),
+        stat_fit_metric_mode = sig_chr(input$stat_fit_metric_mode),
+        stat_fit_group_field = sig_chr(input$stat_fit_group_field)
+      )
+    }
+
     sig_chr <- function(x) {
       if (is.null(x) || length(x) == 0L) return("")
       vals <- trimws(as.character(x))
@@ -2584,6 +2749,95 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         out <- matrix(out, nrow = nrow(mat), ncol = ncol(mat))
       }
       out
+    }
+
+    select_surface_extrema_candidates <- function(
+      df,
+      score_col = "score",
+      objective = c("max", "min"),
+      n = 5L,
+      smooth_sigma = 1.0,
+      min_sep = NULL,
+      allow_unseparated_fill = TRUE
+    ) {
+      objective <- match.arg(objective)
+      if (is.null(df) || !is.data.frame(df) || nrow(df) == 0L) return(df[0, , drop = FALSE])
+      if (!all(c("dX", "dY", score_col) %in% names(df))) return(utils::head(df, n))
+      n <- suppressWarnings(as.integer(n))
+      if (!is.finite(n) || n < 1L) n <- 5L
+
+      dfx <- df[is.finite(df$dX) & is.finite(df$dY) & is.finite(df[[score_col]]), , drop = FALSE]
+      if (nrow(dfx) == 0L) return(df[0, , drop = FALSE])
+      dx_vals <- sort(unique(as.integer(dfx$dX)))
+      dy_vals <- sort(unique(as.integer(dfx$dY)))
+      if (length(dx_vals) == 0L || length(dy_vals) == 0L) return(utils::head(dfx, n))
+
+      score_mat <- matrix(NA_real_, nrow = length(dy_vals), ncol = length(dx_vals))
+      rr <- match(as.integer(dfx$dY), dy_vals)
+      cc <- match(as.integer(dfx$dX), dx_vals)
+      score_mat[cbind(rr, cc)] <- as.numeric(dfx[[score_col]])
+      smooth_mat <- gaussian_smooth_matrix(score_mat, sigma = smooth_sigma)
+      if (!is.matrix(smooth_mat) || !any(is.finite(smooth_mat))) smooth_mat <- score_mat
+      rank_mat <- if (identical(objective, "min")) -smooth_mat else smooth_mat
+
+      extrema <- matrix(FALSE, nrow = nrow(rank_mat), ncol = ncol(rank_mat))
+      for (r in seq_len(nrow(rank_mat))) {
+        for (c in seq_len(ncol(rank_mat))) {
+          v <- rank_mat[r, c]
+          if (!is.finite(v)) next
+          r0 <- max(1L, r - 1L)
+          r1 <- min(nrow(rank_mat), r + 1L)
+          c0 <- max(1L, c - 1L)
+          c1 <- min(ncol(rank_mat), c + 1L)
+          nb <- rank_mat[r0:r1, c0:c1, drop = FALSE]
+          extrema[r, c] <- isTRUE(v >= max(nb, na.rm = TRUE))
+        }
+      }
+
+      dfx$surface_score <- smooth_mat[cbind(rr, cc)]
+      dfx$surface_rank_score <- rank_mat[cbind(rr, cc)]
+      dfx$surface_extremum <- extrema[cbind(rr, cc)]
+      ord <- order(dfx$surface_extremum, dfx$surface_rank_score, dfx[[score_col]], decreasing = TRUE, na.last = NA)
+      pool <- dfx[ord, , drop = FALSE]
+      if (nrow(pool) == 0L) return(pool)
+
+      if (is.null(min_sep)) {
+        step_vals <- sort(unique(abs(diff(dx_vals))))
+        step_vals <- step_vals[is.finite(step_vals) & step_vals > 0]
+        stp <- if (length(step_vals) > 0L) min(step_vals) else 1L
+        min_sep <- max(2L, 3L * as.integer(stp))
+      }
+      min_sep <- suppressWarnings(as.numeric(min_sep))
+      if (!is.finite(min_sep) || min_sep < 0) min_sep <- 0
+
+      keep_idx <- integer(0)
+      for (i in seq_len(nrow(pool))) {
+        if (length(keep_idx) >= n) break
+        if (length(keep_idx) == 0L) {
+          keep_idx <- c(keep_idx, i)
+          next
+        }
+        dist <- sqrt((pool$dX[i] - pool$dX[keep_idx])^2 + (pool$dY[i] - pool$dY[keep_idx])^2)
+        if (all(dist >= min_sep, na.rm = TRUE)) keep_idx <- c(keep_idx, i)
+      }
+      if (isTRUE(allow_unseparated_fill) && length(keep_idx) < min(n, nrow(pool))) {
+        extra <- setdiff(seq_len(nrow(pool)), keep_idx)
+        keep_idx <- c(keep_idx, extra[seq_len(min(length(extra), n - length(keep_idx)))])
+      }
+      pool[keep_idx[seq_len(min(length(keep_idx), n))], , drop = FALSE]
+    }
+
+    rbind_fill_columns <- function(...) {
+      dfs <- list(...)
+      dfs <- Filter(function(x) !is.null(x) && is.data.frame(x), dfs)
+      if (length(dfs) == 0L) return(data.frame())
+      all_cols <- unique(unlist(lapply(dfs, names), use.names = FALSE))
+      dfs2 <- lapply(dfs, function(x) {
+        miss <- setdiff(all_cols, names(x))
+        for (nm in miss) x[[nm]] <- NA
+        x[, all_cols, drop = FALSE]
+      })
+      do.call(rbind, dfs2)
     }
 
     get_msi_palette <- function(name) {
@@ -3069,9 +3323,50 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
 
       mode_req <- tolower(trimws(as.character(input$msi_plot_mode)[1]))
-      if (!mode_req %in% c("mz", "rgb", "pdata")) mode_req <- "mz"
+      if (!mode_req %in% c("mz", "rgb", "tic", "pdata")) mode_req <- "mz"
 
-      # 1) pData mode
+      # 1) TIC mode: use an existing TIC-like pData field if available,
+      # otherwise compute total ion current once and cache it in pData.
+      if (identical(mode_req, "tic")) {
+        tic_info <- try(ensure_tic_pdata_field(obj), silent = TRUE)
+        validate(need(!inherits(tic_info, "try-error") && !is.null(tic_info$field), "Could not compute or locate TIC pData field."))
+        if (isTRUE(tic_info$computed)) {
+          xh$mapped_obj <- tic_info$obj
+          obj <- tic_info$obj
+          message(sprintf("[Histology MSI display] Computed TIC once and cached it in pData column '%s'.", tic_info$field))
+        }
+        pd <- as.data.frame(Cardinal::pData(obj))
+        field <- as.character(tic_info$field)[1]
+        vals <- pd[[field]]
+        ras <- build_numeric_raster(vals, apply_transform = TRUE)
+        sig_opt <- build_numeric_signal(vals, apply_transform = TRUE, apply_enhance = FALSE)
+        return(list(
+          raster = ras,
+          nx = nx,
+          ny = ny,
+          xmin = xmin,
+          xmax = xmax,
+          ymin = ymin,
+          ymax = ymax,
+          mz_selected = NA_real_,
+          mz_index = NA_integer_,
+          rgb_mz = NULL,
+          pdata_field = field,
+          mode = "tic",
+          mode_requested = mode_req,
+          display_label = paste0("TIC: ", field),
+          opt_signal = sig_opt,
+          x_source = x_source,
+          y_source = y_source,
+          x_display = x_norm,
+          y_display = row_idx,
+          x_norm = x_norm,
+          y_norm = y_norm,
+          row_idx = row_idx
+        ))
+      }
+
+      # 2) pData mode
       if (identical(mode_req, "pdata")) {
         pd <- as.data.frame(Cardinal::pData(obj))
         field <- as.character(input$overlay_pdata_field)[1]
@@ -3154,7 +3449,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       valid_mz_idx <- which(is.finite(mz_axis))
       validate(need(length(valid_mz_idx) > 0, "MSI data has no m/z axis for selected display mode."))
 
-      # 2) RGB mode
+      # 3) RGB mode
       if (identical(mode_req, "rgb")) {
         idx_rgb <- suppressWarnings(as.integer(xh$rgb_mz_applied))
         idx_rgb <- unique(idx_rgb[is.finite(idx_rgb) & idx_rgb %in% valid_mz_idx])
@@ -3227,7 +3522,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         ))
       }
 
-      # 3) Single m/z mode (default fallback)
+      # 4) Single m/z mode (default fallback)
       idx <- suppressWarnings(as.integer(input$mz_select))
       if (!is.finite(idx) || !idx %in% valid_mz_idx) {
         idx_last <- suppressWarnings(as.integer(isolate(xh$last_valid_mz_select))[1])
@@ -3796,9 +4091,9 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       source_mode <- tolower(trimws(if (is.null(source_mode) || length(source_mode) == 0L) "current" else as.character(source_mode)[1]))
       if (!source_mode %in% c("current", "pdata", "multi", "pca")) source_mode <- "current"
       msi_mode <- tolower(trimws(if (is.null(msi_mode) || length(msi_mode) == 0L) "mz" else as.character(msi_mode)[1]))
-      if (!msi_mode %in% c("mz", "rgb", "pdata")) msi_mode <- "mz"
+      if (!msi_mode %in% c("mz", "rgb", "tic", "pdata")) msi_mode <- "mz"
 
-      if (identical(source_mode, "pdata") || (identical(source_mode, "current") && identical(msi_mode, "pdata"))) {
+      if (identical(source_mode, "pdata") || (identical(source_mode, "current") && msi_mode %in% c("tic", "pdata"))) {
         "either"
       } else {
         "inverse"
@@ -3896,6 +4191,51 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       )
       validate(need(!inherits(new_pd, "try-error"), "Could not construct PositionDataFrame for mapped pData."))
       new_pd
+    }
+
+    ensure_tic_pdata_field <- function(obj, preferred_name = "TIC") {
+      pd <- as.data.frame(Cardinal::pData(obj))
+      n_pix <- ncol(obj)
+      if (nrow(pd) != n_pix) {
+        stop(sprintf("pData length mismatch for TIC display (%d rows vs %d pixels).", nrow(pd), n_pix))
+      }
+
+      tic_candidates <- c(
+        "TIC", "tic", "total_ion_current", "totalIonCurrent",
+        "total_ion_count", "totalIonCount", "TotalIonCurrent",
+        "Total_Ion_Current"
+      )
+      for (nm in tic_candidates) {
+        if (nm %in% colnames(pd)) {
+          vals <- suppressWarnings(as.numeric(pd[[nm]]))
+          if (length(vals) == n_pix && any(is.finite(vals), na.rm = TRUE)) {
+            return(list(obj = obj, field = nm, computed = FALSE))
+          }
+        }
+      }
+
+      X <- get_intensity_matrix_fast(obj)
+      X[!is.finite(X)] <- 0
+      tic_vals <- as.numeric(colSums(X, na.rm = TRUE))
+      if (length(tic_vals) != n_pix) {
+        stop(sprintf("Computed TIC length mismatch (%d values vs %d pixels).", length(tic_vals), n_pix))
+      }
+
+      field <- preferred_name
+      if (field %in% colnames(pd)) {
+        i <- 1L
+        repeat {
+          field_try <- paste0(preferred_name, "_calc", if (i > 1L) paste0("_", i) else "")
+          if (!field_try %in% colnames(pd)) {
+            field <- field_try
+            break
+          }
+          i <- i + 1L
+        }
+      }
+      pd[[field]] <- tic_vals
+      Cardinal::pData(obj) <- build_position_pdata(obj, pd)
+      list(obj = obj, field = field, computed = TRUE)
     }
 
     flip_values_vertically_to_match_display <- function(vals, msi_obj) {
@@ -4399,36 +4739,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       matrix(sig, nrow = ny, ncol = nx)
     }
 
-    polygon_mask_matrix <- function(msi_obj, tx, ty) {
-      req(polygon_data())
-      poly <- polygon_data()
-      poly$map_label <- get_polygon_labels(poly, input$polygon_label_field)
-      poly_t <- transform_polygons_for_current_registration(poly, tx = tx, ty = ty)$source
-
-      # For inside/outside optimization, suppress obvious non-cell and
-      # overly large polygons that can make the mask nearly invariant.
-      raw_labels <- as.character(poly_t$map_label)
-      keep_mask <- rep(TRUE, nrow(poly_t))
-      cell_like <- is_cell_like_polygon_label(raw_labels)
-      if (any(cell_like, na.rm = TRUE)) {
-        keep_mask <- keep_mask & cell_like
+    rasterize_source_polygons_to_mask <- function(msi_obj, poly_t) {
+      if (is.null(poly_t) || nrow(poly_t) == 0L) {
+        return(matrix(FALSE, nrow = as.integer(msi_obj$ny), ncol = as.integer(msi_obj$nx)))
       }
-      cell_object <- is_cell_like_polygon_object(poly_t)
-      if (any(!cell_object, na.rm = TRUE)) {
-        keep_mask <- keep_mask & cell_object
-      }
-      poly_area <- suppressWarnings(as.numeric(sf::st_area(poly_t)))
-      poly_area[!is.finite(poly_area)] <- 0
-      canvas_area <- as.numeric(msi_obj$nx) * as.numeric(msi_obj$ny)
-      huge <- is.finite(poly_area) & (poly_area > (0.5 * canvas_area))
-      if (any(huge) && any(keep_mask & !huge)) {
-        keep_mask <- keep_mask & !huge
-      }
-      if (any(keep_mask)) {
-        poly_t <- poly_t[keep_mask, , drop = FALSE]
-      }
-      validate(need(nrow(poly_t) > 0, "No valid polygons remain for inside/outside mask (after filtering non-cell/oversized polygons)."))
-
       grid <- source_canvas_grid_df(msi_obj)
       poly_crs <- normalize_crs(try(sf::st_crs(poly_t), silent = TRUE))
       if (is.null(poly_crs)) {
@@ -4450,12 +4764,164 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       mask
     }
 
+    polygon_mask_bbox <- function(mask, msi_obj) {
+      rc <- which(mask, arr.ind = TRUE)
+      if (is.null(rc) || nrow(rc) == 0L) return(NULL)
+      y_plot <- as.integer(msi_obj$ny - rc[, "row"] + 1L)
+      list(
+        x_min = as.integer(min(rc[, "col"], na.rm = TRUE)),
+        x_max = as.integer(max(rc[, "col"], na.rm = TRUE)),
+        y_min = as.integer(min(y_plot, na.rm = TRUE)),
+        y_max = as.integer(max(y_plot, na.rm = TRUE))
+      )
+    }
+
+    filter_fit_polygons <- function(poly_t, target_mode, msi_obj) {
+      if (is.null(poly_t) || nrow(poly_t) == 0L) {
+        return(list(poly = poly_t, keep = logical(0), n_before = 0L, n_after = 0L, n_huge = 0L))
+      }
+      target_mode <- tolower(trimws(as.character(target_mode)[1]))
+      keep_mask <- rep(TRUE, nrow(poly_t))
+      raw_labels <- if ("map_label" %in% colnames(poly_t)) as.character(poly_t$map_label) else rep("", nrow(poly_t))
+      object_keep <- is_cell_like_polygon_object(poly_t)
+      poly_area <- suppressWarnings(as.numeric(sf::st_area(poly_t)))
+      poly_area[!is.finite(poly_area)] <- 0
+      canvas_area <- as.numeric(msi_obj$nx) * as.numeric(msi_obj$ny)
+      huge <- is.finite(poly_area) & (poly_area > (0.5 * canvas_area))
+
+      if (identical(target_mode, "cells")) {
+        cell_like <- is_cell_like_polygon_label(raw_labels)
+        if (any(cell_like, na.rm = TRUE)) keep_mask <- keep_mask & cell_like
+        if (any(!object_keep, na.rm = TRUE)) keep_mask <- keep_mask & object_keep
+      } else if (identical(target_mode, "nuclei")) {
+        if (any(!object_keep, na.rm = TRUE)) keep_mask <- keep_mask & object_keep
+      }
+      if (any(huge) && any(keep_mask & !huge)) keep_mask <- keep_mask & !huge
+      if (!any(keep_mask)) keep_mask[] <- TRUE
+
+      list(
+        poly = poly_t[keep_mask, , drop = FALSE],
+        keep = keep_mask,
+        n_before = as.integer(nrow(poly_t)),
+        n_after = as.integer(sum(keep_mask, na.rm = TRUE)),
+        n_huge = as.integer(sum(huge, na.rm = TRUE))
+      )
+    }
+
+    transform_main_fit_polygons <- function(tx, ty) {
+      req(polygon_data())
+      poly <- polygon_data()
+      poly$map_label <- get_polygon_labels(poly, input$polygon_label_field)
+      transform_polygons_for_current_registration(poly, tx = tx, ty = ty)$source
+    }
+
+    build_main_polygon_fit_target <- function(msi_obj, tx, ty, target_mode = "cells") {
+      poly_t <- transform_main_fit_polygons(tx = tx, ty = ty)
+      filt <- filter_fit_polygons(poly_t, target_mode = target_mode, msi_obj = msi_obj)
+      if (is.null(filt$poly) || nrow(filt$poly) == 0L) stop("No valid polygons remain after filtering.")
+      mask <- rasterize_source_polygons_to_mask(msi_obj, filt$poly)
+      list(
+        mask = mask,
+        label = if (identical(target_mode, "all")) "All usable polygons" else "Cells / usable cell polygons",
+        source = if (identical(target_mode, "all")) "all_polygons" else "cell_polygons",
+        target_mode = target_mode,
+        n_polygons_before = filt$n_before,
+        n_polygons_after = filt$n_after,
+        n_huge_polygons = filt$n_huge
+      )
+    }
+
+    build_nucleus_polygon_fit_target <- function(msi_obj, tx, ty) {
+      if (is.null(input$nucleus_polygon_file) || !nzchar(input$nucleus_polygon_file$name)) {
+        stop("Load a nucleus polygon file to use nucleus fitting.")
+      }
+      nucleus_poly <- nucleus_polygon_data()
+      axis_mode <- resolve_polygon_axis_mode(nucleus_poly, input$polygon_axis_mode, get_histology_image_optional())
+      nucleus_t <- transform_polygons_for_current_registration(nucleus_poly, tx = tx, ty = ty, axis_mode = axis_mode)$source
+      filt <- filter_fit_polygons(nucleus_t, target_mode = "nuclei", msi_obj = msi_obj)
+      if (is.null(filt$poly) || nrow(filt$poly) == 0L) stop("No valid nucleus polygons remain after filtering.")
+      nucleus_mask <- rasterize_source_polygons_to_mask(msi_obj, filt$poly)
+
+      clipped_to_cells <- FALSE
+      cell_pixels <- NA_integer_
+      cell_try <- try(build_main_polygon_fit_target(msi_obj = msi_obj, tx = tx, ty = ty, target_mode = "cells"), silent = TRUE)
+      if (!inherits(cell_try, "try-error") && !is.null(cell_try$mask) && is.matrix(cell_try$mask)) {
+        cell_pixels <- suppressWarnings(as.integer(sum(cell_try$mask, na.rm = TRUE)))
+        clipped <- nucleus_mask & cell_try$mask
+        if (sum(clipped, na.rm = TRUE) >= 5L) {
+          nucleus_mask <- clipped
+          clipped_to_cells <- TRUE
+        }
+      }
+
+      list(
+        mask = nucleus_mask,
+        label = "Nuclei",
+        source = "nucleus_polygons",
+        target_mode = "nuclei",
+        n_polygons_before = filt$n_before,
+        n_polygons_after = filt$n_after,
+        n_huge_polygons = filt$n_huge,
+        clipped_to_cells = clipped_to_cells,
+        cell_pixels = cell_pixels
+      )
+    }
+
+    selected_polygon_fit_target_mode <- function(input_id = "stat_fit_polygon_target") {
+      mode <- tolower(trimws(as.character(input[[input_id]])[1]))
+      if (!mode %in% c("cells", "nuclei", "all")) mode <- "cells"
+      if (identical(mode, "nuclei") && (is.null(input$nucleus_polygon_file) || !nzchar(input$nucleus_polygon_file$name))) mode <- "cells"
+      mode
+    }
+
+    build_polygon_fit_target <- function(msi_obj, tx, ty, target_mode = selected_polygon_fit_target_mode(), stable_window = NULL) {
+      target_mode <- tolower(trimws(as.character(target_mode)[1]))
+      if (!target_mode %in% c("cells", "nuclei", "all")) target_mode <- "cells"
+      out <- if (identical(target_mode, "nuclei")) {
+        build_nucleus_polygon_fit_target(msi_obj = msi_obj, tx = tx, ty = ty)
+      } else {
+        build_main_polygon_fit_target(msi_obj = msi_obj, tx = tx, ty = ty, target_mode = target_mode)
+      }
+      valid_pix <- matrix(FALSE, nrow = as.integer(msi_obj$ny), ncol = as.integer(msi_obj$nx))
+      valid_pix[cbind(as.integer(msi_obj$row_idx), as.integer(msi_obj$x_norm))] <- TRUE
+      out$mask <- out$mask & valid_pix
+      out$n_pixels <- as.integer(sum(out$mask, na.rm = TRUE))
+      out$total_pixels <- as.integer(sum(valid_pix, na.rm = TRUE))
+      out$coverage_fraction <- if (out$total_pixels > 0L) out$n_pixels / out$total_pixels else NA_real_
+      out$bbox <- polygon_mask_bbox(out$mask, msi_obj)
+      out$stable_mask <- NULL
+      out$stable_pixels <- NA_integer_
+      out$stable_trim_fraction <- NA_real_
+      if (!is.null(stable_window) && all(c("dx_min", "dx_max", "dy_min", "dy_max") %in% names(stable_window))) {
+        stable_mask <- trim_mask_for_shift_window(
+          out$mask,
+          stable_window$dx_min,
+          stable_window$dx_max,
+          stable_window$dy_min,
+          stable_window$dy_max
+        )
+        stable_pixels <- suppressWarnings(as.integer(sum(stable_mask, na.rm = TRUE)))
+        if (is.finite(stable_pixels) && stable_pixels >= 1L) {
+          out$stable_mask <- stable_mask
+          out$stable_pixels <- stable_pixels
+          out$stable_trim_fraction <- if (out$n_pixels > 0L) 1 - (stable_pixels / out$n_pixels) else NA_real_
+        }
+      }
+      out
+    }
+
+    polygon_mask_matrix <- function(msi_obj, tx, ty, target_mode = selected_polygon_fit_target_mode()) {
+      target <- build_polygon_fit_target(msi_obj = msi_obj, tx = tx, ty = ty, target_mode = target_mode)
+      validate(need(!is.null(target$mask) && any(target$mask, na.rm = TRUE), "No valid polygons remain for selected fit target."))
+      target$mask
+    }
+
     polygon_group_label_code_matrix <- function(
       msi_obj,
       tx,
       ty,
       label_field = "clustered_polygon_class",
-      exclude_labels = c("outside_polygon", "outside", "unassigned", "unclustered_polygon")
+      exclude_labels = stat_fit_exclude_group_labels()
     ) {
       req(polygon_data())
       poly <- polygon_data()
@@ -4531,7 +4997,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
     pdata_group_label_code_matrix <- function(
       msi_obj,
       field,
-      exclude_labels = c("outside_polygon", "outside", "unassigned", "unclustered_polygon")
+      exclude_labels = stat_fit_exclude_group_labels()
     ) {
       obj <- msi_for_pdata()
       pd <- as.data.frame(Cardinal::pData(obj))
@@ -4579,7 +5045,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       tx,
       ty,
       group_field_sel = NULL,
-      exclude_labels = c("outside_polygon", "outside", "unassigned", "unclustered_polygon")
+      exclude_labels = stat_fit_exclude_group_labels()
     ) {
       shift_code_to_anchor <- function(code_mat, tx_use, ty_use) {
         tx_i <- suppressWarnings(as.integer(round(tx_use)))
@@ -6217,6 +6683,295 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       out
     }
 
+    fit_target_summary_text <- function(info) {
+      if (is.null(info)) return("No target preview is available.")
+      px <- suppressWarnings(as.integer(info$n_pixels %||% NA_integer_))
+      total <- suppressWarnings(as.integer(info$total_pixels %||% NA_integer_))
+      cov <- suppressWarnings(as.numeric(info$coverage_fraction %||% NA_real_))
+      parts <- c(
+        sprintf("Target: %s", as.character(info$label %||% "n/a")),
+        sprintf("Source: %s", as.character(info$source %||% "n/a")),
+        if (is.finite(px)) sprintf("Pixels: %d", px) else NULL,
+        if (is.finite(total)) sprintf("Total MSI pixels: %d", total) else NULL,
+        if (is.finite(cov)) sprintf("Coverage: %.1f%%", 100 * cov) else NULL
+      )
+      if (!is.null(info$stable_mask) && is.matrix(info$stable_mask)) {
+        spx <- suppressWarnings(as.integer(info$stable_pixels %||% NA_integer_))
+        trim <- suppressWarnings(as.numeric(info$stable_trim_fraction %||% NA_real_))
+        parts <- c(
+          parts,
+          if (is.finite(spx)) sprintf("Stable pixels: %d", spx) else NULL,
+          if (is.finite(trim)) sprintf("Stable trim: %.1f%%", 100 * trim) else NULL
+        )
+      }
+      if (!is.null(info$bbox)) {
+        parts <- c(parts, sprintf("BBox: x=[%d,%d] y=[%d,%d]", info$bbox$x_min, info$bbox$x_max, info$bbox$y_min, info$bbox$y_max))
+      }
+      paste(parts, collapse = " | ")
+    }
+
+    build_stat_group_target_info <- function(lab0, msi_obj, label_prefix = "Stat target: ") {
+      code_mat <- matrix(as.integer(lab0$code_mat), nrow = nrow(lab0$code_mat), ncol = ncol(lab0$code_mat))
+      n_pixels <- as.integer(sum(code_mat > 0L, na.rm = TRUE))
+      total <- as.integer(length(msi_obj$x_norm))
+      list(
+        type = "group_labels",
+        code_mat = code_mat,
+        group_levels = lab0$group_levels,
+        label = sprintf("%s%s groups", label_prefix, lab0$group_field %||% "selected"),
+        source = sprintf(
+          "%s group labels%s",
+          lab0$group_source %||% "unknown",
+          if (!is.null(lab0$group_support) && !identical(lab0$group_support, "labels")) {
+            sprintf(" clipped to %s", lab0$group_support_label %||% lab0$group_support)
+          } else {
+            ""
+          }
+        ),
+        group_support = lab0$group_support %||% "labels",
+        group_support_label = lab0$group_support_label %||% "Mapped labels only",
+        group_support_pixels = lab0$group_support_pixels %||% NA_integer_,
+        n_pixels = n_pixels,
+        total_pixels = total,
+        coverage_fraction = if (total > 0L) n_pixels / total else NA_real_,
+        bbox = polygon_mask_bbox(code_mat > 0L, msi_obj)
+      )
+    }
+
+    build_fit_target_info_ui <- function(info, empty_text) {
+      if (is.null(info)) return(tags$small(empty_text))
+      extra <- character(0)
+      if (identical(info$source, "nucleus_polygons")) {
+        extra <- c(extra, sprintf("Clipped to cells: %s", if (isTRUE(info$clipped_to_cells)) "yes" else "no"))
+      }
+      if (identical(info$type, "group_labels") && !is.null(info$group_support_label)) {
+        extra <- c(extra, sprintf("ANOVA support: %s", info$group_support_label))
+      }
+      if (identical(info$type, "binary_mask")) {
+        extra <- c(extra, "Inside test pixels: green fill + orange outline")
+        if (!is.null(info$outside_mode)) {
+          extra <- c(extra, sprintf("Outside test pixels: yellow (%s)", info$outside_mode))
+        }
+      }
+      if (!is.null(info$n_polygons_after)) {
+        extra <- c(extra, sprintf("Polygons used: %s / %s", info$n_polygons_after, info$n_polygons_before %||% "n/a"))
+      }
+      tags$div(
+        tags$strong(as.character(info$label %||% "Fit target")),
+        tags$p(style = "margin: 6px 0 0 0;", fit_target_summary_text(info)),
+        if (length(extra) > 0L) tags$p(style = "margin: 6px 0 0 0;", paste(extra, collapse = " | ")) else NULL
+      )
+    }
+
+    draw_fit_target_plot <- function(info, main = NULL) {
+      if (is.null(info)) return(invisible(NULL))
+      if (identical(info$type, "group_labels") && !is.null(info$code_mat) && is.matrix(info$code_mat)) {
+        code_mat <- matrix(as.integer(info$code_mat), nrow = nrow(info$code_mat), ncol = ncol(info$code_mat))
+        lev <- as.character(info$group_levels %||% character(0))
+        pal <- if (length(lev) > 0L) get_discrete_palette(length(lev), input$cluster_palette) else character(0)
+        col_mat <- matrix("#F5F5F5", nrow = nrow(code_mat), ncol = ncol(code_mat))
+        for (ii in seq_along(pal)) col_mat[code_mat == ii] <- pal[ii]
+        rast <- as.raster(col_mat)
+      } else {
+        mask <- matrix(as.logical(info$mask), nrow = nrow(info$mask), ncol = ncol(info$mask))
+        mask[is.na(mask)] <- FALSE
+        plot_mask <- mask
+        has_stable <- !is.null(info$stable_mask) && is.matrix(info$stable_mask)
+        if (isTRUE(has_stable)) {
+          stable_mask <- matrix(as.logical(info$stable_mask), nrow = nrow(mask), ncol = ncol(mask))
+          stable_mask[is.na(stable_mask)] <- FALSE
+          plot_mask <- stable_mask
+        }
+        col_mat <- matrix("#F5F5F5", nrow = nrow(mask), ncol = ncol(mask))
+        if (!is.null(info$outside_mask) && is.matrix(info$outside_mask)) {
+          outside_mask <- matrix(as.logical(info$outside_mask), nrow = nrow(mask), ncol = ncol(mask))
+          outside_mask[is.na(outside_mask)] <- FALSE
+          col_mat[outside_mask] <- "#F6C85F"
+        }
+        if (isTRUE(has_stable)) {
+          trimmed_mask <- mask & !plot_mask
+          col_mat[trimmed_mask] <- "#D7F0F2"
+        } else {
+          col_mat[mask] <- "#76D17A"
+        }
+        col_mat[plot_mask] <- "#76D17A"
+        boundary <- plot_mask & !erode8(plot_mask)
+        col_mat[boundary] <- "#FF8C00"
+        rast <- as.raster(col_mat)
+      }
+      if (is.null(main) || !nzchar(trimws(as.character(main)[1]))) main <- as.character(info$label %||% "Fit target")
+      graphics::par(mar = c(0.5, 0.5, 2.2, 0.5))
+      graphics::plot.new()
+      graphics::plot.window(xlim = c(1, ncol(rast)), ylim = c(nrow(rast), 1), asp = 1, xaxs = "i", yaxs = "i")
+      graphics::rasterImage(rast, 1, 1, ncol(rast), nrow(rast), interpolate = FALSE)
+      graphics::box(col = "grey70")
+      graphics::title(main = main)
+      if (!identical(info$type, "group_labels")) {
+        legend_labels <- c("inside", "inside outline")
+        legend_cols <- c("#76D17A", "#FF8C00")
+        if (!is.null(info$outside_mask) && is.matrix(info$outside_mask)) {
+          legend_labels <- c(legend_labels, "outside test")
+          legend_cols <- c(legend_cols, "#F6C85F")
+        }
+        if (!is.null(info$stable_mask) && is.matrix(info$stable_mask)) {
+          legend_labels <- c(legend_labels, "trimmed")
+          legend_cols <- c(legend_cols, "#D7F0F2")
+        }
+        graphics::legend(
+          "bottomleft",
+          legend = legend_labels,
+          fill = legend_cols,
+          border = NA,
+          bty = "n",
+          cex = 0.8,
+          inset = 0.01
+        )
+      }
+    }
+
+    build_stat_fit_target_preview_info <- function() {
+      req(msi_for_pdata())
+      txy <- current_translate_xy()
+      tx <- as.numeric(txy$tx)
+      ty <- as.numeric(txy$ty)
+      msi <- make_msi_raster()
+      stat_metric_mode <- tolower(trimws(as.character(input$stat_fit_metric_mode)[1]))
+      if (!stat_metric_mode %in% c("inside_outside", "polygon_cluster_groups")) stat_metric_mode <- "inside_outside"
+
+      if (identical(stat_metric_mode, "polygon_cluster_groups")) {
+        spec <- parse_stat_fit_group_field()
+        lab0 <- stat_fit_group_label_code_matrix(
+          msi_obj = msi,
+          tx = tx,
+          ty = ty,
+          group_field_sel = spec$raw,
+          exclude_labels = stat_fit_exclude_group_labels()
+        )
+        lab0 <- apply_stat_fit_group_support(
+          lab0,
+          msi_obj = msi,
+          tx = tx,
+          ty = ty,
+          support_mode = selected_stat_fit_group_support_mode()
+        )
+        return(build_stat_group_target_info(lab0, msi, label_prefix = "Stat target: "))
+      }
+
+      rng <- suppressWarnings(as.integer(input$stat_fit_range))
+      stp <- suppressWarnings(as.integer(input$stat_fit_step))
+      if (!is.finite(rng) || rng < 1L) rng <- 20L
+      if (!is.finite(stp) || stp < 1L) stp <- 2L
+      dx_vals <- seq.int(-as.integer(rng), as.integer(rng), by = as.integer(stp))
+      dy_vals <- seq.int(-as.integer(rng), as.integer(rng), by = as.integer(stp))
+      target_mode <- selected_polygon_fit_target_mode("stat_fit_polygon_target")
+      target <- build_polygon_fit_target(
+        msi_obj = msi,
+        tx = tx,
+        ty = ty,
+        target_mode = target_mode,
+        stable_window = list(dx_min = min(dx_vals), dx_max = max(dx_vals), dy_min = min(dy_vals), dy_max = max(dy_vals))
+      )
+      outside_mode <- tolower(trimws(as.character(input$stat_fit_outside_mode)[1]))
+      if (!outside_mode %in% c("local", "bbox", "global")) outside_mode <- "bbox"
+      buf <- suppressWarnings(as.integer(input$stat_fit_buffer_px))
+      bbox_pad <- suppressWarnings(as.integer(input$stat_fit_bbox_pad))
+      if (!is.finite(buf) || buf < 1L) buf <- 3L
+      if (!is.finite(bbox_pad) || bbox_pad < 0L) bbox_pad <- 25L
+      mask_for_outside <- if (!is.null(target$stable_mask) && is.matrix(target$stable_mask)) target$stable_mask else target$mask
+      outside_i <- switch(
+        outside_mode,
+        local = local_outside_mask(mask_for_outside, buffer_px = buf),
+        bbox = bbox_outside_mask(mask_for_outside, pad_px = bbox_pad),
+        global = !mask_for_outside,
+        bbox_outside_mask(mask_for_outside, pad_px = bbox_pad)
+      )
+      outside_i <- outside_i & !mask_for_outside
+      target$type <- "binary_mask"
+      target$label <- paste0("Stat target: ", target$label)
+      target$selected_target_mode <- target_mode
+      target$outside_mask <- outside_i
+      target$outside_mode <- outside_mode
+      target
+    }
+
+    build_edge_fit_target_preview_info <- function() {
+      req(msi_for_pdata())
+      if (is.null(input$polygon_file) || !nzchar(input$polygon_file$name)) return(NULL)
+      txy <- current_translate_xy()
+      tx <- as.numeric(txy$tx)
+      ty <- as.numeric(txy$ty)
+      rng <- suppressWarnings(as.integer(input$optimize_xy_range))
+      stp <- suppressWarnings(as.integer(input$optimize_xy_step))
+      if (!is.finite(rng) || rng < 1L) rng <- 40L
+      if (!is.finite(stp) || stp < 1L) stp <- 2L
+      dx_vals <- seq.int(-as.integer(rng), as.integer(rng), by = as.integer(stp))
+      dy_vals <- seq.int(-as.integer(rng), as.integer(rng), by = as.integer(stp))
+      target_mode <- selected_polygon_fit_target_mode("edge_fit_polygon_target")
+      target <- build_polygon_fit_target(
+        msi_obj = make_msi_raster(),
+        tx = tx,
+        ty = ty,
+        target_mode = target_mode,
+        stable_window = list(dx_min = min(dx_vals), dx_max = max(dx_vals), dy_min = min(dy_vals), dy_max = max(dy_vals))
+      )
+      target$type <- "binary_mask"
+      target$label <- paste0("Edge target: ", target$label)
+      target$selected_target_mode <- target_mode
+      target
+    }
+
+    observeEvent(input$preview_stat_fit_target, {
+      info <- try(build_stat_fit_target_preview_info(), silent = TRUE)
+      if (inherits(info, "try-error") || is.null(info)) {
+        xh$stat_fit_target_info <- NULL
+        showNotification("Could not build Stat Fit target preview. Check loaded inputs and target selection.", type = "warning", duration = 7)
+        return()
+      }
+      xh$stat_fit_target_info <- info
+      showNotification(fit_target_summary_text(info), type = "message", duration = 6)
+    }, ignoreInit = TRUE)
+
+    observeEvent(input$preview_edge_fit_target, {
+      info <- try(build_edge_fit_target_preview_info(), silent = TRUE)
+      if (inherits(info, "try-error") || is.null(info)) {
+        xh$edge_fit_target_info <- NULL
+        showNotification("Could not build Edge Fit target preview. Check loaded inputs and target selection.", type = "warning", duration = 7)
+        return()
+      }
+      xh$edge_fit_target_info <- info
+      showNotification(fit_target_summary_text(info), type = "message", duration = 6)
+    }, ignoreInit = TRUE)
+
+    output$stat_fit_target_plot <- renderPlot({
+      info <- xh$stat_fit_target_info
+      validate(need(!is.null(info), "Click Preview Stat target to build the target mask/map."))
+      draw_fit_target_plot(info)
+    })
+
+    output$stat_fit_target_info_ui <- renderUI({
+      info <- xh$stat_fit_target_info
+      build_fit_target_info_ui(info, "Click Preview Stat target to build the target mask/map.")
+    })
+
+    output$edge_fit_target_plot <- renderPlot({
+      info <- xh$edge_fit_target_info
+      validate(need(!is.null(info), "Click Preview Edge target to build the target mask."))
+      draw_fit_target_plot(info)
+    })
+
+    output$edge_fit_target_info_ui <- renderUI({
+      info <- xh$edge_fit_target_info
+      build_fit_target_info_ui(info, "Click Preview Edge target to build the target mask.")
+    })
+
+    observeEvent(input$stat_fit_polygon_target, {
+      xh$stat_fit_target_info <- NULL
+    }, ignoreInit = TRUE)
+
+    observeEvent(input$edge_fit_polygon_target, {
+      xh$edge_fit_target_info <- NULL
+    }, ignoreInit = TRUE)
+
     output$optimize_xy_preview_ui <- renderUI({
       cand <- xh$opt_xy_candidates
       if (is.null(cand) || nrow(cand) == 0) {
@@ -6381,6 +7136,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
     draw_histology_fit_target_plot <- function(info, main = NULL) {
       if (is.null(info) || is.null(info$signal) || !is.matrix(info$signal)) return(invisible(NULL))
       sig <- info$signal
+      target_type <- if (!is.null(info$type) && nzchar(as.character(info$type)[1])) as.character(info$type)[1] else NA_character_
+      target_source <- if (!is.null(info$source) && nzchar(as.character(info$source)[1])) as.character(info$source)[1] else NA_character_
+      flip_target_display <- target_type %in% c("categorical_spatial_map", "categorical_label_map", "binary_mask") ||
+        identical(target_source, "pdata")
       if (!is.null(info$type) &&
           identical(as.character(info$type)[1], "categorical_label_map") &&
           !is.null(info$label_matrix) &&
@@ -6392,6 +7151,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         col_mat <- matrix("#00000000", nrow = nrow(lab_mat), ncol = ncol(lab_mat))
         keep <- !is.na(lab_mat)
         col_mat[keep] <- unname(col_map[lab_mat[keep]])
+        if (isTRUE(flip_target_display)) col_mat <- col_mat[nrow(col_mat):1, , drop = FALSE]
         rast <- as.raster(col_mat)
       } else {
         palette_use <- if (!is.null(info$type) &&
@@ -6400,7 +7160,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         } else {
           input$msi_palette
         }
-        rast <- signal_matrix_to_raster(sig, palette_name = palette_use)
+        sig_display <- if (isTRUE(flip_target_display)) sig[nrow(sig):1, , drop = FALSE] else sig
+        rast <- signal_matrix_to_raster(sig_display, palette_name = palette_use)
       }
       if (is.null(rast)) return(invisible(NULL))
       if (is.null(main) || !nzchar(trimws(as.character(main)[1]))) {
@@ -7254,17 +8015,33 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         }
 
         best_idx <- which(cand_df$dX == best_row$dX[1] & cand_df$dY == best_row$dY[1])
-        ord_hist <- order(cand_df$score, decreasing = TRUE)
-        if (length(best_idx) > 0L) {
-          ord_hist <- c(best_idx[1], ord_hist[ord_hist != best_idx[1]])
-        }
         score_ord <- order(cand_df$score, decreasing = TRUE)
         start_idx <- which(cand_df$dX == 0L & cand_df$dY == 0L)
+        hist_surface_top <- try(
+          select_surface_extrema_candidates(
+            cand_df,
+            score_col = "score",
+            objective = "max",
+            n = 6L,
+            smooth_sigma = 1.0,
+            min_sep = max(4L, 4L * as.integer(stp)),
+            allow_unseparated_fill = FALSE
+          ),
+          silent = TRUE
+        )
+        hist_surface_idx <- integer(0)
+        if (!inherits(hist_surface_top, "try-error") && !is.null(hist_surface_top) && nrow(hist_surface_top) > 0L) {
+          hist_surface_idx <- match(
+            paste(hist_surface_top$dX, hist_surface_top$dY),
+            paste(cand_df$dX, cand_df$dY)
+          )
+          hist_surface_idx <- hist_surface_idx[is.finite(hist_surface_idx)]
+        }
         display_idx <- unique(c(
           if (length(best_idx) > 0L) best_idx[1] else integer(0),
           score_ord[1],
           if (length(start_idx) > 0L) start_idx[1] else integer(0),
-          ord_hist
+          hist_surface_idx
         ))
         cand_top <- cand_df[display_idx, , drop = FALSE]
         if (nrow(cand_top) > 6L) cand_top <- cand_top[seq_len(6L), , drop = FALSE]
@@ -7275,7 +8052,13 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         cand_top$selected <- (cand_top$dX == best_row$dX[1]) & (cand_top$dY == best_row$dY[1])
         cand_top$peak_score <- cand_top$score_rank == 1L
         cand_top$start_position <- (cand_top$dX == 0L) & (cand_top$dY == 0L)
-        cand_top_out <- cand_top[, c("rank", "score_rank", "selected", "peak_score", "start_position", "dX", "dY", "score", "raw_score", "corr_score", "nmi_score", "edge_score", "overlap", "n_edge", "translate_x", "translate_y"), drop = FALSE]
+        surface_key <- if (!inherits(hist_surface_top, "try-error") && !is.null(hist_surface_top) && nrow(hist_surface_top) > 0L) {
+          paste(hist_surface_top$dX, hist_surface_top$dY, sep = ":")
+        } else {
+          character(0)
+        }
+        cand_top$surface_neighborhood <- paste(cand_top$dX, cand_top$dY, sep = ":") %in% surface_key
+        cand_top_out <- cand_top[, c("rank", "score_rank", "selected", "peak_score", "start_position", "surface_neighborhood", "dX", "dY", "score", "raw_score", "corr_score", "nmi_score", "edge_score", "overlap", "n_edge", "translate_x", "translate_y"), drop = FALSE]
         names(cand_top_out)[names(cand_top_out) == "raw_score"] <- "intensity_score"
         names(cand_top_out)[names(cand_top_out) == "corr_score"] <- "signed_corr"
         names(cand_top_out)[names(cand_top_out) == "nmi_score"] <- "nmi"
@@ -7480,7 +8263,11 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       if (!stat_metric_mode %in% c("inside_outside", "polygon_cluster_groups")) stat_metric_mode <- "inside_outside"
       stat_group_spec <- parse_stat_fit_group_field()
       stat_objective <- tolower(trimws(as.character(input$stat_fit_objective)[1]))
-      if (!stat_objective %in% c("min", "max")) stat_objective <- if (identical(stat_metric_mode, "polygon_cluster_groups")) "max" else "min"
+      if (identical(stat_metric_mode, "polygon_cluster_groups")) {
+        stat_objective <- "max"
+      } else if (!stat_objective %in% c("min", "max")) {
+        stat_objective <- "min"
+      }
       intensity_transform <- tolower(trimws(as.character(input$intensity_transform)[1]))
       if (!intensity_transform %in% c("none", "sqrt", "log1p", "asinh")) intensity_transform <- "none"
 
@@ -7527,14 +8314,28 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
             tx = tx,
             ty = ty,
             group_field_sel = stat_group_spec$raw,
-            exclude_labels = c("outside_polygon", "outside", "unassigned", "unclustered_polygon")
+            exclude_labels = stat_fit_exclude_group_labels()
           ),
           silent = TRUE
         )
+        if (!inherits(lab0, "try-error") && !is.null(lab0)) {
+          lab0 <- try(
+            apply_stat_fit_group_support(
+              lab0,
+              msi_obj = msi,
+              tx = tx,
+              ty = ty,
+              support_mode = selected_stat_fit_group_support_mode()
+            ),
+            silent = TRUE
+          )
+        }
         if (inherits(lab0, "try-error") || is.null(lab0)) {
-          showNotification("Could not build cluster-group labels for current transform. Check selected group field / polygon file.", type = "error", duration = 8)
+          showNotification("Could not build cluster-group labels/support for current transform. Check selected group field, polygon support, and polygon files.", type = "error", duration = 8)
           return()
         }
+        xh$stat_fit_target_info <- build_stat_group_target_info(lab0, msi, label_prefix = "Stat max-info target: ")
+        showNotification(fit_target_summary_text(xh$stat_fit_target_info), type = "message", duration = 7)
         grp_vec_full <- as.integer(lab0$code_mat[cbind(pix_rows, pix_cols)])
         valid_grp <- is.finite(grp_vec_full) & grp_vec_full > 0L
         if (!any(valid_grp)) {
@@ -7563,11 +8364,24 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         n_out <- as.integer(sum(!valid_grp | !(grp_vec_full %in% keep_codes), na.rm = TRUE))
         n_grp <- as.integer(length(unique(grp_idx)))
       } else {
-        mask_i <- try(polygon_mask_matrix(msi, tx = tx, ty = ty), silent = TRUE)
-        if (inherits(mask_i, "try-error") || is.null(mask_i)) {
-          showNotification("Could not build polygon mask for current transform.", type = "error", duration = 8)
+        target_i <- try(
+          build_polygon_fit_target(
+            msi_obj = msi,
+            tx = tx,
+            ty = ty,
+            target_mode = selected_polygon_fit_target_mode("stat_fit_polygon_target")
+          ),
+          silent = TRUE
+        )
+        if (inherits(target_i, "try-error") || is.null(target_i) || is.null(target_i$mask)) {
+          showNotification("Could not build selected polygon target for current transform.", type = "error", duration = 8)
           return()
         }
+        target_i$type <- "binary_mask"
+        target_i$label <- paste0("Stat max-info target: ", target_i$label)
+        xh$stat_fit_target_info <- target_i
+        showNotification(fit_target_summary_text(target_i), type = "message", duration = 7)
+        mask_i <- target_i$mask
 
         outside_i <- switch(
           outside_mode,
@@ -7680,8 +8494,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       cat(sprintf("intensity_transform: %s\n", intensity_transform))
       if (identical(stat_metric_mode, "polygon_cluster_groups")) {
         cat(sprintf(
-          "transform: translate_x=%.3f translate_y=%.3f | metric=polygon_cluster_groups | field=%s (%s) | objective=%s | groups=%d | grouped_pixels=%d excluded=%d\n",
-          tx, ty, stat_group_spec$field, ifelse(is.null(lab0$group_source), "unknown", lab0$group_source), stat_objective, n_grp, n_in, n_out
+          "transform: translate_x=%.3f translate_y=%.3f | metric=polygon_cluster_groups | field=%s (%s) | support=%s | objective=%s | groups=%d | grouped_pixels=%d excluded=%d\n",
+          tx, ty, stat_group_spec$field, ifelse(is.null(lab0$group_source), "unknown", lab0$group_source),
+          ifelse(is.null(lab0$group_support_label), "mapped labels only", lab0$group_support_label),
+          stat_objective, n_grp, n_in, n_out
         ))
         if (length(grp_levels_present) > 0L) {
           cat("groups used: ", paste(grp_levels_present, collapse = ", "), "\n", sep = "")
@@ -7739,7 +8555,11 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       outside_mode <- tolower(trimws(as.character(input$stat_fit_outside_mode)[1]))
       if (!outside_mode %in% c("local", "bbox", "global")) outside_mode <- "bbox"
       stat_objective <- tolower(trimws(as.character(input$stat_fit_objective)[1]))
-      if (!stat_objective %in% c("min", "max")) stat_objective <- if (identical(stat_metric_mode, "polygon_cluster_groups")) "max" else "min"
+      if (identical(stat_metric_mode, "polygon_cluster_groups")) {
+        stat_objective <- "max"
+      } else if (!stat_objective %in% c("min", "max")) {
+        stat_objective <- "min"
+      }
       intensity_transform <- tolower(trimws(as.character(input$intensity_transform)[1]))
       if (!intensity_transform %in% c("none", "sqrt", "log1p", "asinh")) intensity_transform <- "none"
 
@@ -7765,6 +8585,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       msi <- make_msi_raster()
       withProgress(message = "Stat-fit grid search", value = 0.05, {
         mask0 <- NULL
+        target0 <- NULL
         group_code0 <- NULL
         group_levels0 <- character(0)
         if (identical(stat_metric_mode, "polygon_cluster_groups")) {
@@ -7775,15 +8596,27 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
               tx = tx0,
               ty = ty0,
               group_field_sel = stat_group_spec$raw,
-              exclude_labels = c("outside_polygon", "outside", "unassigned", "unclustered_polygon")
+              exclude_labels = stat_fit_exclude_group_labels()
             ),
             silent = TRUE
           )
+          if (!inherits(lab0, "try-error") && !is.null(lab0)) {
+            lab0 <- try(
+              apply_stat_fit_group_support(
+                lab0,
+                msi_obj = msi,
+                tx = tx0,
+                ty = ty0,
+                support_mode = selected_stat_fit_group_support_mode()
+              ),
+              silent = TRUE
+            )
+          }
           if (inherits(lab0, "try-error") || is.null(lab0)) {
             xh$stat_fit_grid <- NULL
             xh$stat_fit_candidates <- NULL
             xh$stat_fit_summary <- NULL
-            showNotification("Could not build cluster-group labels for Stat Fit. Check selected group field / polygon file (or use pData field).", type = "error", duration = 8)
+            showNotification("Could not build cluster-group labels/support for Stat Fit. Check selected group field and polygon support files.", type = "error", duration = 8)
             return()
           }
           if (identical(lab0$group_source, "pdata")) {
@@ -7798,6 +8631,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           }
           group_code0 <- lab0$code_mat
           group_levels0 <- as.character(lab0$group_levels)
+          xh$stat_fit_target_info <- build_stat_group_target_info(lab0, msi, label_prefix = "Stat Fit target: ")
+          showNotification(fit_target_summary_text(xh$stat_fit_target_info), type = "message", duration = 7)
           if (length(group_levels0) < 2L) {
             xh$stat_fit_grid <- NULL
             xh$stat_fit_candidates <- NULL
@@ -7814,15 +8649,26 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
             return()
           }
         } else {
-          incProgress(0.10, detail = "Rasterizing base polygon mask")
-          mask0 <- try(polygon_mask_matrix(msi, tx = tx0, ty = ty0), silent = TRUE)
-          if (inherits(mask0, "try-error") || is.null(mask0)) {
+          incProgress(0.10, detail = "Rasterizing selected polygon target")
+          target0 <- try(
+            build_polygon_fit_target(
+              msi_obj = msi,
+              tx = tx0,
+              ty = ty0,
+              target_mode = selected_polygon_fit_target_mode("stat_fit_polygon_target")
+            ),
+            silent = TRUE
+          )
+          if (inherits(target0, "try-error") || is.null(target0) || is.null(target0$mask)) {
             xh$stat_fit_grid <- NULL
             xh$stat_fit_candidates <- NULL
             xh$stat_fit_summary <- NULL
-            showNotification("Could not build polygon mask for Stat Fit. Check polygon scaling/position.", type = "error", duration = 8)
+            showNotification("Could not build selected polygon target for Stat Fit. Check polygon scaling/position.", type = "error", duration = 8)
             return()
           }
+          target0$type <- "binary_mask"
+          target0$label <- paste0("Stat Fit target: ", target0$label)
+          mask0 <- target0$mask
 
           n_mask <- suppressWarnings(sum(mask0, na.rm = TRUE))
           if (!is.finite(n_mask) || n_mask < 10L) {
@@ -7915,6 +8761,16 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           } else {
             message("[Histology Stat Fit] Stable-window group trim would leave too few pixels; using full group support.")
           }
+          if (!is.null(xh$stat_fit_target_info) && identical(xh$stat_fit_target_info$type, "group_labels")) {
+            info0 <- xh$stat_fit_target_info
+            info0$code_mat <- group_code0
+            info0$n_pixels <- as.integer(sum(group_code0 > 0L, na.rm = TRUE))
+            total_px <- suppressWarnings(as.integer(info0$total_pixels %||% length(msi$x_norm)))
+            info0$coverage_fraction <- if (is.finite(total_px) && total_px > 0L) info0$n_pixels / total_px else NA_real_
+            info0$bbox <- polygon_mask_bbox(group_code0 > 0L, msi)
+            xh$stat_fit_target_info <- info0
+          }
+          showNotification(fit_target_summary_text(xh$stat_fit_target_info), type = "message", duration = 7)
         } else if (!is.null(mask0)) {
           stable_mask <- trim_mask_for_shift_window(mask0, min(dx_vals), max(dx_vals), min(dy_vals), max(dy_vals))
           n_before <- suppressWarnings(sum(mask0, na.rm = TRUE))
@@ -7930,6 +8786,13 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           } else {
             message("[Histology Stat Fit] Stable-window mask trim would leave too few pixels; using full mask support.")
           }
+          if (!is.null(target0)) {
+            target0$stable_mask <- mask0
+            target0$stable_pixels <- as.integer(sum(mask0, na.rm = TRUE))
+            target0$stable_trim_fraction <- if (is.finite(n_before) && n_before > 0L) 1 - (target0$stable_pixels / n_before) else NA_real_
+            xh$stat_fit_target_info <- target0
+          }
+          showNotification(fit_target_summary_text(xh$stat_fit_target_info), type = "message", duration = 7)
         }
 
         grid <- expand.grid(dx = dx_vals, dy = dy_vals, KEEP.OUT.ATTRS = FALSE, stringsAsFactors = FALSE)
@@ -8197,13 +9060,39 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         cand$rank <- seq_len(nrow(cand))
 
         top_n <- min(5L, nrow(cand))
-        xh$stat_fit_grid <- grid
-        xh$stat_fit_candidates <- cand[seq_len(top_n), c(
-          "rank", "dX", "dY", "n_sig", "score", "med_lfc", "mean_logp", "mean_abs_t_top",
-          "n_inside", "n_outside", "n_groups", "translate_x", "translate_y"
-        ), drop = FALSE]
-
         best <- cand[1, , drop = FALSE]
+        surface_top <- try(
+          select_surface_extrema_candidates(
+            cand,
+            score_col = "score",
+            objective = if (identical(stat_objective, "min")) "min" else "max",
+            n = top_n,
+            smooth_sigma = 1.0,
+            min_sep = max(2L, 3L * as.integer(stp))
+          ),
+          silent = TRUE
+        )
+        if (inherits(surface_top, "try-error") || is.null(surface_top) || nrow(surface_top) == 0L) {
+          surface_top <- cand[seq_len(top_n), , drop = FALSE]
+        }
+        display_keys <- paste(surface_top$dX, surface_top$dY, sep = ":")
+        best_key <- paste(best$dX[1], best$dY[1], sep = ":")
+        if (!best_key %in% display_keys) {
+          surface_top <- rbind_fill_columns(best, surface_top)
+        }
+        surface_top <- surface_top[!duplicated(paste(surface_top$dX, surface_top$dY, sep = ":")), , drop = FALSE]
+        if (nrow(surface_top) > top_n) surface_top <- surface_top[seq_len(top_n), , drop = FALSE]
+        surface_top$rank <- seq_len(nrow(surface_top))
+        surface_top$surface_extremum <- if ("surface_extremum" %in% names(surface_top)) as.logical(surface_top$surface_extremum) else NA
+        surface_top$surface_score <- if ("surface_score" %in% names(surface_top)) as.numeric(surface_top$surface_score) else NA_real_
+
+        xh$stat_fit_grid <- grid
+        xh$stat_fit_candidates <- surface_top[, intersect(c(
+          "rank", "dX", "dY", "n_sig", "score", "surface_score", "surface_extremum",
+          "med_lfc", "mean_logp", "mean_abs_t_top",
+          "n_inside", "n_outside", "n_groups", "translate_x", "translate_y"
+        ), names(surface_top)), drop = FALSE]
+
         xh$stat_fit_summary <- list(
           anchor_translate_x = tx0,
           anchor_translate_y = ty0,
@@ -8224,6 +9113,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           metric_mode = stat_metric_mode,
           metric_group_var = if (identical(stat_metric_mode, "polygon_cluster_groups")) if (!is.null(lab0$group_field)) lab0$group_field else stat_group_spec$field else NA_character_,
           metric_group_source = if (identical(stat_metric_mode, "polygon_cluster_groups")) if (!is.null(lab0$group_source)) lab0$group_source else stat_group_spec$source else NA_character_,
+          metric_group_support = if (identical(stat_metric_mode, "polygon_cluster_groups")) if (!is.null(lab0$group_support_label)) lab0$group_support_label else "Mapped labels only" else NA_character_,
           n_group_levels_base = if (identical(stat_metric_mode, "polygon_cluster_groups")) length(group_levels0) else NA_integer_,
           objective = stat_objective,
           outside_mode = outside_mode,
@@ -8234,6 +9124,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           adjusted_p = use_adjusted,
           intensity_transform = intensity_transform
         )
+        xh$stat_fit_signature <- current_stat_fit_signature()
 
         cat("\n[Histology Stat Fit] Top candidate positions\n")
         cat(sprintf(
@@ -8242,9 +9133,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         ))
         if (identical(stat_metric_mode, "polygon_cluster_groups")) {
           cat(sprintf(
-            "group field: %s (%s)\n",
+            "group field: %s (%s) | support: %s\n",
             if (!is.null(lab0$group_field)) lab0$group_field else stat_group_spec$field,
-            if (!is.null(lab0$group_source)) lab0$group_source else stat_group_spec$source
+            if (!is.null(lab0$group_source)) lab0$group_source else stat_group_spec$source,
+            if (!is.null(lab0$group_support_label)) lab0$group_support_label else "Mapped labels only"
           ))
         } else {
           cat(sprintf("outside mode: %s\n", outside_mode))
@@ -8274,13 +9166,55 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         input$scale_y,
         input$overlay_scale_mode,
         input$flip_histology_y,
-        input$polygon_axis_mode
+        input$polygon_axis_mode,
+        input$polygon_file,
+        input$nucleus_polygon_file,
+        input$stat_fit_polygon_target,
+        input$stat_fit_group_support,
+        input$stat_fit_metric_mode,
+        input$stat_fit_group_field
       ),
       {
-        if (!is.null(xh$stat_fit_grid) || !is.null(xh$stat_fit_summary) || !is.null(xh$stat_fit_candidates)) {
+        cur_sig <- current_stat_fit_signature()
+        prev_sig <- xh$stat_fit_signature
+        if (!is.null(prev_sig) && identical(cur_sig, prev_sig)) {
+          return()
+        }
+        if (!is.null(xh$stat_fit_grid) || !is.null(xh$stat_fit_summary) || !is.null(xh$stat_fit_candidates) || !is.null(xh$stat_fit_target_info)) {
           xh$stat_fit_grid <- NULL
           xh$stat_fit_candidates <- NULL
           xh$stat_fit_summary <- NULL
+          xh$stat_fit_signature <- NULL
+          xh$stat_fit_target_info <- NULL
+        }
+      },
+      ignoreInit = TRUE
+    )
+
+    observeEvent(
+      list(
+        input$translate_x,
+        input$translate_y,
+        input$rotate_deg,
+        input$scale_x,
+        input$scale_y,
+        input$overlay_scale_mode,
+        input$flip_histology_y,
+        input$polygon_axis_mode,
+        input$polygon_file,
+        input$nucleus_polygon_file,
+        input$edge_fit_polygon_target,
+        input$edge_fit_signal_source,
+        input$edge_fit_pdata_field,
+        input$mz_select,
+        input$msi_plot_mode
+      ),
+      {
+        if (!is.null(xh$opt_xy_grid) || !is.null(xh$opt_xy_summary) || !is.null(xh$opt_xy_candidates) || !is.null(xh$edge_fit_target_info)) {
+          xh$opt_xy_grid <- NULL
+          xh$opt_xy_candidates <- NULL
+          xh$opt_xy_summary <- NULL
+          xh$edge_fit_target_info <- NULL
         }
       },
       ignoreInit = TRUE
@@ -8352,7 +9286,6 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           is.finite(sm$best_dY)) {
         hit <- g2[g2$dX == sm$best_dX & g2$dY == sm$best_dY, , drop = FALSE]
         if (nrow(hit) > 0L) return(hit[1, , drop = FALSE])
-        return(data.frame(dX = as.numeric(sm$best_dX), dY = as.numeric(sm$best_dY)))
       }
       idx <- which.max(g2$score)
       g2[idx, , drop = FALSE]
@@ -8568,7 +9501,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         ggplot2::theme_minimal() +
         ggplot2::labs(
           title = "Edge-fit heatmap",
-          subtitle = paste0("Fill = composite edge/contrast score | blue + = current position (dX=0,dY=0) | red X = selected fit", anchor_txt, filled_note),
+          subtitle = paste0("Fill = composite edge/contrast score | blue + = current position (dX=0,dY=0) | red X = best scored grid point", anchor_txt, filled_note),
           x = "dX",
           y = "dY",
           fill = "Score"
@@ -8636,7 +9569,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         ggplot2::theme_minimal() +
         ggplot2::labs(
           title = "Edge-fit contours",
-          subtitle = paste0("Contours = composite edge/contrast score | blue + = current position (dX=0,dY=0) | red X = selected fit", anchor_txt),
+          subtitle = paste0("Contours = composite edge/contrast score | blue + = current position (dX=0,dY=0) | red X = best scored grid point", anchor_txt),
           x = "dX",
           y = "dY"
         )
@@ -8858,10 +9791,19 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         ))
         edge_cache <- build_edge_distance_cache(signal)
 
-        incProgress(0.2, detail = "Rasterizing polygon mask")
+        incProgress(0.2, detail = "Rasterizing selected polygon target")
 
-        mask0 <- try(polygon_mask_matrix(msi, tx = tx0, ty = ty0), silent = TRUE)
-        if (inherits(mask0, "try-error")) mask0 <- NULL
+        target0 <- try(
+          build_polygon_fit_target(
+            msi_obj = msi,
+            tx = tx0,
+            ty = ty0,
+            target_mode = selected_polygon_fit_target_mode("edge_fit_polygon_target")
+          ),
+          silent = TRUE
+        )
+        if (inherits(target0, "try-error")) target0 <- NULL
+        mask0 <- if (!is.null(target0) && !is.null(target0$mask)) target0$mask else NULL
         anchor_dx <- 0L
         anchor_dy <- 0L
         best_anchor_area <- if (!is.null(mask0)) suppressWarnings(sum(mask0, na.rm = TRUE)) else -Inf
@@ -8881,14 +9823,21 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           for (i in seq_len(nrow(anchor_grid))) {
             adx <- as.integer(anchor_grid$dx[i])
             ady <- as.integer(anchor_grid$dy[i])
-            m_try <- try(
-              polygon_mask_matrix(msi, tx = tx0 + adx, ty = ty0 + ady),
+            t_try <- try(
+              build_polygon_fit_target(
+                msi_obj = msi,
+                tx = tx0 + adx,
+                ty = ty0 + ady,
+                target_mode = selected_polygon_fit_target_mode("edge_fit_polygon_target")
+              ),
               silent = TRUE
             )
-            if (inherits(m_try, "try-error") || is.null(m_try)) next
+            if (inherits(t_try, "try-error") || is.null(t_try) || is.null(t_try$mask)) next
+            m_try <- t_try$mask
             n_try <- suppressWarnings(sum(m_try, na.rm = TRUE))
             if (is.finite(n_try) && n_try > best_anchor_area) {
               best_anchor_area <- n_try
+              target0 <- t_try
               mask0 <- m_try
               anchor_dx <- adx
               anchor_dy <- ady
@@ -8896,10 +9845,12 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           }
         }
 
-        if (is.null(mask0)) {
-          showNotification("Could not build polygon mask for optimization. Check polygon geometry.", type = "error", duration = 8)
+        if (is.null(target0) || is.null(mask0)) {
+          showNotification("Could not build selected polygon target for optimization. Check polygon geometry.", type = "error", duration = 8)
           return()
         }
+        target0$type <- "binary_mask"
+        target0$label <- paste0("Edge Fit target: ", target0$label)
         n_mask <- sum(mask0, na.rm = TRUE)
         if (!is.finite(n_mask) || n_mask < 10) {
           showNotification("Polygon mask is too small for stable XY optimization.", type = "warning", duration = 8)
@@ -8932,6 +9883,11 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         } else {
           message("[Histology Edge Fit] Stable-window mask trim would leave too few pixels; using full anchor mask.")
         }
+        target0$stable_mask <- mask0
+        target0$stable_pixels <- as.integer(sum(mask0, na.rm = TRUE))
+        target0$stable_trim_fraction <- if (is.finite(best_anchor_area) && best_anchor_area > 0L) 1 - (target0$stable_pixels / best_anchor_area) else NA_real_
+        xh$edge_fit_target_info <- target0
+        showNotification(fit_target_summary_text(target0), type = "message", duration = 7)
 
         mask_cache <- build_mask_bands(mask0, band_px = band_px)
 
@@ -9185,7 +10141,16 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           z
         }
 
+        search_tx_min <- max(-1000, tx0 - rng)
+        search_tx_max <- min(1000, tx0 + rng)
+        search_ty_min <- max(-1000, ty0 - rng)
+        search_ty_max <- min(1000, ty0 + rng)
+        clamp_edge_search_x <- function(x) clamp(x, search_tx_min, search_tx_max)
+        clamp_edge_search_y <- function(y) clamp(y, search_ty_min, search_ty_max)
+
         score_translation_exact <- function(tx_abs, ty_abs) {
+          tx_abs <- clamp_edge_search_x(tx_abs)
+          ty_abs <- clamp_edge_search_y(ty_abs)
           dx_abs <- as.integer(round(as.numeric(tx_abs) - tx0 - anchor_dx))
           dy_abs <- as.integer(round(as.numeric(ty_abs) - ty0 - anchor_dy))
           sc_raw <- score_mask_shift(mask_cache, signal, dx = dx_abs, dy = dy_abs)
@@ -9203,8 +10168,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         if (nrow(seed_df) == 0L) {
           seed_df <- data.frame(dX = as.numeric(best_row$dX[1]), dY = as.numeric(best_row$dY[1]), stringsAsFactors = FALSE)
         }
-        seed_df$translate_x <- clamp(tx0 + as.numeric(seed_df$dX), -1000, 1000)
-        seed_df$translate_y <- clamp(ty0 + as.numeric(seed_df$dY), -1000, 1000)
+        seed_df$translate_x <- clamp_edge_search_x(tx0 + as.numeric(seed_df$dX))
+        seed_df$translate_y <- clamp_edge_search_y(ty0 + as.numeric(seed_df$dY))
 
         exact_rows <- vector("list", nrow(seed_df))
         for (i in seq_len(nrow(seed_df))) {
@@ -9240,8 +10205,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         }
 
         if (nrow(exact_df) == 0L) {
-          tx_seed <- clamp(tx0 + as.numeric(best_row$dX[1]), -1000, 1000)
-          ty_seed <- clamp(ty0 + as.numeric(best_row$dY[1]), -1000, 1000)
+          tx_seed <- clamp_edge_search_x(tx0 + as.numeric(best_row$dX[1]))
+          ty_seed <- clamp_edge_search_y(ty0 + as.numeric(best_row$dY[1]))
           ev_seed <- score_translation_exact(tx_seed, ty_seed)
           exact_df <- data.frame(
             translate_x = tx_seed,
@@ -9276,8 +10241,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           byrow = TRUE
         )
         for (iter in seq_len(25L)) {
-          tx_c <- clamp(tx_cur + dirs[, 1], -1000, 1000)
-          ty_c <- clamp(ty_cur + dirs[, 2], -1000, 1000)
+          tx_c <- clamp_edge_search_x(tx_cur + dirs[, 1])
+          ty_c <- clamp_edge_search_y(ty_cur + dirs[, 2])
           key <- paste(tx_c, ty_c, sep = ",")
           keep <- !duplicated(key)
           tx_c <- tx_c[keep]
@@ -9304,8 +10269,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         }
 
         # Basin-jump scan (1 px) to recover from nearby local minima
-        # that can remain offset by ~10-30 pixels in one axis.
-        jump_span <- as.integer(min(80L, max(20L, round(rng * 0.8))))
+        # that can remain offset within the requested search window.
+        jump_span <- as.integer(min(80L, max(2L, round(rng * 0.8)), rng))
         if (jump_span >= 2L) {
           best_tx <- tx_cur
           best_ty <- ty_cur
@@ -9314,7 +10279,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
           # Scan Y around current X.
           for (ddy in seq.int(-jump_span, jump_span, by = 1L)) {
-            ty_try <- clamp(ty_cur + ddy, -1000, 1000)
+            ty_try <- clamp_edge_search_y(ty_cur + ddy)
             ev_try <- score_translation_exact(tx_cur, ty_try)
             if (!isTRUE(ev_try$ok) || !is.finite(ev_try$local_score)) next
             if (!is.finite(best_sc) || ev_try$local_score > (best_sc + 1e-4)) {
@@ -9327,7 +10292,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
           # Scan X around improved Y.
           for (ddx in seq.int(-jump_span, jump_span, by = 1L)) {
-            tx_try <- clamp(best_tx + ddx, -1000, 1000)
+            tx_try <- clamp_edge_search_x(best_tx + ddx)
             ev_try <- score_translation_exact(tx_try, best_ty)
             if (!isTRUE(ev_try$ok) || !is.finite(ev_try$local_score)) next
             if (!is.finite(best_sc) || ev_try$local_score > (best_sc + 1e-4)) {
@@ -9344,8 +10309,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
           # One final short local snap around jumped point.
           for (iter in seq_len(10L)) {
-            tx_c <- clamp(tx_cur + dirs[, 1], -1000, 1000)
-            ty_c <- clamp(ty_cur + dirs[, 2], -1000, 1000)
+            tx_c <- clamp_edge_search_x(tx_cur + dirs[, 1])
+            ty_c <- clamp_edge_search_y(ty_cur + dirs[, 2])
             key <- paste(tx_c, ty_c, sep = ",")
             keep <- !duplicated(key)
             tx_c <- tx_c[keep]
@@ -9373,8 +10338,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         }
 
         incProgress(0.08, detail = "Preparing best XY candidate")
-        tx_new <- clamp(tx_cur, -1000, 1000)
-        ty_new <- clamp(ty_cur, -1000, 1000)
+        tx_new <- clamp_edge_search_x(tx_cur)
+        ty_new <- clamp_edge_search_y(ty_cur)
         best_dx <- tx_new - tx0
         best_dy <- ty_new - ty0
         best_score <- if (isTRUE(ev_cur$ok)) as.numeric(ev_cur$local_score) else NA_real_
@@ -9409,23 +10374,90 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           signal_type = if (!is.null(sig_info$type)) as.character(sig_info$type) else NA_character_
         )
 
-        # Build and store top-5 candidate preview from exact refinement if available.
-        if (!is.null(exact_df) && nrow(exact_df) > 0) {
-          prev <- exact_df[order(exact_df$score_exact, decreasing = TRUE), , drop = FALSE]
-          if (nrow(prev) > 5L) prev <- prev[seq_len(5L), , drop = FALSE]
-          prev$score <- prev$score_exact
-          prev$rank <- seq_len(nrow(prev))
-          xh$opt_xy_candidates <- prev[, c("rank", "dX", "dY", "score", "raw_score", "edge_score", "translate_x", "translate_y"), drop = FALSE]
-        } else if (!is.null(cand_df) && nrow(cand_df) > 0) {
-          cand_df <- cand_df[order(cand_df$score, decreasing = TRUE), , drop = FALSE]
-          if (nrow(cand_df) > 5L) cand_df <- cand_df[seq_len(5L), , drop = FALSE]
-          cand_df$translate_x <- clamp(tx0 + cand_df$dX, -1000, 1000)
-          cand_df$translate_y <- clamp(ty0 + cand_df$dY, -1000, 1000)
-          cand_df$rank <- seq_len(nrow(cand_df))
-          xh$opt_xy_candidates <- cand_df[, c("rank", "dX", "dY", "score", "raw_score", "edge_score", "translate_x", "translate_y"), drop = FALSE]
+        exact_selected <- data.frame(
+          candidate_source = "exact_refined",
+          dX = as.numeric(best_dx),
+          dY = as.numeric(best_dy),
+          score = as.numeric(best_score),
+          raw_score = as.numeric(best_raw_score),
+          edge_score = as.numeric(best_edge_score),
+          translate_x = as.numeric(tx_new),
+          translate_y = as.numeric(ty_new),
+          surface_score = NA_real_,
+          surface_extremum = NA,
+          stringsAsFactors = FALSE
+        )
+
+        surface_top <- data.frame()
+        if (!is.null(cand_df) && nrow(cand_df) > 0) {
+          surface_df <- cand_df
+          surface_df$translate_x <- clamp(tx0 + as.numeric(surface_df$dX), -1000, 1000)
+          surface_df$translate_y <- clamp(ty0 + as.numeric(surface_df$dY), -1000, 1000)
+          surface_top <- try(
+            select_surface_extrema_candidates(
+              surface_df,
+              score_col = "score",
+              objective = "max",
+              n = 5L,
+              smooth_sigma = 1.0,
+              min_sep = max(2L, 3L * as.integer(stp)),
+              allow_unseparated_fill = FALSE
+            ),
+            silent = TRUE
+          )
+          if (inherits(surface_top, "try-error") || is.null(surface_top) || nrow(surface_top) == 0L) {
+            surface_top <- surface_df[order(surface_df$score, decreasing = TRUE), , drop = FALSE]
+            surface_top <- utils::head(surface_top, 5L)
+          }
+          surface_top$candidate_source <- if ("surface_extremum" %in% names(surface_top)) {
+            ext <- as.logical(surface_top$surface_extremum)
+            ext[is.na(ext)] <- FALSE
+            ifelse(ext, "surface_peak", "grid_score")
+          } else {
+            rep("grid_score", nrow(surface_top))
+          }
+        }
+
+        preview_df <- rbind_fill_columns(exact_selected, surface_top)
+        if (!is.null(preview_df) && nrow(preview_df) > 0L) {
+          preview_df <- preview_df[is.finite(preview_df$dX) & is.finite(preview_df$dY), , drop = FALSE]
+          preview_df <- preview_df[!duplicated(paste(round(preview_df$dX, 6), round(preview_df$dY, 6), sep = ":")), , drop = FALSE]
+          if (nrow(preview_df) > 5L) preview_df <- preview_df[seq_len(5L), , drop = FALSE]
+          preview_df$rank <- seq_len(nrow(preview_df))
+          xh$opt_xy_candidates <- preview_df[, intersect(c(
+            "rank", "candidate_source", "dX", "dY", "score", "surface_score", "surface_extremum",
+            "raw_score", "edge_score", "translate_x", "translate_y"
+          ), names(preview_df)), drop = FALSE]
         } else {
           xh$opt_xy_candidates <- NULL
         }
+
+        cat("\n[Histology Edge Fit] Top candidate positions\n")
+        cat(sprintf(
+          "anchor translate_x=%.3f translate_y=%.3f | signal=%s:%s (%s) | range=%d step=%d band=%d\n",
+          tx0,
+          ty0,
+          if (!is.null(sig_info$source)) as.character(sig_info$source) else "unknown",
+          if (!is.null(sig_info$field) && nzchar(as.character(sig_info$field))) as.character(sig_info$field) else "n/a",
+          if (!is.null(sig_info$type) && nzchar(as.character(sig_info$type))) as.character(sig_info$type) else "n/a",
+          rng,
+          stp,
+          band_px
+        ))
+        cat(sprintf(
+          "exact refined: dX=%.2f dY=%.2f translate_x=%.2f translate_y=%.2f score=%.4f raw=%.4f edge=%.4f\n",
+          best_dx,
+          best_dy,
+          tx_new,
+          ty_new,
+          best_score,
+          best_raw_score,
+          best_edge_score
+        ))
+        if (!is.null(xh$opt_xy_candidates) && nrow(xh$opt_xy_candidates) > 0L) {
+          print(xh$opt_xy_candidates, row.names = FALSE)
+        }
+        flush.console()
 
         showNotification(
           sprintf(
@@ -10406,7 +11438,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
       if ("msi_plot_mode" %in% names(kv) && !is.null(kv[["msi_plot_mode"]])) {
         mode <- tolower(trimws(as.character(kv[["msi_plot_mode"]])[1]))
-        if (mode %in% c("mz", "rgb", "pdata")) {
+        if (mode %in% c("mz", "rgb", "tic", "pdata")) {
           updateSelectInput(session, "msi_plot_mode", selected = mode)
           xh$restore_msi_mode <- mode
         }
