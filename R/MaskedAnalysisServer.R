@@ -235,9 +235,14 @@ MaskedAnalysisServer <- function(id,  setup_values) {
           list(
             fileInput(
               ns('masses_file'),
-              "File with exact mass values info (.txt)",
+              "File with exact mass values info (.txt, .tsv)",
               placeholder = "Must have 'exact.mass' column",
-              accept = "text/plain"
+              accept = c(
+                "text/plain",
+                "text/tab-separated-values",
+                ".txt",
+                ".tsv"
+              )
             ),
             #must have column called exact.mass
             numericInput(ns("tol2"), "tolerance for peak binning (ppm)", 25)
