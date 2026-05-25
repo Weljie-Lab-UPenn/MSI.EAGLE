@@ -199,7 +199,69 @@ ra_load_msi_dataset <- function(path) {
 
 ra_read_sf_optional <- function(path) {
   if (is.null(path) || !nzchar(trimws(path))) return(NULL)
-  sf::st_read(path, quiet = TRUE, stringsAsFactors = FALSE)
+  ra_coerce_line_annotations_to_polygons(
+    sf::st_read(path, quiet = TRUE, stringsAsFactors = FALSE),
+    context = basename(path)
+  )
+}
+
+ra_coerce_line_annotations_to_polygons <- function(poly, context = "polygon file") {
+  if (is.null(poly) || nrow(poly) == 0L) return(poly)
+  gtypes <- as.character(sf::st_geometry_type(poly, by_geometry = TRUE))
+  if (any(gtypes %in% c("POLYGON", "MULTIPOLYGON"))) return(poly)
+  if (!any(gtypes %in% c("LINESTRING", "MULTILINESTRING"))) return(poly)
+
+  close_ring <- function(xy) {
+    xy <- as.matrix(xy[, 1:2, drop = FALSE])
+    xy <- xy[is.finite(xy[, 1]) & is.finite(xy[, 2]), , drop = FALSE]
+    if (nrow(xy) < 3L) return(NULL)
+    dup <- c(FALSE, xy[-1L, 1] == xy[-nrow(xy), 1] & xy[-1L, 2] == xy[-nrow(xy), 2])
+    xy <- xy[!dup, , drop = FALSE]
+    if (nrow(xy) < 3L) return(NULL)
+    if (!identical(as.numeric(xy[1L, ]), as.numeric(xy[nrow(xy), ]))) {
+      xy <- rbind(xy, xy[1L, , drop = FALSE])
+    }
+    if (nrow(xy) < 4L) return(NULL)
+    xy
+  }
+
+  line_to_polygon <- function(g) {
+    gt <- as.character(sf::st_geometry_type(g))
+    coords <- sf::st_coordinates(g)
+    if (identical(gt, "LINESTRING")) {
+      ring <- close_ring(coords[, c("X", "Y"), drop = FALSE])
+      if (is.null(ring)) return(NULL)
+      return(sf::st_polygon(list(ring)))
+    }
+    if (identical(gt, "MULTILINESTRING")) {
+      split_col <- if ("L1" %in% colnames(coords)) "L1" else colnames(coords)[ncol(coords)]
+      rings <- lapply(split(coords[, c("X", "Y"), drop = FALSE], coords[, split_col]), close_ring)
+      rings <- rings[!vapply(rings, is.null, logical(1))]
+      if (length(rings) == 0L) return(NULL)
+      return(sf::st_multipolygon(lapply(rings, function(ring) list(ring))))
+    }
+    NULL
+  }
+
+  geom <- sf::st_geometry(poly)
+  converted <- vector("list", length(geom))
+  for (i in seq_along(geom)) {
+    gt <- as.character(sf::st_geometry_type(geom[[i]]))
+    if (gt %in% c("LINESTRING", "MULTILINESTRING")) {
+      converted[[i]] <- tryCatch(line_to_polygon(geom[[i]]), error = function(e) NULL)
+    }
+  }
+  keep <- !vapply(converted, is.null, logical(1))
+  if (!any(keep)) return(poly)
+
+  out <- poly[keep, , drop = FALSE]
+  out <- sf::st_set_geometry(out, sf::st_sfc(converted[keep], crs = sf::st_crs(poly)))
+  message(sprintf(
+    "[RegistrationAssessment] Converted %d line annotation geometry/geometries to polygon rings from %s.",
+    sum(keep),
+    context
+  ))
+  out
 }
 
 ra_current_msi_coord_frame <- function(obj) {
@@ -554,6 +616,7 @@ ra_transform_polygon_sf <- function(poly_sf, nx, ny, scale_x, scale_y, translate
                                     source_origin_x = NA_real_, source_origin_y = NA_real_,
                                     downsample_factor = 1,
                                     coord_frame = NULL) {
+  poly_sf <- ra_coerce_line_annotations_to_polygons(poly_sf)
   geom_type <- as.character(sf::st_geometry_type(poly_sf))
   keep <- geom_type %in% c("POLYGON", "MULTIPOLYGON")
   poly <- poly_sf[keep, , drop = FALSE]
