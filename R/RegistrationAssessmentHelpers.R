@@ -211,6 +211,14 @@ ra_coerce_line_annotations_to_polygons <- function(poly, context = "polygon file
   if (any(gtypes %in% c("POLYGON", "MULTIPOLYGON"))) return(poly)
   if (!any(gtypes %in% c("LINESTRING", "MULTILINESTRING"))) return(poly)
 
+  line_ring_close_tolerance <- function(xy) {
+    if (nrow(xy) < 2L) return(NA_real_)
+    steps <- sqrt(rowSums((xy[-1L, , drop = FALSE] - xy[-nrow(xy), , drop = FALSE])^2))
+    steps <- steps[is.finite(steps) & steps > 0]
+    if (length(steps) == 0L) return(5)
+    max(5, 5 * as.numeric(stats::quantile(steps, 0.95, names = FALSE)))
+  }
+
   close_ring <- function(xy) {
     xy <- as.matrix(xy[, 1:2, drop = FALSE])
     xy <- xy[is.finite(xy[, 1]) & is.finite(xy[, 2]), , drop = FALSE]
@@ -218,6 +226,8 @@ ra_coerce_line_annotations_to_polygons <- function(poly, context = "polygon file
     dup <- c(FALSE, xy[-1L, 1] == xy[-nrow(xy), 1] & xy[-1L, 2] == xy[-nrow(xy), 2])
     xy <- xy[!dup, , drop = FALSE]
     if (nrow(xy) < 3L) return(NULL)
+    endpoint_gap <- sqrt(sum((xy[1L, ] - xy[nrow(xy), ])^2))
+    if (!is.finite(endpoint_gap) || endpoint_gap > line_ring_close_tolerance(xy)) return(NULL)
     if (!identical(as.numeric(xy[1L, ]), as.numeric(xy[nrow(xy), ]))) {
       xy <- rbind(xy, xy[1L, , drop = FALSE])
     }
@@ -253,13 +263,15 @@ ra_coerce_line_annotations_to_polygons <- function(poly, context = "polygon file
   }
   keep <- !vapply(converted, is.null, logical(1))
   if (!any(keep)) return(poly)
+  skipped <- sum(gtypes %in% c("LINESTRING", "MULTILINESTRING")) - sum(keep)
 
   out <- poly[keep, , drop = FALSE]
   out <- sf::st_set_geometry(out, sf::st_sfc(converted[keep], crs = sf::st_crs(poly)))
   message(sprintf(
-    "[RegistrationAssessment] Converted %d line annotation geometry/geometries to polygon rings from %s.",
+    "[RegistrationAssessment] Converted %d line annotation geometry/geometries to polygon rings from %s%s.",
     sum(keep),
-    context
+    context,
+    if (skipped > 0L) sprintf("; skipped %d open line annotation(s)", skipped) else ""
   ))
   out
 }
