@@ -858,7 +858,7 @@ combine_card <- function(x) {
   if (length(x) > 1) {
     
     #get run order to preserve order of runs
-    run_order <- unlist(lapply(x, runNames))
+    run_order <- unique(as.character(unlist(lapply(x, runNames))))
     
     #reorder list based on ncol
     x <- x[order(unlist(lapply(x, ncol)), decreasing = TRUE)]
@@ -871,7 +871,9 @@ combine_card <- function(x) {
     }
     
     #reorder pixels based on orginal order
-    pData(tmp)$run <- factor(run(tmp), levels = run_order)
+    run_vals <- as.character(run(tmp))
+    run_levels <- unique(c(run_order, run_vals))
+    pData(tmp)$run <- factor(run_vals, levels = run_levels)
     
     return(tmp)
   }

@@ -22,6 +22,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       restore_overlay_pdata_field = NULL,
       mz_ion_table = NULL,
       mz_ion_signature = NULL,
+      source_msi_signature = NULL,
       stat_fit_grid = NULL,
       stat_fit_candidates = NULL,
       stat_fit_summary = NULL,
@@ -234,14 +235,64 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       mz_axis <- mz_axis[is.finite(mz_axis)]
       mz_min <- if (length(mz_axis) > 0L) round(min(mz_axis), 6) else NA_real_
       mz_max <- if (length(mz_axis) > 0L) round(max(mz_axis), 6) else NA_real_
+      cd <- try(as.data.frame(Cardinal::coord(msi_obj)), silent = TRUE)
+      coord_sig <- "coords:NA"
+      if (!inherits(cd, "try-error") && is.data.frame(cd) && all(c("x", "y") %in% names(cd)) && nrow(cd) > 0L) {
+        cx <- suppressWarnings(as.numeric(cd$x))
+        cy <- suppressWarnings(as.numeric(cd$y))
+        if (any(is.finite(cx)) && any(is.finite(cy))) {
+          coord_sig <- paste(
+            round(range(cx[is.finite(cx)], na.rm = TRUE), 6),
+            round(range(cy[is.finite(cy)], na.rm = TRUE), 6),
+            sep = ",",
+            collapse = "|"
+          )
+        }
+      }
+      pd_cols <- try(colnames(as.data.frame(Cardinal::pData(msi_obj))), silent = TRUE)
+      if (inherits(pd_cols, "try-error") || is.null(pd_cols)) pd_cols <- character(0)
+      value_sig <- "values:NA"
+      feat_idx <- unique(pmax(1L, pmin(suppressWarnings(as.integer(nrow(msi_obj))), c(1L, suppressWarnings(as.integer(round(nrow(msi_obj) / 2))), suppressWarnings(as.integer(nrow(msi_obj)))))))
+      pix_idx <- unique(pmax(1L, pmin(suppressWarnings(as.integer(ncol(msi_obj))), c(1L, suppressWarnings(as.integer(round(ncol(msi_obj) / 2))), suppressWarnings(as.integer(ncol(msi_obj)))))))
+      if (length(feat_idx) > 0L && length(pix_idx) > 0L && all(is.finite(feat_idx)) && all(is.finite(pix_idx))) {
+        vals <- try(as.numeric(Cardinal::spectra(msi_obj)[feat_idx, pix_idx, drop = TRUE]), silent = TRUE)
+        if (!inherits(vals, "try-error") && length(vals) > 0L) {
+          vals[!is.finite(vals)] <- NA_real_
+          value_sig <- paste(format(signif(vals, 8), scientific = TRUE, trim = TRUE), collapse = "|")
+        }
+      }
       paste(
         suppressWarnings(as.integer(nrow(msi_obj))),
         suppressWarnings(as.integer(ncol(msi_obj))),
         paste(rn, collapse = "|"),
         mz_min,
         mz_max,
+        coord_sig,
+        paste(pd_cols, collapse = "|"),
+        value_sig,
         sep = "::"
       )
+    }
+
+    reset_histology_msi_caches <- function() {
+      xh$mapped_obj <- NULL
+      xh$mapped_column <- NULL
+      xh$mapping_source <- NULL
+      xh$cluster_lookup <- NULL
+      xh$rgb_mz_applied <- NULL
+      xh$last_valid_mz_select <- NULL
+      xh$stat_fit_grid <- NULL
+      xh$stat_fit_candidates <- NULL
+      xh$stat_fit_summary <- NULL
+      xh$stat_fit_signature <- NULL
+      xh$stat_fit_target_info <- NULL
+      xh$histology_fit_grid <- NULL
+      xh$histology_fit_candidates <- NULL
+      xh$histology_fit_summary <- NULL
+      xh$histology_fit_signature <- NULL
+      xh$histology_fit_target_info <- NULL
+      xh$edge_fit_target_info <- NULL
+      overlay_last_recorded(NULL)
     }
 
     format_mz_choice_label <- function(mz, detect_fraction = NA_real_, mean_intensity = NA_real_) {
@@ -450,6 +501,15 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
     observeEvent(msi_data(), {
       obj <- try(msi_data(), silent = TRUE)
       if (inherits(obj, "try-error") || is.null(obj)) return()
+      sig_now <- try(msi_dataset_signature(obj), silent = TRUE)
+      sig_old <- isolate(xh$source_msi_signature)
+      if (!inherits(sig_now, "try-error") && !is.null(sig_now) && !identical(sig_now, sig_old)) {
+        if (!is.null(sig_old)) {
+          reset_histology_msi_caches()
+          showNotification("Histology module updated to the newly restored MSI dataset.", type = "message", duration = 5)
+        }
+        xh$source_msi_signature <- sig_now
+      }
       rebuild_mz_ion_cache(obj)
       refresh_mz_ion_inputs(obj)
     }, ignoreInit = FALSE)
