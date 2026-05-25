@@ -264,9 +264,14 @@ ra_coerce_line_annotations_to_polygons <- function(poly, context = "polygon file
   keep <- !vapply(converted, is.null, logical(1))
   if (!any(keep)) return(poly)
   skipped <- sum(gtypes %in% c("LINESTRING", "MULTILINESTRING")) - sum(keep)
+  open_keep <- gtypes %in% c("LINESTRING", "MULTILINESTRING") & !keep
 
   out <- poly[keep, , drop = FALSE]
   out <- sf::st_set_geometry(out, sf::st_sfc(converted[keep], crs = sf::st_crs(poly)))
+  if (any(open_keep)) {
+    attr(out, "open_line_annotations") <- poly[open_keep, , drop = FALSE]
+  }
+  attr(out, "source_reference_bbox") <- sf::st_bbox(poly)
   message(sprintf(
     "[RegistrationAssessment] Converted %d line annotation geometry/geometries to polygon rings from %s%s.",
     sum(keep),
