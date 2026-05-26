@@ -3928,6 +3928,27 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       )
     }
 
+    draw_display_raster <- function(rast, xleft, ytop, xright, ybottom, interpolate = FALSE) {
+      if (is.null(rast) || is.null(dim(rast)) || length(dim(rast)) < 2L) return(invisible(NULL))
+      yy <- suppressWarnings(as.numeric(c(ytop, ybottom)))
+      xx <- suppressWarnings(as.numeric(c(xleft, xright)))
+      if (!all(is.finite(c(xx, yy)))) return(invisible(NULL))
+
+      # Shiny can render plots through either ragg or base png. Those devices
+      # differ when rasterImage() is combined with a reversed y-axis, so draw
+      # rasters with explicit top/bottom bounds and a pre-flipped raster.
+      rast_draw <- rast[seq.int(nrow(rast), 1L), , drop = FALSE]
+      graphics::rasterImage(
+        rast_draw,
+        min(xx),
+        max(yy),
+        max(xx),
+        min(yy),
+        interpolate = interpolate
+      )
+      invisible(NULL)
+    }
+
     transform_polygons_for_current_registration <- function(poly_sf, tx, ty, axis_mode = NULL) {
       msi <- make_msi_raster()
       tr_spec <- registration_transform()
@@ -11117,7 +11138,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       graphics::par(mar = c(0.5, 0.5, 1.5, 0.5))
       graphics::plot.new()
       graphics::plot.window(xlim = c(1, msi$nx), ylim = c(msi$ny, 1), asp = 1, xaxs = "i", yaxs = "i")
-      graphics::rasterImage(msi$raster, 1, 1, msi$nx, msi$ny, interpolate = FALSE)
+      draw_display_raster(msi$raster, 1, 1, msi$nx, msi$ny, interpolate = FALSE)
 
       draw_polygons <- function(poly) {
         if (is.null(poly) || nrow(poly) == 0L) return(invisible(NULL))
@@ -11180,7 +11201,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         if (!is.null(ov$histology)) {
           bbox_disp <- overlay_source_bbox_to_display(ov$histology)
           if (!is.null(bbox_disp)) {
-            graphics::rasterImage(
+            draw_display_raster(
               ov$histology$raster,
               bbox_disp[["xmin"]],
               bbox_disp[["ymin"]],
@@ -11196,7 +11217,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       } else {
         bbox_disp <- overlay_source_bbox_to_display(ov)
         validate(need(!is.null(bbox_disp), "Overlay display bounds are unavailable."))
-        graphics::rasterImage(ov$raster, bbox_disp[["xmin"]], bbox_disp[["ymin"]], bbox_disp[["xmax"]], bbox_disp[["ymax"]], interpolate = TRUE)
+        draw_display_raster(ov$raster, bbox_disp[["xmin"]], bbox_disp[["ymin"]], bbox_disp[["xmax"]], bbox_disp[["ymax"]], interpolate = TRUE)
         if (identical(ov$layer, "cluster")) {
           graphics::title(main = sprintf("Cluster Overlay on MSI (%s)", msi_label))
         } else {
