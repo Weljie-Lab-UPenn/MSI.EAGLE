@@ -11245,6 +11245,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         slide_key = reg_tr$slide_key,
         overlay_source_frame_type = reg_tr$overlay_source_frame_type,
         msi_canvas = sprintf("%d x %d", msi$nx, msi$ny),
+        msi_display_y_convention = "source_y_max_top",
         msi_source_x_range = paste(range(msi$x_source, na.rm = TRUE), collapse = " to "),
         msi_source_y_range = paste(range(msi$y_source, na.rm = TRUE), collapse = " to "),
         msi_y_display_mapping = sprintf(
