@@ -450,6 +450,20 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
     observeEvent(msi_data(), {
       obj <- try(msi_data(), silent = TRUE)
       if (inherits(obj, "try-error") || is.null(obj)) return()
+      cd <- try(as.data.frame(Cardinal::coord(obj)), silent = TRUE)
+      if (!inherits(cd, "try-error") && is.data.frame(cd) && all(c("x", "y") %in% names(cd)) && nrow(cd) > 0L) {
+        x_src <- suppressWarnings(as.numeric(cd$x))
+        y_src <- suppressWarnings(as.numeric(cd$y))
+        x_rng <- range(x_src[is.finite(x_src)], na.rm = TRUE)
+        y_rng <- range(y_src[is.finite(y_src)], na.rm = TRUE)
+        ny <- as.integer(round(diff(y_rng) + 1L))
+        if (all(is.finite(c(x_rng, y_rng))) && is.finite(ny) && ny > 0L) {
+          message(sprintf(
+            "[Histology MSI] coord x=%s..%s y=%s..%s; display maps source y=%s to row %d and source y=%s to row 1.",
+            x_rng[1], x_rng[2], y_rng[1], y_rng[2], y_rng[1], ny, y_rng[2]
+          ))
+        }
+      }
       rebuild_mz_ion_cache(obj)
       refresh_mz_ion_inputs(obj)
     }, ignoreInit = FALSE)
