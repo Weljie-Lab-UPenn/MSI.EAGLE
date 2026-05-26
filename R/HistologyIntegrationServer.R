@@ -11237,6 +11237,12 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       ov_hist <- if (identical(ov$layer, "combined")) ov$histology else ov
       reg_tr <- registration_transform()
       poly_corr <- list(fx = 1, fy = 1, source = "disabled")
+      signal_row_mean <- function(row_i) {
+        sig <- msi$opt_signal
+        if (is.null(sig) || !is.matrix(sig) || nrow(sig) < row_i) return(NA_real_)
+        val <- suppressWarnings(mean(as.numeric(sig[row_i, ]), na.rm = TRUE))
+        if (is.finite(val)) round(val, 6) else NA_real_
+      }
 
       list(
         working_directory = setup_values()[["wd"]],
@@ -11264,6 +11270,18 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         alpha_used = if (is.finite(ov$alpha_used)) round(ov$alpha_used, 3) else NA_real_,
         alpha_histology = input$histology_alpha,
         alpha_cluster = input$cluster_alpha,
+        scale_x = input$scale_x,
+        scale_y = input$scale_y,
+        rotate_deg = input$rotate_deg,
+        translate_x = input$translate_x,
+        translate_y = input$translate_y,
+        flip_histology_y = isTRUE(input$flip_histology_y),
+        effective_overlay_rotate_deg = effective_overlay_rotate_deg(),
+        effective_polygon_rotate_deg = effective_polygon_rotate_deg(),
+        effective_overlay_flip_y = effective_overlay_flip_y(),
+        effective_polygon_flip_y = effective_polygon_flip_y(reg_tr),
+        msi_top_row_signal_mean = signal_row_mean(1L),
+        msi_bottom_row_signal_mean = signal_row_mean(as.integer(msi$ny)),
         overlay_scale_mode = input$overlay_scale_mode,
         histology_um_per_px = input$histology_um_per_px,
         msi_um_per_px = input$msi_um_per_px,
