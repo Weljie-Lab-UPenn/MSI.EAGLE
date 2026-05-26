@@ -11231,6 +11231,15 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         slide_key = reg_tr$slide_key,
         overlay_source_frame_type = reg_tr$overlay_source_frame_type,
         msi_canvas = sprintf("%d x %d", msi$nx, msi$ny),
+        msi_source_x_range = paste(range(msi$x_source, na.rm = TRUE), collapse = " to "),
+        msi_source_y_range = paste(range(msi$y_source, na.rm = TRUE), collapse = " to "),
+        msi_y_display_mapping = sprintf(
+          "source y=%s is display row %s; source y=%s is display row %s",
+          min(msi$y_source, na.rm = TRUE),
+          max(msi$y_display[msi$y_source == min(msi$y_source, na.rm = TRUE)], na.rm = TRUE),
+          max(msi$y_source, na.rm = TRUE),
+          min(msi$y_display[msi$y_source == max(msi$y_source, na.rm = TRUE)], na.rm = TRUE)
+        ),
         msi_display_mode = msi$mode,
         msi_display_label = msi$display_label,
         mz_selected = if (is.finite(msi$mz_selected)) round(msi$mz_selected, 6) else NA_real_,
