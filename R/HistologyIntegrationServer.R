@@ -7055,7 +7055,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       graphics::par(mar = c(0.5, 0.5, 2.2, 0.5))
       graphics::plot.new()
       graphics::plot.window(xlim = c(1, ncol(rast)), ylim = c(nrow(rast), 1), asp = 1, xaxs = "i", yaxs = "i")
-      graphics::rasterImage(rast, 1, 1, ncol(rast), nrow(rast), interpolate = FALSE)
+      draw_display_raster(rast, 1, 1, ncol(rast), nrow(rast), interpolate = FALSE)
       graphics::box(col = "grey70")
       graphics::title(main = main)
       if (!identical(info$type, "group_labels")) {
@@ -7426,7 +7426,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       graphics::par(mar = c(0.5, 0.5, 2.2, 0.5))
       graphics::plot.new()
       graphics::plot.window(xlim = c(1, ncol(sig)), ylim = c(nrow(sig), 1), asp = 1, xaxs = "i", yaxs = "i")
-      graphics::rasterImage(rast, 1, 1, ncol(sig), nrow(sig), interpolate = FALSE)
+      draw_display_raster(rast, 1, 1, ncol(sig), nrow(sig), interpolate = FALSE)
       graphics::box(col = "grey70")
       graphics::title(main = main)
     }
