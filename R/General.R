@@ -759,6 +759,20 @@ pixDatFill_manual<-function(datas, sample_list, variables) {
   
   plate_dat=sample_list
   data1_samples<-datas
+
+  # Preserve pixel identity across subset/rbind operations. Coordinates are not
+  # guaranteed to be unique in stitched or polygon-derived datasets.
+  pdat_cols <- colnames(as.data.frame(pixelData(data1_samples)))
+  pixel_order_col <- ".msi_eagle_pixel_order"
+  while (pixel_order_col %in% pdat_cols) {
+    pixel_order_col <- paste0(pixel_order_col, "_")
+  }
+  pixelData(data1_samples)[[pixel_order_col]] <- seq_len(nrow(as.data.frame(pixelData(data1_samples))))
+  for (v in variables) {
+    if (!v %in% colnames(as.data.frame(pixelData(data1_samples)))) {
+      pixelData(data1_samples)[[v]] <- NA
+    }
+  }
   
   #establish plates to work with
   plates=unique(plate_dat$Plate)
@@ -813,26 +827,37 @@ pixDatFill_manual<-function(datas, sample_list, variables) {
   }
   if(is.null(pdat)){
     print("No new pdata created! Ensure the Plate column of the sample list is matched in run data.")
-    return(pixelData(data1_samples))
+    return(pixelData(datas))
   } else {
-    #redorder rows of pdat based on original order
-    #browser()
-    
-    
-    
-    # Step 1: Create an index in 'original_df' to preserve the original order
-    original_df <- pData(datas) %>% as.data.frame() %>%
-      dplyr::mutate(original_order = dplyr::row_number())
-    
-    
-    #Step 2: Use left_join() to join 'new_df' to 'original_df' and reorder based on original_order
-    reordered_df <- as.data.frame(pdat) %>%
-      dplyr::left_join(original_df %>% dplyr::select(x, y, run, original_order), by = c("x", "y", "run")) %>%
-      dplyr::arrange(original_order) %>%
-      dplyr::select(-original_order)  # Drop the original_order column if not needed
-    
+    original_df <- as.data.frame(pixelData(data1_samples))
+    reordered_df <- original_df
+    pdat_df <- as.data.frame(pdat)
 
-    
+    if (!pixel_order_col %in% colnames(pdat_df)) {
+      message("Could not preserve pixel order during manual phenotyping.")
+      showNotification("Could not preserve pixel order during manual phenotyping.", type = "error")
+      return(pixelData(datas))
+    }
+
+    pdat_df <- pdat_df[order(pdat_df[[pixel_order_col]]), , drop = FALSE]
+    if (any(duplicated(pdat_df[[pixel_order_col]]))) {
+      message("Duplicate pixel assignments detected during manual phenotyping; keeping the first assignment for each pixel.")
+      showNotification("Duplicate pixel assignments detected during manual phenotyping; keeping the first assignment for each pixel.", type = "warning")
+      pdat_df <- pdat_df[!duplicated(pdat_df[[pixel_order_col]]), , drop = FALSE]
+    }
+
+    update_idx <- as.integer(pdat_df[[pixel_order_col]])
+    valid_idx <- !is.na(update_idx) & update_idx >= 1L & update_idx <= nrow(reordered_df)
+    if (!all(valid_idx)) {
+      message("Some manual phenotype pixel assignments were outside the source pixel range and were skipped.")
+      showNotification("Some manual phenotype pixel assignments were outside the source pixel range and were skipped.", type = "warning")
+      pdat_df <- pdat_df[valid_idx, , drop = FALSE]
+      update_idx <- update_idx[valid_idx]
+    }
+
+    reordered_df[update_idx, variables] <- pdat_df[, variables, drop = FALSE]
+    reordered_df <- reordered_df[, !colnames(reordered_df) %in% pixel_order_col, drop = FALSE]
+
     pixelData(data1_samples)<-PositionDataFrame(run=reordered_df$run, coord=coord(datas), reordered_df[,!colnames(reordered_df)%in%c("run", "x", "y")]) 
     
     return(pixelData(data1_samples))
