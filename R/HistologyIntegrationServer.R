@@ -4523,10 +4523,34 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       s[is.na(s)] <- ""
       # Common non-cell/background annotation tokens from exported polygon workflows.
       non_cell <- grepl(
-        "^(line[0-9_.-]*|background|bg|outside|outer|border|boundary|frame|artifact|noncell|notcell|mask|roi|region|brain|eye|center)$",
+        "^(line[0-9_.-]*|background|bg|outside|outer|border|boundary|frame|artifact|noncell|notcell|mask|roi|region)$",
         s
       )
       nzchar(s) & !non_cell
+    }
+
+    drop_large_polygon_outliers <- function(keep_mask, poly_area, canvas_area = NA_real_,
+                                            min_reference = 8L, median_multiplier = 12,
+                                            q75_multiplier = 8, canvas_fraction = 0.25) {
+      keep_mask <- rep_len(as.logical(keep_mask), length(poly_area))
+      keep_mask[is.na(keep_mask)] <- FALSE
+      area <- suppressWarnings(as.numeric(poly_area))
+      area[!is.finite(area) | area <= 0] <- NA_real_
+
+      ref_area <- area[keep_mask & is.finite(area)]
+      if (length(ref_area) < min_reference) return(keep_mask)
+
+      med <- stats::median(ref_area, na.rm = TRUE)
+      q75 <- stats::quantile(ref_area, 0.75, na.rm = TRUE, names = FALSE)
+      threshold <- max(med * median_multiplier, q75 * q75_multiplier, na.rm = TRUE)
+      if (is.finite(canvas_area) && canvas_area > 0) {
+        threshold <- min(threshold, canvas_area * canvas_fraction)
+      }
+      if (!is.finite(threshold) || threshold <= 0) return(keep_mask)
+
+      large <- keep_mask & is.finite(area) & area > threshold
+      if (!any(large) || !any(keep_mask & !large)) return(keep_mask)
+      keep_mask & !large
     }
 
     is_cell_like_polygon_object <- function(poly) {
@@ -5052,6 +5076,9 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         if (any(!object_keep, na.rm = TRUE)) keep_mask <- keep_mask & object_keep
       }
       if (any(huge) && any(keep_mask & !huge)) keep_mask <- keep_mask & !huge
+      if (identical(target_mode, "cells")) {
+        keep_mask <- drop_large_polygon_outliers(keep_mask, poly_area, canvas_area)
+      }
       if (!any(keep_mask)) keep_mask[] <- TRUE
 
       list(
@@ -10868,6 +10895,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       if (any(huge_poly) && any(is_cell_poly & usable_poly)) {
         is_cell_poly <- is_cell_poly & usable_poly
       }
+      is_cell_poly <- drop_large_polygon_outliers(is_cell_poly, poly_area, canvas_area)
       usable_cell_poly <- usable_poly & cell_object
       if (!any(is_cell_poly) && any(usable_cell_poly)) {
         is_cell_poly <- usable_cell_poly
