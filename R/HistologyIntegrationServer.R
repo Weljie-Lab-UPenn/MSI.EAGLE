@@ -4523,7 +4523,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       s[is.na(s)] <- ""
       # Common non-cell/background annotation tokens from exported polygon workflows.
       non_cell <- grepl(
-        "^(line[0-9_.-]*|background|bg|outside|outer|border|boundary|frame|artifact|noncell|notcell|mask|roi|region)$",
+        "^(line[0-9_.-]*|background|bg|outside|outer|border|boundary|frame|artifact|noncell|notcell|mask|roi|region|brain|eye|center)$",
         s
       )
       nzchar(s) & !non_cell
@@ -4535,7 +4535,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       if (!"objectType" %in% colnames(poly)) return(rep(TRUE, n))
       object_type <- tolower(trimws(as.character(poly$objectType)))
       object_type[is.na(object_type)] <- ""
-      !object_type %in% c("annotation", "roi", "region")
+      # QuPath exports cell/region contours as "annotation", so label text is
+      # the safer cell-vs-background signal. Reserve objectType filtering for
+      # explicit ROI/region records.
+      !object_type %in% c("roi", "region")
     }
 
     match_nucleus_polygons_to_cells <- function(cell_poly_t, nucleus_poly_t, cell_keep = NULL) {
