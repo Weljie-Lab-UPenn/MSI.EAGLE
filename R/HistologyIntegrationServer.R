@@ -10895,7 +10895,9 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
       pts_df <- data.frame(
         x = msi$x_display,
-        y = msi$y_display,
+        # Overlay polygons use top-down display rows, while pData must be
+        # assigned to the corresponding unflipped MSI source rows.
+        y = msi$y_norm,
         idx = seq_along(msi$x_display)
       )
       poly_crs <- normalize_crs(try(sf::st_crs(poly_t), silent = TRUE))
