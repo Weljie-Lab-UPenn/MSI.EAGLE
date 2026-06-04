@@ -215,8 +215,20 @@ ra_coerce_line_annotations_to_polygons <- function(poly, context = "polygon file
     if (nrow(xy) < 2L) return(NA_real_)
     steps <- sqrt(rowSums((xy[-1L, , drop = FALSE] - xy[-nrow(xy), , drop = FALSE])^2))
     steps <- steps[is.finite(steps) & steps > 0]
-    if (length(steps) == 0L) return(5)
-    max(5, 5 * as.numeric(stats::quantile(steps, 0.95, names = FALSE)))
+    local_tol <- if (length(steps) == 0L) 5 else {
+      max(5, 5 * as.numeric(stats::quantile(steps, 0.95, names = FALSE)))
+    }
+
+    # Dense exported contours can have endpoints farther apart than their
+    # local point spacing while still leaving only a small global gap.
+    x_span <- diff(range(xy[, 1], na.rm = TRUE))
+    y_span <- diff(range(xy[, 2], na.rm = TRUE))
+    bbox_diag <- sqrt(x_span^2 + y_span^2)
+    path_length <- sum(steps, na.rm = TRUE)
+    global_tol <- min(0.075 * bbox_diag, 0.025 * path_length)
+    if (!is.finite(global_tol) || global_tol <= 0) global_tol <- 0
+
+    max(local_tol, global_tol)
   }
 
   close_ring <- function(xy) {
