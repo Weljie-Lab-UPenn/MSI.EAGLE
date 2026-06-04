@@ -184,7 +184,16 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         tagList(
           uiOutput(ns("polygon_label_field_ui")),
           textInput(ns("polygon_pdata_col"), "pData column name", value = "polygon_region"),
-          selectInput(ns("polygon_overlap_rule"), "If multiple polygons hit one pixel", choices = c("First match" = "first", "All matches (semicolon-separated)" = "all"), selected = "first"),
+          selectInput(
+            ns("polygon_overlap_rule"),
+            "If multiple polygons hit one pixel",
+            choices = c(
+              "Smallest polygon (recommended)" = "smallest",
+              "First match" = "first",
+              "All matches (semicolon-separated)" = "all"
+            ),
+            selected = "smallest"
+          ),
           if (!is.null(input$nucleus_polygon_file) && nzchar(input$nucleus_polygon_file$name)) {
             tags$small("Nucleus GeoJSON detected: mapping will also write nucleus/cytoplasm companion columns.")
           } else {
@@ -4541,9 +4550,9 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       nzchar(s) & !non_cell
     }
 
-    drop_large_polygon_outliers <- function(keep_mask, poly_area, canvas_area = NA_real_,
-                                            min_reference = 8L, median_multiplier = 12,
-                                            q75_multiplier = 8, canvas_fraction = 0.25) {
+    drop_dominant_enclosing_polygons <- function(keep_mask, poly, poly_area,
+                                                 min_reference = 8L, median_multiplier = 12,
+                                                 q75_multiplier = 8, enclosed_fraction = 0.8) {
       keep_mask <- rep_len(as.logical(keep_mask), length(poly_area))
       keep_mask[is.na(keep_mask)] <- FALSE
       area <- suppressWarnings(as.numeric(poly_area))
@@ -4555,14 +4564,25 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       med <- stats::median(ref_area, na.rm = TRUE)
       q75 <- stats::quantile(ref_area, 0.75, na.rm = TRUE, names = FALSE)
       threshold <- max(med * median_multiplier, q75 * q75_multiplier, na.rm = TRUE)
-      if (is.finite(canvas_area) && canvas_area > 0) {
-        threshold <- min(threshold, canvas_area * canvas_fraction)
-      }
       if (!is.finite(threshold) || threshold <= 0) return(keep_mask)
 
-      large <- keep_mask & is.finite(area) & area > threshold
-      if (!any(large) || !any(keep_mask & !large)) return(keep_mask)
-      keep_mask & !large
+      candidate_idx <- which(keep_mask & is.finite(area) & area > threshold)
+      keep_idx <- which(keep_mask)
+      if (length(candidate_idx) == 0L || length(keep_idx) < 2L || is.null(poly)) return(keep_mask)
+
+      points <- try(suppressWarnings(sf::st_point_on_surface(poly[keep_idx, , drop = FALSE])), silent = TRUE)
+      enclosed <- try(sf::st_intersects(poly[candidate_idx, , drop = FALSE], points), silent = TRUE)
+      if (inherits(points, "try-error") || inherits(enclosed, "try-error")) return(keep_mask)
+
+      required <- max(3L, as.integer(ceiling(enclosed_fraction * (length(keep_idx) - 1L))))
+      enclosed_n <- vapply(enclosed, function(ix) {
+        as.integer(max(0L, length(unique(ix)) - 1L))
+      }, integer(1))
+      dominant <- candidate_idx[enclosed_n >= required]
+      remaining <- keep_mask & !(seq_along(keep_mask) %in% dominant)
+      if (length(dominant) == 0L || !any(remaining)) return(keep_mask)
+      keep_mask[dominant] <- FALSE
+      keep_mask
     }
 
     is_cell_like_polygon_object <- function(poly) {
@@ -5089,7 +5109,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
       if (any(huge) && any(keep_mask & !huge)) keep_mask <- keep_mask & !huge
       if (identical(target_mode, "cells")) {
-        keep_mask <- drop_large_polygon_outliers(keep_mask, poly_area, canvas_area)
+        keep_mask <- drop_dominant_enclosing_polygons(keep_mask, poly_t, poly_area)
       }
       if (!any(keep_mask)) keep_mask[] <- TRUE
 
@@ -10888,7 +10908,6 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
       outside_label <- "outside_polygon"
       poly_uid <- paste0("polygon_", sprintf("%05d", seq_len(nrow(poly_t))))
-      has_hit <- lengths(hit) > 0
       raw_labels <- as.character(poly_t$map_label)
       is_cell_poly <- is_cell_like_polygon_label(raw_labels)
       cell_object <- is_cell_like_polygon_object(poly_t)
@@ -10907,7 +10926,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       if (any(huge_poly) && any(is_cell_poly & usable_poly)) {
         is_cell_poly <- is_cell_poly & usable_poly
       }
-      is_cell_poly <- drop_large_polygon_outliers(is_cell_poly, poly_area, canvas_area)
+      is_cell_poly <- drop_dominant_enclosing_polygons(is_cell_poly, poly_t, poly_area)
       usable_cell_poly <- usable_poly & cell_object
       if (!any(is_cell_poly) && any(usable_cell_poly)) {
         is_cell_poly <- usable_cell_poly
@@ -10918,6 +10937,41 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         # Fallback: if heuristics remove everything, use all polygons.
         is_cell_poly <- rep(TRUE, length(raw_labels))
       }
+
+      # Pixel-center intersection can miss annotations smaller than one MSI
+      # pixel. Preserve each in-canvas cell annotation with one nearest pixel.
+      polygon_hit_n <- tabulate(as.integer(unlist(hit, use.names = FALSE)), nbins = nrow(poly_t))
+      rescue_idx <- which(is_cell_poly & polygon_hit_n == 0L)
+      if (length(rescue_idx) > 0L) {
+        rescue_pts <- try(suppressWarnings(sf::st_point_on_surface(poly_t[rescue_idx, , drop = FALSE])), silent = TRUE)
+        rescue_xy <- try(sf::st_coordinates(rescue_pts), silent = TRUE)
+        if (!inherits(rescue_pts, "try-error") && !inherits(rescue_xy, "try-error") &&
+            nrow(rescue_xy) >= length(rescue_idx)) {
+          x_unique <- sort(unique(as.numeric(pts_df$x)))
+          y_unique <- sort(unique(as.numeric(pts_df$y)))
+          x_step <- suppressWarnings(stats::median(diff(x_unique), na.rm = TRUE))
+          y_step <- suppressWarnings(stats::median(diff(y_unique), na.rm = TRUE))
+          if (!is.finite(x_step) || x_step <= 0) x_step <- 1
+          if (!is.finite(y_step) || y_step <= 0) y_step <- 1
+          in_canvas <- rescue_xy[, 1] >= (min(pts_df$x) - x_step / 2) &
+            rescue_xy[, 1] <= (max(pts_df$x) + x_step / 2) &
+            rescue_xy[, 2] >= (min(pts_df$y) - y_step / 2) &
+            rescue_xy[, 2] <= (max(pts_df$y) + y_step / 2)
+          if (any(in_canvas)) {
+            nearest <- try(sf::st_nearest_feature(rescue_pts[in_canvas, , drop = FALSE], pts_sf), silent = TRUE)
+            if (!inherits(nearest, "try-error")) {
+              rescue_use <- rescue_idx[in_canvas]
+              for (j in seq_along(nearest)) {
+                px <- as.integer(nearest[j])
+                if (is.finite(px) && px >= 1L && px <= length(hit)) {
+                  hit[[px]] <- unique(c(hit[[px]], rescue_use[j]))
+                }
+              }
+            }
+          }
+        }
+      }
+      has_hit <- lengths(hit) > 0
 
       map_polygon_values_from_hit <- function(value_vec_full, mask = rep(TRUE, length(value_vec_full)), outside = outside_label) {
         out <- rep(outside, nrow(pts_df))
@@ -10934,6 +10988,11 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           out[has_hit] <- vapply(hit[has_hit], function(ix) {
             ix_use <- ix[mask[ix]]
             if (length(ix_use) == 0L) return(outside)
+            if (identical(input$polygon_overlap_rule, "smallest") && length(ix_use) > 1L) {
+              hit_area <- poly_area[ix_use]
+              hit_area[!is.finite(hit_area) | hit_area <= 0] <- Inf
+              ix_use <- ix_use[which.min(hit_area)]
+            }
             as.character(value_vec_full[ix_use[1]])
           }, character(1))
         }
@@ -10990,6 +11049,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           if (!any(nucleus_keep)) nucleus_keep <- rep(TRUE, nrow(nucleus_t))
           nucleus_t <- nucleus_t[nucleus_keep, , drop = FALSE]
           nucleus_uid <- nucleus_uid[nucleus_keep]
+          nucleus_area <- nucleus_area[nucleus_keep]
 
           if (nrow(nucleus_t) > 0) {
             nucleus_parent_idx <- match_nucleus_polygons_to_cells(poly_t, nucleus_t, cell_keep = is_cell_poly)
@@ -11022,6 +11082,11 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
                 out[has_nucleus_hit] <- vapply(nucleus_hit[has_nucleus_hit], function(ix) {
                   ix_use <- ix[valid_nucleus[ix]]
                   if (length(ix_use) == 0L) return(outside)
+                  if (identical(input$polygon_overlap_rule, "smallest") && length(ix_use) > 1L) {
+                    hit_area <- nucleus_area[ix_use]
+                    hit_area[!is.finite(hit_area) | hit_area <= 0] <- Inf
+                    ix_use <- ix_use[which.min(hit_area)]
+                  }
                   as.character(value_vec_full[ix_use[1]])
                 }, character(1))
               }
