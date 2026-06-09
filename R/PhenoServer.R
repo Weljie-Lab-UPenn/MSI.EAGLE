@@ -465,7 +465,7 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       # This file will be removed later by renderImage
       outfile <- tempfile(fileext = '.png')
       
-      png(outfile, width = 800, height = 600)
+      png(outfile, width = 1200, height = 900)
       
       # #img.dat<-x3$img_p.dat  #should the be pdata?
       # img.dat<-x3$img.dat
@@ -484,7 +484,7 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       }
       
       #browser()
-      print(image(pk_img, input$phen_plot))
+      print(image(pk_img, input$phen_plot, key = keyval))
       
       
       #print(Cardinal::image(mytable_selected(), mz=ion, plusminus=input$plusminus_viz))

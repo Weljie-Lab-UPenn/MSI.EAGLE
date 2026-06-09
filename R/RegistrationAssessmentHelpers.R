@@ -199,7 +199,98 @@ ra_load_msi_dataset <- function(path) {
 
 ra_read_sf_optional <- function(path) {
   if (is.null(path) || !nzchar(trimws(path))) return(NULL)
-  sf::st_read(path, quiet = TRUE, stringsAsFactors = FALSE)
+  ra_coerce_line_annotations_to_polygons(
+    sf::st_read(path, quiet = TRUE, stringsAsFactors = FALSE),
+    context = basename(path)
+  )
+}
+
+ra_coerce_line_annotations_to_polygons <- function(poly, context = "polygon file") {
+  if (is.null(poly) || nrow(poly) == 0L) return(poly)
+  gtypes <- as.character(sf::st_geometry_type(poly, by_geometry = TRUE))
+  if (any(gtypes %in% c("POLYGON", "MULTIPOLYGON"))) return(poly)
+  if (!any(gtypes %in% c("LINESTRING", "MULTILINESTRING"))) return(poly)
+
+  line_ring_close_tolerance <- function(xy) {
+    if (nrow(xy) < 2L) return(NA_real_)
+    steps <- sqrt(rowSums((xy[-1L, , drop = FALSE] - xy[-nrow(xy), , drop = FALSE])^2))
+    steps <- steps[is.finite(steps) & steps > 0]
+    local_tol <- if (length(steps) == 0L) 5 else {
+      max(5, 5 * as.numeric(stats::quantile(steps, 0.95, names = FALSE)))
+    }
+
+    # Dense exported contours can have endpoints farther apart than their
+    # local point spacing while still leaving only a small global gap.
+    x_span <- diff(range(xy[, 1], na.rm = TRUE))
+    y_span <- diff(range(xy[, 2], na.rm = TRUE))
+    bbox_diag <- sqrt(x_span^2 + y_span^2)
+    path_length <- sum(steps, na.rm = TRUE)
+    global_tol <- min(0.075 * bbox_diag, 0.025 * path_length)
+    if (!is.finite(global_tol) || global_tol <= 0) global_tol <- 0
+
+    max(local_tol, global_tol)
+  }
+
+  close_ring <- function(xy) {
+    xy <- as.matrix(xy[, 1:2, drop = FALSE])
+    xy <- xy[is.finite(xy[, 1]) & is.finite(xy[, 2]), , drop = FALSE]
+    if (nrow(xy) < 3L) return(NULL)
+    dup <- c(FALSE, xy[-1L, 1] == xy[-nrow(xy), 1] & xy[-1L, 2] == xy[-nrow(xy), 2])
+    xy <- xy[!dup, , drop = FALSE]
+    if (nrow(xy) < 3L) return(NULL)
+    endpoint_gap <- sqrt(sum((xy[1L, ] - xy[nrow(xy), ])^2))
+    if (!is.finite(endpoint_gap) || endpoint_gap > line_ring_close_tolerance(xy)) return(NULL)
+    if (!identical(as.numeric(xy[1L, ]), as.numeric(xy[nrow(xy), ]))) {
+      xy <- rbind(xy, xy[1L, , drop = FALSE])
+    }
+    if (nrow(xy) < 4L) return(NULL)
+    xy
+  }
+
+  line_to_polygon <- function(g) {
+    gt <- as.character(sf::st_geometry_type(g))
+    coords <- sf::st_coordinates(g)
+    if (identical(gt, "LINESTRING")) {
+      ring <- close_ring(coords[, c("X", "Y"), drop = FALSE])
+      if (is.null(ring)) return(NULL)
+      return(sf::st_polygon(list(ring)))
+    }
+    if (identical(gt, "MULTILINESTRING")) {
+      split_col <- if ("L1" %in% colnames(coords)) "L1" else colnames(coords)[ncol(coords)]
+      rings <- lapply(split(coords[, c("X", "Y"), drop = FALSE], coords[, split_col]), close_ring)
+      rings <- rings[!vapply(rings, is.null, logical(1))]
+      if (length(rings) == 0L) return(NULL)
+      return(sf::st_multipolygon(lapply(rings, function(ring) list(ring))))
+    }
+    NULL
+  }
+
+  geom <- sf::st_geometry(poly)
+  converted <- vector("list", length(geom))
+  for (i in seq_along(geom)) {
+    gt <- as.character(sf::st_geometry_type(geom[[i]]))
+    if (gt %in% c("LINESTRING", "MULTILINESTRING")) {
+      converted[[i]] <- tryCatch(line_to_polygon(geom[[i]]), error = function(e) NULL)
+    }
+  }
+  keep <- !vapply(converted, is.null, logical(1))
+  if (!any(keep)) return(poly)
+  skipped <- sum(gtypes %in% c("LINESTRING", "MULTILINESTRING")) - sum(keep)
+  open_keep <- gtypes %in% c("LINESTRING", "MULTILINESTRING") & !keep
+
+  out <- poly[keep, , drop = FALSE]
+  out <- sf::st_set_geometry(out, sf::st_sfc(converted[keep], crs = sf::st_crs(poly)))
+  if (any(open_keep)) {
+    attr(out, "open_line_annotations") <- poly[open_keep, , drop = FALSE]
+  }
+  attr(out, "source_reference_bbox") <- sf::st_bbox(poly)
+  message(sprintf(
+    "[RegistrationAssessment] Converted %d line annotation geometry/geometries to polygon rings from %s%s.",
+    sum(keep),
+    context,
+    if (skipped > 0L) sprintf("; skipped %d open line annotation(s)", skipped) else ""
+  ))
+  out
 }
 
 ra_current_msi_coord_frame <- function(obj) {
@@ -554,6 +645,7 @@ ra_transform_polygon_sf <- function(poly_sf, nx, ny, scale_x, scale_y, translate
                                     source_origin_x = NA_real_, source_origin_y = NA_real_,
                                     downsample_factor = 1,
                                     coord_frame = NULL) {
+  poly_sf <- ra_coerce_line_annotations_to_polygons(poly_sf)
   geom_type <- as.character(sf::st_geometry_type(poly_sf))
   keep <- geom_type %in% c("POLYGON", "MULTIPOLYGON")
   poly <- poly_sf[keep, , drop = FALSE]

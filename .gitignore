@@ -1,0 +1,3 @@
+# Local peak-list cleanup helpers and generated peak-list outputs
+/tools/
+/inst/peak_lists/

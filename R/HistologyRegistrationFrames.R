@@ -226,6 +226,7 @@ source_sf_to_display_sf <- function(poly_sf, coord_frame, flip_y = TRUE) {
   rebuild_one <- function(one_row) {
     cc <- sf::st_coordinates(one_row)
     if (nrow(cc) == 0L) return(NULL)
+    geom_type <- as.character(sf::st_geometry_type(sf::st_geometry(one_row)[[1]]))
 
     x1 <- cc[, "X"] - coord_frame$xmin + 1
     if (isTRUE(flip_y)) {
@@ -234,6 +235,20 @@ source_sf_to_display_sf <- function(poly_sf, coord_frame, flip_y = TRUE) {
       y1 <- cc[, "Y"] - coord_frame$ymin + 1
     }
     cc_new <- cbind(x1, y1, cc[, setdiff(colnames(cc), c("X", "Y")), drop = FALSE])
+
+    if (geom_type %in% c("LINESTRING", "MULTILINESTRING")) {
+      if ("L1" %in% colnames(cc_new)) {
+        parts <- lapply(unique(cc_new[, "L1"]), function(l1) {
+          as.matrix(cc_new[cc_new[, "L1"] == l1, c("x1", "y1"), drop = FALSE])
+        })
+        parts <- parts[vapply(parts, nrow, integer(1)) >= 2L]
+        if (length(parts) == 0L) return(NULL)
+        return(if (length(parts) == 1L) sf::st_linestring(parts[[1]]) else sf::st_multilinestring(parts))
+      }
+      line <- as.matrix(cc_new[, c("x1", "y1"), drop = FALSE])
+      if (nrow(line) < 2L) return(NULL)
+      return(sf::st_linestring(line))
+    }
 
     if ("L3" %in% colnames(cc_new)) {
       polys <- lapply(unique(cc_new[, "L3"]), function(l3) {

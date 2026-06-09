@@ -184,7 +184,16 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         tagList(
           uiOutput(ns("polygon_label_field_ui")),
           textInput(ns("polygon_pdata_col"), "pData column name", value = "polygon_region"),
-          selectInput(ns("polygon_overlap_rule"), "If multiple polygons hit one pixel", choices = c("First match" = "first", "All matches (semicolon-separated)" = "all"), selected = "first"),
+          selectInput(
+            ns("polygon_overlap_rule"),
+            "If multiple polygons hit one pixel",
+            choices = c(
+              "Smallest polygon (recommended)" = "smallest",
+              "First match" = "first",
+              "All matches (semicolon-separated)" = "all"
+            ),
+            selected = "smallest"
+          ),
           if (!is.null(input$nucleus_polygon_file) && nzchar(input$nucleus_polygon_file$name)) {
             tags$small("Nucleus GeoJSON detected: mapping will also write nucleus/cytoplasm companion columns.")
           } else {
@@ -450,6 +459,20 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
     observeEvent(msi_data(), {
       obj <- try(msi_data(), silent = TRUE)
       if (inherits(obj, "try-error") || is.null(obj)) return()
+      cd <- try(as.data.frame(Cardinal::coord(obj)), silent = TRUE)
+      if (!inherits(cd, "try-error") && is.data.frame(cd) && all(c("x", "y") %in% names(cd)) && nrow(cd) > 0L) {
+        x_src <- suppressWarnings(as.numeric(cd$x))
+        y_src <- suppressWarnings(as.numeric(cd$y))
+        x_rng <- range(x_src[is.finite(x_src)], na.rm = TRUE)
+        y_rng <- range(y_src[is.finite(y_src)], na.rm = TRUE)
+        ny <- as.integer(round(diff(y_rng) + 1L))
+        if (all(is.finite(c(x_rng, y_rng))) && is.finite(ny) && ny > 0L) {
+          message(sprintf(
+            "[Histology MSI] coord x=%s..%s y=%s..%s; display maps source y=%s to row %d and source y=%s to row 1.",
+            x_rng[1], x_rng[2], y_rng[1], y_rng[2], y_rng[1], ny, y_rng[2]
+          ))
+        }
+      }
       rebuild_mz_ion_cache(obj)
       refresh_mz_ion_inputs(obj)
     }, ignoreInit = FALSE)
@@ -649,11 +672,100 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       out
     })
 
+    coerce_line_annotations_to_polygons <- function(poly, context = "polygon file") {
+      if (is.null(poly) || nrow(poly) == 0L) return(poly)
+      gtypes <- as.character(sf::st_geometry_type(poly, by_geometry = TRUE))
+      if (any(gtypes %in% c("POLYGON", "MULTIPOLYGON"))) return(poly)
+      if (!any(gtypes %in% c("LINESTRING", "MULTILINESTRING"))) return(poly)
+
+      line_ring_close_tolerance <- function(xy) {
+        if (nrow(xy) < 2L) return(NA_real_)
+        steps <- sqrt(rowSums((xy[-1L, , drop = FALSE] - xy[-nrow(xy), , drop = FALSE])^2))
+        steps <- steps[is.finite(steps) & steps > 0]
+        local_tol <- if (length(steps) == 0L) 5 else {
+          max(5, 5 * as.numeric(stats::quantile(steps, 0.95, names = FALSE)))
+        }
+
+        # Dense exported contours can have endpoints farther apart than their
+        # local point spacing while still leaving only a small global gap.
+        x_span <- diff(range(xy[, 1], na.rm = TRUE))
+        y_span <- diff(range(xy[, 2], na.rm = TRUE))
+        bbox_diag <- sqrt(x_span^2 + y_span^2)
+        path_length <- sum(steps, na.rm = TRUE)
+        global_tol <- min(0.075 * bbox_diag, 0.025 * path_length)
+        if (!is.finite(global_tol) || global_tol <= 0) global_tol <- 0
+
+        max(local_tol, global_tol)
+      }
+
+      close_ring <- function(xy) {
+        xy <- as.matrix(xy[, 1:2, drop = FALSE])
+        xy <- xy[is.finite(xy[, 1]) & is.finite(xy[, 2]), , drop = FALSE]
+        if (nrow(xy) < 3L) return(NULL)
+        dup <- c(FALSE, xy[-1L, 1] == xy[-nrow(xy), 1] & xy[-1L, 2] == xy[-nrow(xy), 2])
+        xy <- xy[!dup, , drop = FALSE]
+        if (nrow(xy) < 3L) return(NULL)
+        endpoint_gap <- sqrt(sum((xy[1L, ] - xy[nrow(xy), ])^2))
+        if (!is.finite(endpoint_gap) || endpoint_gap > line_ring_close_tolerance(xy)) return(NULL)
+        if (!identical(as.numeric(xy[1L, ]), as.numeric(xy[nrow(xy), ]))) {
+          xy <- rbind(xy, xy[1L, , drop = FALSE])
+        }
+        if (nrow(xy) < 4L) return(NULL)
+        xy
+      }
+
+      line_to_polygon <- function(g) {
+        gt <- as.character(sf::st_geometry_type(g))
+        coords <- sf::st_coordinates(g)
+        if (identical(gt, "LINESTRING")) {
+          ring <- close_ring(coords[, c("X", "Y"), drop = FALSE])
+          if (is.null(ring)) return(NULL)
+          return(sf::st_polygon(list(ring)))
+        }
+        if (identical(gt, "MULTILINESTRING")) {
+          split_col <- if ("L1" %in% colnames(coords)) "L1" else colnames(coords)[ncol(coords)]
+          rings <- lapply(split(coords[, c("X", "Y"), drop = FALSE], coords[, split_col]), close_ring)
+          rings <- rings[!vapply(rings, is.null, logical(1))]
+          if (length(rings) == 0L) return(NULL)
+          return(sf::st_multipolygon(lapply(rings, function(ring) list(ring))))
+        }
+        NULL
+      }
+
+      geom <- sf::st_geometry(poly)
+      converted <- vector("list", length(geom))
+      for (i in seq_along(geom)) {
+        gt <- as.character(sf::st_geometry_type(geom[[i]]))
+        if (gt %in% c("LINESTRING", "MULTILINESTRING")) {
+          converted[[i]] <- tryCatch(line_to_polygon(geom[[i]]), error = function(e) NULL)
+        }
+      }
+      keep <- !vapply(converted, is.null, logical(1))
+      if (!any(keep)) return(poly)
+      skipped <- sum(gtypes %in% c("LINESTRING", "MULTILINESTRING")) - sum(keep)
+      open_keep <- gtypes %in% c("LINESTRING", "MULTILINESTRING") & !keep
+
+      out <- poly[keep, , drop = FALSE]
+      out <- sf::st_set_geometry(out, sf::st_sfc(converted[keep], crs = sf::st_crs(poly)))
+      if (any(open_keep)) {
+        attr(out, "open_line_annotations") <- poly[open_keep, , drop = FALSE]
+      }
+      attr(out, "source_reference_bbox") <- sf::st_bbox(poly)
+      message(sprintf(
+        "[Histology] Converted %d line annotation geometry/geometries to polygon rings from %s%s.",
+        sum(keep),
+        context,
+        if (skipped > 0L) sprintf("; skipped %d open line annotation(s)", skipped) else ""
+      ))
+      out
+    }
+
     polygon_data <- reactive({
       req(input$polygon_file)
       validate(need(requireNamespace("sf", quietly = TRUE), "Package 'sf' is required for polygon mapping."))
       poly <- try(sf::st_read(input$polygon_file$datapath, quiet = TRUE), silent = TRUE)
       validate(need(!inherits(poly, "try-error"), "Could not read polygon file. Please provide a valid GeoJSON."))
+      poly <- coerce_line_annotations_to_polygons(poly, context = input$polygon_file$name)
       poly
     })
 
@@ -662,6 +774,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       validate(need(requireNamespace("sf", quietly = TRUE), "Package 'sf' is required for polygon mapping."))
       poly <- try(sf::st_read(input$nucleus_polygon_file$datapath, quiet = TRUE), silent = TRUE)
       validate(need(!inherits(poly, "try-error"), "Could not read nucleus polygon file. Please provide a valid GeoJSON."))
+      poly <- coerce_line_annotations_to_polygons(poly, context = input$nucleus_polygon_file$name)
       poly
     })
 
@@ -3700,7 +3813,9 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         return(list(
           layer = "polygon",
           polygons = poly_t$display,
+          lines = poly_t$lines_display,
           polygons_source = poly_t$source,
+          lines_source = poly_t$lines_source,
           alpha_used = NA_real_,
           axis_mode = poly_t$axis_mode,
           polygon_source_dim = {
@@ -3732,7 +3847,9 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           layer = "combined",
           histology = hist_out,
           polygons = if (!is.null(poly_out)) poly_out$display else NULL,
+          lines = if (!is.null(poly_out)) poly_out$lines_display else NULL,
           polygons_source = if (!is.null(poly_out)) poly_out$source else NULL,
+          lines_source = if (!is.null(poly_out)) poly_out$lines_source else NULL,
           axis_mode = if (!is.null(poly_out)) poly_out$axis_mode else NA_character_,
           alpha_used = if (!is.null(hist_out)) hist_out$alpha_used else NA_real_
         ))
@@ -3832,6 +3949,27 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       )
     }
 
+    draw_display_raster <- function(rast, xleft, ytop, xright, ybottom, interpolate = FALSE) {
+      if (is.null(rast) || is.null(dim(rast)) || length(dim(rast)) < 2L) return(invisible(NULL))
+      yy <- suppressWarnings(as.numeric(c(ytop, ybottom)))
+      xx <- suppressWarnings(as.numeric(c(xleft, xright)))
+      if (!all(is.finite(c(xx, yy)))) return(invisible(NULL))
+
+      # Shiny can render plots through either ragg or base png. Those devices
+      # differ when rasterImage() is combined with a reversed y-axis, so draw
+      # rasters with explicit top/bottom bounds and a pre-flipped raster.
+      rast_draw <- rast[seq.int(nrow(rast), 1L), , drop = FALSE]
+      graphics::rasterImage(
+        rast_draw,
+        min(xx),
+        max(yy),
+        max(xx),
+        min(yy),
+        interpolate = interpolate
+      )
+      invisible(NULL)
+    }
+
     transform_polygons_for_current_registration <- function(poly_sf, tx, ty, axis_mode = NULL) {
       msi <- make_msi_raster()
       tr_spec <- registration_transform()
@@ -3859,8 +3997,30 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         downsample_factor = tr_spec$overlay_downsample_factor,
         coord_frame = registration_reference_coord_frame()
       )
+      open_lines <- attr(poly_sf, "open_line_annotations", exact = TRUE)
+      line_src <- transform_line_sf(
+        line_sf = open_lines,
+        nx = msi$nx,
+        ny = msi$ny,
+        scale_x = input$scale_x,
+        scale_y = input$scale_y,
+        translate_x = tx,
+        translate_y = ty,
+        rotate_deg = polygon_rotate,
+        flip_y = polygon_flip_y,
+        swap_xy = identical(axis_mode, "yx"),
+        scale_mode = input$overlay_scale_mode,
+        source_width = tr_spec$overlay_source_width,
+        source_height = tr_spec$overlay_source_height,
+        source_origin_x = tr_spec$overlay_source_origin_x,
+        source_origin_y = tr_spec$overlay_source_origin_y,
+        downsample_factor = tr_spec$overlay_downsample_factor,
+        coord_frame = registration_reference_coord_frame(),
+        reference_bbox = attr(poly_sf, "source_reference_bbox", exact = TRUE)
+      )
       poly_display <- source_sf_to_display_sf(poly_src, current_registration_view_coord_frame())
-      list(source = poly_src, display = poly_display, axis_mode = axis_mode)
+      line_display <- source_sf_to_display_sf(line_src, current_registration_view_coord_frame())
+      list(source = poly_src, display = poly_display, lines_source = line_src, lines_display = line_display, axis_mode = axis_mode)
     }
 
     decode_rgba_hex <- function(rgba_hex) {
@@ -4238,24 +4398,6 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       list(obj = obj, field = field, computed = TRUE)
     }
 
-    flip_values_vertically_to_match_display <- function(vals, msi_obj) {
-      vals <- as.vector(vals)
-      x_src <- suppressWarnings(as.integer(msi_obj$x_source))
-      y_src <- suppressWarnings(as.integer(msi_obj$y_source))
-      if (length(vals) != length(x_src) || length(vals) != length(y_src)) return(vals)
-      if (!all(is.finite(x_src)) || !all(is.finite(y_src))) return(vals)
-
-      ymin <- min(y_src, na.rm = TRUE)
-      ymax <- max(y_src, na.rm = TRUE)
-      key_now <- paste(x_src, y_src, sep = ":")
-      key_flip <- paste(x_src, ymax - y_src + ymin, sep = ":")
-      m <- match(key_flip, key_now)
-      ok <- is.finite(m) & m >= 1L & m <= length(vals)
-      out <- vals
-      out[ok] <- vals[m[ok]]
-      out
-    }
-
     normalize_crs <- function(crs_obj) {
       if (inherits(crs_obj, "try-error") || is.null(crs_obj)) return(NULL)
       if (inherits(crs_obj, "crs")) return(crs_obj)
@@ -4408,13 +4550,51 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       nzchar(s) & !non_cell
     }
 
+    drop_dominant_enclosing_polygons <- function(keep_mask, poly, poly_area,
+                                                 min_reference = 8L, median_multiplier = 12,
+                                                 q75_multiplier = 8, enclosed_fraction = 0.8) {
+      keep_mask <- rep_len(as.logical(keep_mask), length(poly_area))
+      keep_mask[is.na(keep_mask)] <- FALSE
+      area <- suppressWarnings(as.numeric(poly_area))
+      area[!is.finite(area) | area <= 0] <- NA_real_
+
+      ref_area <- area[keep_mask & is.finite(area)]
+      if (length(ref_area) < min_reference) return(keep_mask)
+
+      med <- stats::median(ref_area, na.rm = TRUE)
+      q75 <- stats::quantile(ref_area, 0.75, na.rm = TRUE, names = FALSE)
+      threshold <- max(med * median_multiplier, q75 * q75_multiplier, na.rm = TRUE)
+      if (!is.finite(threshold) || threshold <= 0) return(keep_mask)
+
+      candidate_idx <- which(keep_mask & is.finite(area) & area > threshold)
+      keep_idx <- which(keep_mask)
+      if (length(candidate_idx) == 0L || length(keep_idx) < 2L || is.null(poly)) return(keep_mask)
+
+      points <- try(suppressWarnings(sf::st_point_on_surface(poly[keep_idx, , drop = FALSE])), silent = TRUE)
+      enclosed <- try(sf::st_intersects(poly[candidate_idx, , drop = FALSE], points), silent = TRUE)
+      if (inherits(points, "try-error") || inherits(enclosed, "try-error")) return(keep_mask)
+
+      required <- max(3L, as.integer(ceiling(enclosed_fraction * (length(keep_idx) - 1L))))
+      enclosed_n <- vapply(enclosed, function(ix) {
+        as.integer(max(0L, length(unique(ix)) - 1L))
+      }, integer(1))
+      dominant <- candidate_idx[enclosed_n >= required]
+      remaining <- keep_mask & !(seq_along(keep_mask) %in% dominant)
+      if (length(dominant) == 0L || !any(remaining)) return(keep_mask)
+      keep_mask[dominant] <- FALSE
+      keep_mask
+    }
+
     is_cell_like_polygon_object <- function(poly) {
       n <- if (is.null(poly)) 0L else nrow(poly)
       if (n == 0L) return(logical(0))
       if (!"objectType" %in% colnames(poly)) return(rep(TRUE, n))
       object_type <- tolower(trimws(as.character(poly$objectType)))
       object_type[is.na(object_type)] <- ""
-      !object_type %in% c("annotation", "roi", "region")
+      # QuPath exports cell/region contours as "annotation", so label text is
+      # the safer cell-vs-background signal. Reserve objectType filtering for
+      # explicit ROI/region records.
+      !object_type %in% c("roi", "region")
     }
 
     match_nucleus_polygons_to_cells <- function(cell_poly_t, nucleus_poly_t, cell_keep = NULL) {
@@ -4509,7 +4689,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       poly <- poly_sf[keep, , drop = FALSE]
       validate(need(nrow(poly) > 0, "No polygon geometries found in input file."))
 
-      bb <- sf::st_bbox(poly)
+      bb <- attr(poly_sf, "source_reference_bbox", exact = TRUE)
+      if (is.null(bb) || !all(c("xmin", "ymin", "xmax", "ymax") %in% names(bb))) {
+        bb <- sf::st_bbox(poly)
+      }
       if (isTRUE(swap_xy)) {
         bb_xmin <- as.numeric(bb$ymin)
         bb_xmax <- as.numeric(bb$ymax)
@@ -4685,6 +4868,134 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       poly
     }
 
+    transform_line_sf <- function(line_sf, nx, ny, scale_x, scale_y, translate_x, translate_y, rotate_deg, flip_y = FALSE, swap_xy = FALSE, scale_mode = "absolute", source_width = NA_real_, source_height = NA_real_, source_origin_x = NA_real_, source_origin_y = NA_real_, downsample_factor = 1, coord_frame = NULL, reference_bbox = NULL) {
+      if (is.null(line_sf) || nrow(line_sf) == 0L) return(NULL)
+      geom_type <- as.character(sf::st_geometry_type(line_sf))
+      keep <- geom_type %in% c("LINESTRING", "MULTILINESTRING")
+      lines <- line_sf[keep, , drop = FALSE]
+      if (nrow(lines) == 0L) return(NULL)
+
+      bb <- reference_bbox
+      if (is.null(bb) || !all(c("xmin", "ymin", "xmax", "ymax") %in% names(bb))) {
+        bb <- sf::st_bbox(lines)
+      }
+      if (isTRUE(swap_xy)) {
+        bb_xmin <- as.numeric(bb$ymin)
+        bb_xmax <- as.numeric(bb$ymax)
+        bb_ymin <- as.numeric(bb$xmin)
+        bb_ymax <- as.numeric(bb$xmax)
+      } else {
+        bb_xmin <- as.numeric(bb$xmin)
+        bb_xmax <- as.numeric(bb$xmax)
+        bb_ymin <- as.numeric(bb$ymin)
+        bb_ymax <- as.numeric(bb$ymax)
+      }
+      bb_w <- as.numeric(bb_xmax - bb_xmin)
+      bb_h <- as.numeric(bb_ymax - bb_ymin)
+      if (!is.finite(bb_w) || !is.finite(bb_h) || bb_w <= 0 || bb_h <= 0) return(NULL)
+
+      has_source_dims <- is.finite(source_width) && is.finite(source_height) && source_width > 0 && source_height > 0
+      if (has_source_dims) {
+        if (isTRUE(swap_xy)) {
+          frame_w <- as.numeric(source_height)
+          frame_h <- as.numeric(source_width)
+        } else {
+          frame_w <- as.numeric(source_width)
+          frame_h <- as.numeric(source_height)
+        }
+      } else {
+        frame_w <- bb_w
+        frame_h <- bb_h
+      }
+      if (!is.finite(frame_w) || !is.finite(frame_h) || frame_w <= 0 || frame_h <= 0) return(NULL)
+      downsample_factor <- suppressWarnings(as.numeric(downsample_factor)[1])
+      if (!is.finite(downsample_factor) || downsample_factor <= 0) downsample_factor <- 1
+      frame_w_img <- frame_w / downsample_factor
+      frame_h_img <- frame_h / downsample_factor
+
+      mode <- tolower(trimws(as.character(scale_mode)[1]))
+      if (!mode %in% c("absolute", "fit")) mode <- "absolute"
+      if (identical(mode, "fit")) {
+        fit_scale <- min(nx / frame_w_img, ny / frame_h_img)
+        sx <- fit_scale * scale_x
+        sy <- fit_scale * scale_y
+      } else {
+        sx <- as.numeric(scale_x)
+        sy <- as.numeric(scale_y)
+      }
+      if (!is.finite(sx) || !is.finite(sy) || sx <= 0 || sy <= 0) return(NULL)
+
+      center_frame <- coord_frame
+      if (is.null(center_frame)) center_frame <- current_msi_coord_frame()
+      cx <- if (!is.null(center_frame)) ((center_frame$xmin + center_frame$xmax) / 2) + translate_x else (nx / 2) + translate_x
+      cy <- if (!is.null(center_frame)) ((center_frame$ymin + center_frame$ymax) / 2) + translate_y else (ny / 2) + translate_y
+      theta <- rotate_deg * pi / 180
+      ct <- cos(theta)
+      st <- sin(theta)
+
+      use_source_origin <- is.finite(source_origin_x) && is.finite(source_origin_y)
+      in_frame <- if (has_source_dims) {
+        bb_xmin >= -1 && bb_ymin >= -1 && bb_xmax <= (frame_w + 1) && bb_ymax <= (frame_h + 1)
+      } else {
+        FALSE
+      }
+      use_source_frame <- use_source_origin || (has_source_dims && in_frame)
+      geom_frame_w <- if (use_source_frame) frame_w_img else (bb_w / downsample_factor)
+      geom_frame_h <- if (use_source_frame) frame_h_img else (bb_h / downsample_factor)
+      w <- geom_frame_w * sx
+      h <- geom_frame_h * sy
+
+      rebuild_one <- function(one_row) {
+        cc <- sf::st_coordinates(one_row)
+        if (nrow(cc) == 0L) return(NULL)
+        x_src <- cc[, "X"]
+        y_src <- cc[, "Y"]
+        if (isTRUE(swap_xy)) {
+          tmp <- x_src
+          x_src <- y_src
+          y_src <- tmp
+        }
+        if (use_source_origin) {
+          x_base <- x_src - source_origin_x
+          y_base <- y_src - source_origin_y
+        } else if (has_source_dims && in_frame) {
+          x_base <- x_src
+          y_base <- y_src
+        } else {
+          x_base <- x_src - bb_xmin
+          y_base <- y_src - bb_ymin
+        }
+        x_frame <- x_base / downsample_factor
+        y_frame <- y_base / downsample_factor
+        x0 <- x_frame * sx
+        y0 <- if (isTRUE(flip_y)) (geom_frame_h - y_frame) * sy else y_frame * sy
+        xr <- x0 - w / 2
+        yr <- y0 - h / 2
+        x1 <- cx + (ct * xr - st * yr)
+        y1 <- cy + (st * xr + ct * yr)
+        cc_new <- cbind(x1, y1, cc[, setdiff(colnames(cc), c("X", "Y")), drop = FALSE])
+
+        if ("L1" %in% colnames(cc_new)) {
+          parts <- lapply(unique(cc_new[, "L1"]), function(l1) {
+            as.matrix(cc_new[cc_new[, "L1"] == l1, c("x1", "y1"), drop = FALSE])
+          })
+          parts <- parts[vapply(parts, nrow, integer(1)) >= 2L]
+          if (length(parts) == 0L) return(NULL)
+          if (length(parts) == 1L) sf::st_linestring(parts[[1]]) else sf::st_multilinestring(parts)
+        } else {
+          line <- as.matrix(cc_new[, c("x1", "y1"), drop = FALSE])
+          if (nrow(line) < 2L) return(NULL)
+          sf::st_linestring(line)
+        }
+      }
+
+      geoms <- lapply(seq_len(nrow(lines)), function(i) try(rebuild_one(lines[i, , drop = FALSE]), silent = TRUE))
+      good <- !vapply(geoms, function(g) is.null(g) || inherits(g, "try-error"), logical(1))
+      if (!any(good)) return(NULL)
+      lines <- lines[good, , drop = FALSE]
+      sf::st_set_geometry(lines, sf::st_sfc(geoms[good]))
+    }
+
     msi_signal_matrix <- function(msi_obj) {
       validate(need(!is.null(msi_obj$raster), "MSI raster is unavailable for optimization."))
       ny <- as.integer(msi_obj$ny)
@@ -4797,6 +5108,9 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         if (any(!object_keep, na.rm = TRUE)) keep_mask <- keep_mask & object_keep
       }
       if (any(huge) && any(keep_mask & !huge)) keep_mask <- keep_mask & !huge
+      if (identical(target_mode, "cells")) {
+        keep_mask <- drop_dominant_enclosing_polygons(keep_mask, poly_t, poly_area)
+      }
       if (!any(keep_mask)) keep_mask[] <- TRUE
 
       list(
@@ -6803,7 +7117,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       graphics::par(mar = c(0.5, 0.5, 2.2, 0.5))
       graphics::plot.new()
       graphics::plot.window(xlim = c(1, ncol(rast)), ylim = c(nrow(rast), 1), asp = 1, xaxs = "i", yaxs = "i")
-      graphics::rasterImage(rast, 1, 1, ncol(rast), nrow(rast), interpolate = FALSE)
+      draw_display_raster(rast, 1, 1, ncol(rast), nrow(rast), interpolate = FALSE)
       graphics::box(col = "grey70")
       graphics::title(main = main)
       if (!identical(info$type, "group_labels")) {
@@ -7174,7 +7488,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       graphics::par(mar = c(0.5, 0.5, 2.2, 0.5))
       graphics::plot.new()
       graphics::plot.window(xlim = c(1, ncol(sig)), ylim = c(nrow(sig), 1), asp = 1, xaxs = "i", yaxs = "i")
-      graphics::rasterImage(rast, 1, 1, ncol(sig), nrow(sig), interpolate = FALSE)
+      draw_display_raster(rast, 1, 1, ncol(sig), nrow(sig), interpolate = FALSE)
       graphics::box(col = "grey70")
       graphics::title(main = main)
     }
@@ -10512,7 +10826,6 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         obj <- msi_for_pdata()
         pd <- as.data.frame(Cardinal::pData(obj))
         validate(need(nrow(pd) == length(mapped_lab), "Length mismatch between pData and mapped clusters."))
-        mapped_lab <- flip_values_vertically_to_match_display(mapped_lab, msi)
         pd[[col_name]] <- factor(mapped_lab, levels = cluster_labels)
 
         Cardinal::pData(obj) <- build_position_pdata(obj, pd)
@@ -10577,7 +10890,9 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
       pts_df <- data.frame(
         x = msi$x_display,
-        y = msi$y_display,
+        # Overlay polygons use top-down display rows, while pData must be
+        # assigned to the corresponding unflipped MSI source rows.
+        y = msi$y_norm,
         idx = seq_along(msi$x_display)
       )
       poly_crs <- normalize_crs(try(sf::st_crs(poly_t), silent = TRUE))
@@ -10590,7 +10905,6 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
       outside_label <- "outside_polygon"
       poly_uid <- paste0("polygon_", sprintf("%05d", seq_len(nrow(poly_t))))
-      has_hit <- lengths(hit) > 0
       raw_labels <- as.character(poly_t$map_label)
       is_cell_poly <- is_cell_like_polygon_label(raw_labels)
       cell_object <- is_cell_like_polygon_object(poly_t)
@@ -10609,6 +10923,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       if (any(huge_poly) && any(is_cell_poly & usable_poly)) {
         is_cell_poly <- is_cell_poly & usable_poly
       }
+      is_cell_poly <- drop_dominant_enclosing_polygons(is_cell_poly, poly_t, poly_area)
       usable_cell_poly <- usable_poly & cell_object
       if (!any(is_cell_poly) && any(usable_cell_poly)) {
         is_cell_poly <- usable_cell_poly
@@ -10619,6 +10934,41 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         # Fallback: if heuristics remove everything, use all polygons.
         is_cell_poly <- rep(TRUE, length(raw_labels))
       }
+
+      # Pixel-center intersection can miss annotations smaller than one MSI
+      # pixel. Preserve each in-canvas cell annotation with one nearest pixel.
+      polygon_hit_n <- tabulate(as.integer(unlist(hit, use.names = FALSE)), nbins = nrow(poly_t))
+      rescue_idx <- which(is_cell_poly & polygon_hit_n == 0L)
+      if (length(rescue_idx) > 0L) {
+        rescue_pts <- try(suppressWarnings(sf::st_point_on_surface(poly_t[rescue_idx, , drop = FALSE])), silent = TRUE)
+        rescue_xy <- try(sf::st_coordinates(rescue_pts), silent = TRUE)
+        if (!inherits(rescue_pts, "try-error") && !inherits(rescue_xy, "try-error") &&
+            nrow(rescue_xy) >= length(rescue_idx)) {
+          x_unique <- sort(unique(as.numeric(pts_df$x)))
+          y_unique <- sort(unique(as.numeric(pts_df$y)))
+          x_step <- suppressWarnings(stats::median(diff(x_unique), na.rm = TRUE))
+          y_step <- suppressWarnings(stats::median(diff(y_unique), na.rm = TRUE))
+          if (!is.finite(x_step) || x_step <= 0) x_step <- 1
+          if (!is.finite(y_step) || y_step <= 0) y_step <- 1
+          in_canvas <- rescue_xy[, 1] >= (min(pts_df$x) - x_step / 2) &
+            rescue_xy[, 1] <= (max(pts_df$x) + x_step / 2) &
+            rescue_xy[, 2] >= (min(pts_df$y) - y_step / 2) &
+            rescue_xy[, 2] <= (max(pts_df$y) + y_step / 2)
+          if (any(in_canvas)) {
+            nearest <- try(sf::st_nearest_feature(rescue_pts[in_canvas, , drop = FALSE], pts_sf), silent = TRUE)
+            if (!inherits(nearest, "try-error")) {
+              rescue_use <- rescue_idx[in_canvas]
+              for (j in seq_along(nearest)) {
+                px <- as.integer(nearest[j])
+                if (is.finite(px) && px >= 1L && px <= length(hit)) {
+                  hit[[px]] <- unique(c(hit[[px]], rescue_use[j]))
+                }
+              }
+            }
+          }
+        }
+      }
+      has_hit <- lengths(hit) > 0
 
       map_polygon_values_from_hit <- function(value_vec_full, mask = rep(TRUE, length(value_vec_full)), outside = outside_label) {
         out <- rep(outside, nrow(pts_df))
@@ -10635,6 +10985,11 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           out[has_hit] <- vapply(hit[has_hit], function(ix) {
             ix_use <- ix[mask[ix]]
             if (length(ix_use) == 0L) return(outside)
+            if (identical(input$polygon_overlap_rule, "smallest") && length(ix_use) > 1L) {
+              hit_area <- poly_area[ix_use]
+              hit_area[!is.finite(hit_area) | hit_area <= 0] <- Inf
+              ix_use <- ix_use[which.min(hit_area)]
+            }
             as.character(value_vec_full[ix_use[1]])
           }, character(1))
         }
@@ -10691,6 +11046,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           if (!any(nucleus_keep)) nucleus_keep <- rep(TRUE, nrow(nucleus_t))
           nucleus_t <- nucleus_t[nucleus_keep, , drop = FALSE]
           nucleus_uid <- nucleus_uid[nucleus_keep]
+          nucleus_area <- nucleus_area[nucleus_keep]
 
           if (nrow(nucleus_t) > 0) {
             nucleus_parent_idx <- match_nucleus_polygons_to_cells(poly_t, nucleus_t, cell_keep = is_cell_poly)
@@ -10723,6 +11079,11 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
                 out[has_nucleus_hit] <- vapply(nucleus_hit[has_nucleus_hit], function(ix) {
                   ix_use <- ix[valid_nucleus[ix]]
                   if (length(ix_use) == 0L) return(outside)
+                  if (identical(input$polygon_overlap_rule, "smallest") && length(ix_use) > 1L) {
+                    hit_area <- nucleus_area[ix_use]
+                    hit_area[!is.finite(hit_area) | hit_area <= 0] <- Inf
+                    ix_use <- ix_use[which.min(hit_area)]
+                  }
                   as.character(value_vec_full[ix_use[1]])
                 }, character(1))
               }
@@ -10760,21 +11121,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       obj <- msi_for_pdata()
       pd <- as.data.frame(Cardinal::pData(obj))
       validate(need(nrow(pd) == length(mapped_lab), "Length mismatch between pData and polygon mapping."))
-      mapped_lab <- flip_values_vertically_to_match_display(mapped_lab, msi)
-      mapped_uid <- flip_values_vertically_to_match_display(mapped_uid, msi)
       hit_cell <- mapped_uid != outside_label
-      if (!is.null(mapped_lab_original) && length(mapped_lab_original) == length(mapped_lab)) {
-        mapped_lab_original <- flip_values_vertically_to_match_display(mapped_lab_original, msi)
-      }
-      if (!is.null(mapped_compartment_label) && length(mapped_compartment_label) == length(mapped_lab)) {
-        mapped_compartment_label <- flip_values_vertically_to_match_display(mapped_compartment_label, msi)
-      }
-      if (!is.null(mapped_compartment_class) && length(mapped_compartment_class) == length(mapped_lab)) {
-        mapped_compartment_class <- flip_values_vertically_to_match_display(mapped_compartment_class, msi)
-      }
-      if (!is.null(mapped_nucleus_uid) && length(mapped_nucleus_uid) == length(mapped_lab)) {
-        mapped_nucleus_uid <- flip_values_vertically_to_match_display(mapped_nucleus_uid, msi)
-      }
 
       pd[[col_name]] <- mapped_lab
       if (!is.null(mapped_lab_original) && length(mapped_lab_original) == nrow(pd) && !is.null(orig_col_name)) {
@@ -10896,7 +11243,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       graphics::par(mar = c(0.5, 0.5, 1.5, 0.5))
       graphics::plot.new()
       graphics::plot.window(xlim = c(1, msi$nx), ylim = c(msi$ny, 1), asp = 1, xaxs = "i", yaxs = "i")
-      graphics::rasterImage(msi$raster, 1, 1, msi$nx, msi$ny, interpolate = FALSE)
+      draw_display_raster(msi$raster, 1, 1, msi$nx, msi$ny, interpolate = FALSE)
 
       draw_polygons <- function(poly) {
         if (is.null(poly) || nrow(poly) == 0L) return(invisible(NULL))
@@ -10935,14 +11282,31 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         invisible(NULL)
       }
 
+      draw_lines <- function(lines) {
+        if (is.null(lines) || nrow(lines) == 0L) return(invisible(NULL))
+        base_poly_col <- safe_color(input$polygon_outline_color, "#73FFFF")
+        poly_lwd <- suppressWarnings(as.numeric(input$polygon_linewidth))
+        if (!is.finite(poly_lwd) || poly_lwd <= 0) poly_lwd <- 1
+        graphics::plot(
+          sf::st_geometry(lines),
+          add = TRUE,
+          col = base_poly_col,
+          lwd = poly_lwd,
+          axes = FALSE,
+          reset = FALSE
+        )
+        invisible(NULL)
+      }
+
       if (identical(ov$layer, "polygon")) {
         draw_polygons(ov$polygons)
+        draw_lines(ov$lines)
         graphics::title(main = sprintf("Polygon Overlay on MSI (%s)", msi_label))
       } else if (identical(ov$layer, "combined")) {
         if (!is.null(ov$histology)) {
           bbox_disp <- overlay_source_bbox_to_display(ov$histology)
           if (!is.null(bbox_disp)) {
-            graphics::rasterImage(
+            draw_display_raster(
               ov$histology$raster,
               bbox_disp[["xmin"]],
               bbox_disp[["ymin"]],
@@ -10953,11 +11317,12 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           }
         }
         draw_polygons(ov$polygons)
+        draw_lines(ov$lines)
         graphics::title(main = sprintf("Combined Histology + Polygon Overlay on MSI (%s)", msi_label))
       } else {
         bbox_disp <- overlay_source_bbox_to_display(ov)
         validate(need(!is.null(bbox_disp), "Overlay display bounds are unavailable."))
-        graphics::rasterImage(ov$raster, bbox_disp[["xmin"]], bbox_disp[["ymin"]], bbox_disp[["xmax"]], bbox_disp[["ymax"]], interpolate = TRUE)
+        draw_display_raster(ov$raster, bbox_disp[["xmin"]], bbox_disp[["ymin"]], bbox_disp[["xmax"]], bbox_disp[["ymax"]], interpolate = TRUE)
         if (identical(ov$layer, "cluster")) {
           graphics::title(main = sprintf("Cluster Overlay on MSI (%s)", msi_label))
         } else {
@@ -10998,6 +11363,12 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       ov_hist <- if (identical(ov$layer, "combined")) ov$histology else ov
       reg_tr <- registration_transform()
       poly_corr <- list(fx = 1, fy = 1, source = "disabled")
+      signal_row_mean <- function(row_i) {
+        sig <- msi$opt_signal
+        if (is.null(sig) || !is.matrix(sig) || nrow(sig) < row_i) return(NA_real_)
+        val <- suppressWarnings(mean(as.numeric(sig[row_i, ]), na.rm = TRUE))
+        if (is.finite(val)) round(val, 6) else NA_real_
+      }
 
       list(
         working_directory = setup_values()[["wd"]],
@@ -11006,6 +11377,16 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         slide_key = reg_tr$slide_key,
         overlay_source_frame_type = reg_tr$overlay_source_frame_type,
         msi_canvas = sprintf("%d x %d", msi$nx, msi$ny),
+        msi_display_y_convention = "source_y_max_top",
+        msi_source_x_range = paste(range(msi$x_source, na.rm = TRUE), collapse = " to "),
+        msi_source_y_range = paste(range(msi$y_source, na.rm = TRUE), collapse = " to "),
+        msi_y_display_mapping = sprintf(
+          "source y=%s is display row %s; source y=%s is display row %s",
+          min(msi$y_source, na.rm = TRUE),
+          max(msi$y_display[msi$y_source == min(msi$y_source, na.rm = TRUE)], na.rm = TRUE),
+          max(msi$y_source, na.rm = TRUE),
+          min(msi$y_display[msi$y_source == max(msi$y_source, na.rm = TRUE)], na.rm = TRUE)
+        ),
         msi_display_mode = msi$mode,
         msi_display_label = msi$display_label,
         mz_selected = if (is.finite(msi$mz_selected)) round(msi$mz_selected, 6) else NA_real_,
@@ -11015,6 +11396,18 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         alpha_used = if (is.finite(ov$alpha_used)) round(ov$alpha_used, 3) else NA_real_,
         alpha_histology = input$histology_alpha,
         alpha_cluster = input$cluster_alpha,
+        scale_x = input$scale_x,
+        scale_y = input$scale_y,
+        rotate_deg = input$rotate_deg,
+        translate_x = input$translate_x,
+        translate_y = input$translate_y,
+        flip_histology_y = isTRUE(input$flip_histology_y),
+        effective_overlay_rotate_deg = effective_overlay_rotate_deg(),
+        effective_polygon_rotate_deg = effective_polygon_rotate_deg(),
+        effective_overlay_flip_y = effective_overlay_flip_y(),
+        effective_polygon_flip_y = effective_polygon_flip_y(reg_tr),
+        msi_top_row_signal_mean = signal_row_mean(1L),
+        msi_bottom_row_signal_mean = signal_row_mean(as.integer(msi$ny)),
         overlay_scale_mode = input$overlay_scale_mode,
         histology_um_per_px = input$histology_um_per_px,
         msi_um_per_px = input$msi_um_per_px,
