@@ -9602,12 +9602,22 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       g2[idx, , drop = FALSE]
     }
 
-    get_histology_fit_peak_row <- function(g2) {
-      idx <- which.max(g2$score)
-      g2[idx, , drop = FALSE]
+    # Resolve the grid row for the candidate currently chosen in the
+    # "Histology-fit candidates (top 5)" dropdown. Defaults to the first
+    # (top-ranked, [selected]) candidate when no explicit choice is made.
+    get_histology_fit_choice_row <- function(g2) {
+      cand <- xh$histology_fit_candidates
+      if (is.null(cand) || nrow(cand) == 0L) return(NULL)
+      pick_rank <- suppressWarnings(as.integer(input$histology_fit_choice))
+      if (length(pick_rank) != 1L || !is.finite(pick_rank)) pick_rank <- cand$rank[1]
+      crow <- cand[cand$rank == pick_rank, , drop = FALSE]
+      if (nrow(crow) == 0L) crow <- cand[1, , drop = FALSE]
+      hit <- g2[g2$dX == crow$dX[1] & g2$dY == crow$dY[1], , drop = FALSE]
+      if (nrow(hit) > 0L) return(hit[1, , drop = FALSE])
+      NULL
     }
 
-    build_histology_fit_heatmap <- function(g2, best, peak = NULL, with_tooltip = FALSE, anchor_tx = NA_real_, anchor_ty = NA_real_) {
+    build_histology_fit_heatmap <- function(g2, best, with_tooltip = FALSE, anchor_tx = NA_real_, anchor_ty = NA_real_) {
       origin <- data.frame(dX = 0, dY = 0)
       rel <- get_histology_fit_intensity_relation()
       g_plot <- regularize_histology_fit_plot_grid(g2)
@@ -9638,7 +9648,6 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       p +
         ggplot2::geom_rect(color = NA) +
         ggplot2::geom_point(data = origin, ggplot2::aes(x = dX, y = dY), inherit.aes = FALSE, shape = 3, size = 3, stroke = 1.1, color = "deepskyblue3") +
-        if (!is.null(peak) && nrow(peak) > 0L) ggplot2::geom_point(data = peak, ggplot2::aes(x = dX, y = dY), inherit.aes = FALSE, shape = 1, size = 4.2, stroke = 1.1, color = "orange2") else NULL +
         ggplot2::geom_point(data = best, ggplot2::aes(x = dX, y = dY), inherit.aes = FALSE, shape = 4, size = 4, stroke = 1.2, color = "red") +
         ggplot2::coord_equal() +
         ggplot2::scale_fill_viridis_c(option = "magma", na.value = "grey85") +
@@ -9650,7 +9659,6 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
             histology_intensity_relation_label(rel),
             " | blue + = current position (dX=0,dY=0)",
             " | red X = selected fit",
-            " | orange circle = raw score peak",
             anchor_txt,
             filled_note
           ),
@@ -9668,15 +9676,11 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         g2 <- grid[is.finite(grid$score), , drop = FALSE]
         validate(need(nrow(g2) > 0, "No valid Histology Fit points to plot."))
         s <- xh$histology_fit_summary
-        best <- get_histology_fit_selected_row(g2, sm = s)
-        peak <- get_histology_fit_peak_row(g2)
-        if (nrow(best) > 0L && nrow(peak) > 0L && identical(best$dX[1], peak$dX[1]) && identical(best$dY[1], peak$dY[1])) {
-          peak <- NULL
-        }
+        best <- get_histology_fit_choice_row(g2)
+        if (is.null(best) || nrow(best) == 0L) best <- get_histology_fit_selected_row(g2, sm = s)
         p <- build_histology_fit_heatmap(
           g2,
           best,
-          peak = peak,
           with_tooltip = TRUE,
           anchor_tx = if (!is.null(s$start_translate_x)) as.numeric(s$start_translate_x) else NA_real_,
           anchor_ty = if (!is.null(s$start_translate_y)) as.numeric(s$start_translate_y) else NA_real_
@@ -9691,15 +9695,11 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         g2 <- grid[is.finite(grid$score), , drop = FALSE]
         validate(need(nrow(g2) > 0, "No valid Histology Fit points to plot."))
         s <- xh$histology_fit_summary
-        best <- get_histology_fit_selected_row(g2, sm = s)
-        peak <- get_histology_fit_peak_row(g2)
-        if (nrow(best) > 0L && nrow(peak) > 0L && identical(best$dX[1], peak$dX[1]) && identical(best$dY[1], peak$dY[1])) {
-          peak <- NULL
-        }
+        best <- get_histology_fit_choice_row(g2)
+        if (is.null(best) || nrow(best) == 0L) best <- get_histology_fit_selected_row(g2, sm = s)
         build_histology_fit_heatmap(
           g2,
           best,
-          peak = peak,
           with_tooltip = FALSE,
           anchor_tx = if (!is.null(s$start_translate_x)) as.numeric(s$start_translate_x) else NA_real_,
           anchor_ty = if (!is.null(s$start_translate_y)) as.numeric(s$start_translate_y) else NA_real_
@@ -9717,11 +9717,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       rel <- get_histology_fit_intensity_relation()
       origin <- data.frame(dX = 0, dY = 0)
         s <- xh$histology_fit_summary
-        best <- get_histology_fit_selected_row(g2, sm = s)
-        peak <- get_histology_fit_peak_row(g2)
-        if (nrow(best) > 0L && nrow(peak) > 0L && identical(best$dX[1], peak$dX[1]) && identical(best$dY[1], peak$dY[1])) {
-          peak <- NULL
-        }
+        best <- get_histology_fit_choice_row(g2)
+        if (is.null(best) || nrow(best) == 0L) best <- get_histology_fit_selected_row(g2, sm = s)
         anchor_txt <- if (!is.null(s$start_translate_x) && !is.null(s$start_translate_y) &&
           is.finite(s$start_translate_x) && is.finite(s$start_translate_y)) {
           sprintf(" | anchor tx=%.1f, ty=%.1f", as.numeric(s$start_translate_x), as.numeric(s$start_translate_y))
@@ -9731,7 +9728,6 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         ggplot2::ggplot(g_plot, ggplot2::aes(x = dX, y = dY, z = score)) +
           ggplot2::geom_contour(bins = 12, linewidth = 0.5) +
           ggplot2::geom_point(data = origin, ggplot2::aes(x = dX, y = dY), inherit.aes = FALSE, shape = 3, size = 3, stroke = 1.1, color = "deepskyblue3") +
-          if (!is.null(peak) && nrow(peak) > 0L) ggplot2::geom_point(data = peak, ggplot2::aes(x = dX, y = dY), inherit.aes = FALSE, shape = 1, size = 4.2, stroke = 1.1, color = "orange2") else NULL +
           ggplot2::geom_point(data = best, ggplot2::aes(x = dX, y = dY), inherit.aes = FALSE, shape = 4, size = 4, stroke = 1.2, color = "red") +
           ggplot2::coord_equal() +
           ggplot2::theme_minimal() +
@@ -9742,7 +9738,6 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
             histology_intensity_relation_label(rel),
             " | blue + = current position (dX=0,dY=0)",
             " | red X = selected fit",
-            " | orange circle = raw score peak",
             anchor_txt
           ),
             x = "dX",
