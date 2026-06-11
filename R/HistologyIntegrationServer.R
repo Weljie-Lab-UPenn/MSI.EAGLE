@@ -971,12 +971,12 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         cur_n_components <- suppressWarnings(as.integer(isolate(input$histology_fit_pca_n_components)))
         cur_n_features <- suppressWarnings(as.integer(isolate(input$histology_fit_pca_n_features)))
         if (length(cur_component) != 1L || !isTRUE(is.finite(cur_component)) || cur_component < 1L) cur_component <- 1L
-        if (length(cur_n_components) != 1L || !isTRUE(is.finite(cur_n_components)) || cur_n_components < 1L) cur_n_components <- 1L
-        if (length(cur_n_features) != 1L || !isTRUE(is.finite(cur_n_features)) || cur_n_features < 4L) cur_n_features <- 32L
+        if (length(cur_n_components) != 1L || !isTRUE(is.finite(cur_n_components)) || cur_n_components < 1L) cur_n_components <- 3L
+        if (length(cur_n_features) != 1L || !isTRUE(is.finite(cur_n_features)) || cur_n_features < 4L) cur_n_features <- 128L
         return(tagList(
           numericInput(ns("histology_fit_pca_component"), "PCA component", value = clamp(cur_component, 1L, 64L), min = 1, max = 64, step = 1),
           numericInput(ns("histology_fit_pca_n_components"), "PCs to combine", value = clamp(cur_n_components, 1L, 8L), min = 1, max = 8, step = 1),
-          numericInput(ns("histology_fit_pca_n_features"), "Informative ions for PCA", value = clamp(cur_n_features, 4L, 128L), min = 4, max = 128, step = 4),
+          numericInput(ns("histology_fit_pca_n_features"), "Informative ions for PCA", value = max(4L, cur_n_features), min = 4, max = NA, step = 4),
           tags$small("Build a self-contained MSI target from one or more low-order PCA components computed on a bounded set of informative ions.")
         ))
       }
@@ -5639,17 +5639,17 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       )
     }
 
-    histology_fit_signal_from_pca <- function(msi_obj, component = 1L, n_components = 1L, n_features = 32L) {
+    histology_fit_signal_from_pca <- function(msi_obj, component = 1L, n_components = 3L, n_features = 128L) {
       obj <- msi_for_pdata()
       component <- suppressWarnings(as.integer(component))
       n_components <- suppressWarnings(as.integer(n_components))
       n_features <- suppressWarnings(as.integer(n_features))
       if (length(component) != 1L || !isTRUE(is.finite(component)) || component < 1L) component <- 1L
-      if (length(n_components) != 1L || !isTRUE(is.finite(n_components)) || n_components < 1L) n_components <- 1L
-      if (length(n_features) != 1L || !isTRUE(is.finite(n_features)) || n_features < 4L) n_features <- 32L
+      if (length(n_components) != 1L || !isTRUE(is.finite(n_components)) || n_components < 1L) n_components <- 3L
+      if (length(n_features) != 1L || !isTRUE(is.finite(n_features)) || n_features < 4L) n_features <- 128L
       component <- as.integer(min(64L, max(1L, component)))
       n_components <- as.integer(min(8L, max(1L, n_components)))
-      n_features <- as.integer(min(128L, max(4L, n_features)))
+      n_features <- as.integer(max(4L, n_features))
 
       intensity_transform <- tolower(trimws(as.character(input$intensity_transform)[1]))
       if (!intensity_transform %in% c("none", "sqrt", "log1p", "asinh")) intensity_transform <- "none"
@@ -5928,8 +5928,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         n_comp <- suppressWarnings(as.integer(input$histology_fit_pca_n_components))
         n_features <- suppressWarnings(as.integer(input$histology_fit_pca_n_features))
         if (length(comp_id) != 1L || !isTRUE(is.finite(comp_id)) || comp_id < 1L) comp_id <- 1L
-        if (length(n_comp) != 1L || !isTRUE(is.finite(n_comp)) || n_comp < 1L) n_comp <- 1L
-        if (length(n_features) != 1L || !isTRUE(is.finite(n_features)) || n_features < 4L) n_features <- 32L
+        if (length(n_comp) != 1L || !isTRUE(is.finite(n_comp)) || n_comp < 1L) n_comp <- 3L
+        if (length(n_features) != 1L || !isTRUE(is.finite(n_features)) || n_features < 4L) n_features <- 128L
         out <- histology_fit_signal_from_pca(msi_obj = msi_obj, component = comp_id, n_components = n_comp, n_features = n_features)
         return(list(
           signal = out$signal,
@@ -12084,7 +12084,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
             }
             if ("histology_fit_pca_n_features" %in% names(kv) && !is.null(kv[["histology_fit_pca_n_features"]])) {
               v <- suppressWarnings(as.numeric(kv[["histology_fit_pca_n_features"]]))
-              if (is.finite(v)) updateNumericInput(session, "histology_fit_pca_n_features", value = clamp(v, 4, 128))
+              if (is.finite(v)) updateNumericInput(session, "histology_fit_pca_n_features", value = max(4, v))
             }
             if ("histology_fit_intensity_relation" %in% names(kv) && !is.null(kv[["histology_fit_intensity_relation"]])) {
               v <- tolower(trimws(as.character(kv[["histology_fit_intensity_relation"]])[1]))
@@ -12148,7 +12148,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         }
         if ("histology_fit_pca_n_features" %in% names(kv) && !is.null(kv[["histology_fit_pca_n_features"]])) {
           v <- suppressWarnings(as.numeric(kv[["histology_fit_pca_n_features"]]))
-          if (is.finite(v)) updateNumericInput(session, "histology_fit_pca_n_features", value = clamp(v, 4, 128))
+          if (is.finite(v)) updateNumericInput(session, "histology_fit_pca_n_features", value = max(4, v))
         }
       }, once = TRUE)
 
@@ -12452,8 +12452,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
             updateNumericInput(session, "histology_fit_step", value = 2)
             updateSelectInput(session, "histology_feature_mode", selected = "purple")
             updateNumericInput(session, "histology_fit_pca_component", value = 1)
-            updateNumericInput(session, "histology_fit_pca_n_components", value = 1)
-            updateNumericInput(session, "histology_fit_pca_n_features", value = 32)
+            updateNumericInput(session, "histology_fit_pca_n_components", value = 3)
+            updateNumericInput(session, "histology_fit_pca_n_features", value = 128)
             updateSelectInput(session, "histology_fit_signal_source", selected = "multi")
             updateNumericInput(session, "histology_fit_multi_n", value = 12)
             updateSelectInput(session, "histology_fit_intensity_relation", selected = "inverse")
