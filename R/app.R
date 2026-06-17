@@ -29,8 +29,9 @@
 # @importFrom DT dataTableOutput renderDataTable
 MSI.EAGLE <- function(...) {
   library(magrittr)
-  # Allow larger uploads (histology images / polygon files) than Shiny default 5 MB.
-  options(shiny.maxRequestSize = 500 * 1024^2)
+  # Remove the upload size limit (histology images / polygon files); Shiny
+  # defaults to 5 MB. Inf disables the cap entirely.
+  options(shiny.maxRequestSize = Inf)
   
   #check for directories and set to current wd if not set
   if(!exists("rawd")){
