@@ -422,7 +422,7 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
           
           checkboxInput(ns("superpose"), "Superpose images?", value=FALSE),
           selectInput(ns("display_mode"), "Ion math?", c("none", "RGB (2-3 ions)" = "rgb", "sum", "ratio", "subtract", "min", "max", "mean", "sd", "var", "multiply")),
-          numericInput(ns("plusminus_viz3"), "+/- m/z for visualization",0.05)
+          numericInput(ns("plusminus_viz3"), "+/- m/z for visualization",0.01)
           
         )
       }
