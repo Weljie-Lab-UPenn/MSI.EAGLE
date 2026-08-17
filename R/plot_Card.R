@@ -836,7 +836,7 @@ plot_card_server <- function(id, overview_peaks_sel, spatialOnly=FALSE, allInput
             if (length(target_ions) == 0 || any(!is.finite(target_ions))) return(NULL)
             idx_map <- vapply(target_ions, resolve_feature_index_exact, integer(1))
             if (any(!is.finite(idx_map)) || any(idx_map < 1)) return(NULL)
-            uniq_idx <- unique(idx_map)
+            uniq_idx <- sort(unique(idx_map))
             spec_obj <- try(Cardinal::spectra(overview_peaks_sel_masked[uniq_idx, ]), silent = TRUE)
             if (inherits(spec_obj, "try-error")) return(NULL)
             mat_all <- coerce_spectra_matrix(spec_obj, length(uniq_idx), n_pix_masked)
