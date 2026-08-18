@@ -675,8 +675,30 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
     coerce_line_annotations_to_polygons <- function(poly, context = "polygon file") {
       if (is.null(poly) || nrow(poly) == 0L) return(poly)
       gtypes <- as.character(sf::st_geometry_type(poly, by_geometry = TRUE))
-      if (any(gtypes %in% c("POLYGON", "MULTIPOLYGON"))) return(poly)
       if (!any(gtypes %in% c("LINESTRING", "MULTILINESTRING"))) return(poly)
+
+      classification_present <- rep(FALSE, nrow(poly))
+      if ("classification" %in% colnames(poly)) {
+        class_col <- poly[["classification"]]
+        classification_present <- vapply(seq_len(nrow(poly)), function(i) {
+          one <- if (is.data.frame(class_col)) class_col[i, , drop = FALSE] else class_col[[i]]
+          if (is.null(one) || length(one) == 0L) return(FALSE)
+          txt <- trimws(paste(as.character(unlist(one, use.names = FALSE)), collapse = ""))
+          !is.na(txt) && nzchar(txt) && !identical(tolower(txt), "null")
+        }, logical(1))
+      }
+      annotation_object <- rep(FALSE, nrow(poly))
+      if ("objectType" %in% colnames(poly)) {
+        object_type <- tolower(trimws(as.character(poly[["objectType"]])))
+        object_type[is.na(object_type)] <- ""
+        annotation_object <- identical(length(object_type), nrow(poly)) & object_type == "annotation"
+      }
+      # QuPath can serialize freehand classified region annotations as dense
+      # LINESTRINGs whose endpoints are visually close but not byte-identical.
+      # In a polygon-mapping upload these are intended ROIs, so close them even
+      # when the conservative geometric gap heuristic would reject them. Keep
+      # unclassified/true line objects under the original conservative rule.
+      force_close <- annotation_object & classification_present
 
       line_ring_close_tolerance <- function(xy) {
         if (nrow(xy) < 2L) return(NA_real_)
@@ -698,7 +720,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         max(local_tol, global_tol)
       }
 
-      close_ring <- function(xy) {
+      close_ring <- function(xy, force = FALSE) {
         xy <- as.matrix(xy[, 1:2, drop = FALSE])
         xy <- xy[is.finite(xy[, 1]) & is.finite(xy[, 2]), , drop = FALSE]
         if (nrow(xy) < 3L) return(NULL)
@@ -706,7 +728,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         xy <- xy[!dup, , drop = FALSE]
         if (nrow(xy) < 3L) return(NULL)
         endpoint_gap <- sqrt(sum((xy[1L, ] - xy[nrow(xy), ])^2))
-        if (!is.finite(endpoint_gap) || endpoint_gap > line_ring_close_tolerance(xy)) return(NULL)
+        if (!is.finite(endpoint_gap) || (!isTRUE(force) && endpoint_gap > line_ring_close_tolerance(xy))) return(NULL)
         if (!identical(as.numeric(xy[1L, ]), as.numeric(xy[nrow(xy), ]))) {
           xy <- rbind(xy, xy[1L, , drop = FALSE])
         }
@@ -714,17 +736,21 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         xy
       }
 
-      line_to_polygon <- function(g) {
+      line_to_polygon <- function(g, force = FALSE) {
         gt <- as.character(sf::st_geometry_type(g))
         coords <- sf::st_coordinates(g)
         if (identical(gt, "LINESTRING")) {
-          ring <- close_ring(coords[, c("X", "Y"), drop = FALSE])
+          ring <- close_ring(coords[, c("X", "Y"), drop = FALSE], force = force)
           if (is.null(ring)) return(NULL)
           return(sf::st_polygon(list(ring)))
         }
         if (identical(gt, "MULTILINESTRING")) {
           split_col <- if ("L1" %in% colnames(coords)) "L1" else colnames(coords)[ncol(coords)]
-          rings <- lapply(split(coords[, c("X", "Y"), drop = FALSE], coords[, split_col]), close_ring)
+          rings <- lapply(
+            split(coords[, c("X", "Y"), drop = FALSE], coords[, split_col]),
+            close_ring,
+            force = force
+          )
           rings <- rings[!vapply(rings, is.null, logical(1))]
           if (length(rings) == 0L) return(NULL)
           return(sf::st_multipolygon(lapply(rings, function(ring) list(ring))))
@@ -736,13 +762,16 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       converted <- vector("list", length(geom))
       for (i in seq_along(geom)) {
         gt <- as.character(sf::st_geometry_type(geom[[i]]))
-        if (gt %in% c("LINESTRING", "MULTILINESTRING")) {
-          converted[[i]] <- tryCatch(line_to_polygon(geom[[i]]), error = function(e) NULL)
+        if (gt %in% c("POLYGON", "MULTIPOLYGON")) {
+          converted[[i]] <- geom[[i]]
+        } else if (gt %in% c("LINESTRING", "MULTILINESTRING")) {
+          converted[[i]] <- tryCatch(line_to_polygon(geom[[i]], force = force_close[i]), error = function(e) NULL)
         }
       }
       keep <- !vapply(converted, is.null, logical(1))
       if (!any(keep)) return(poly)
-      skipped <- sum(gtypes %in% c("LINESTRING", "MULTILINESTRING")) - sum(keep)
+      converted_line_n <- sum(keep & gtypes %in% c("LINESTRING", "MULTILINESTRING"))
+      skipped <- sum(gtypes %in% c("LINESTRING", "MULTILINESTRING")) - converted_line_n
       open_keep <- gtypes %in% c("LINESTRING", "MULTILINESTRING") & !keep
 
       out <- poly[keep, , drop = FALSE]
@@ -752,9 +781,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
       attr(out, "source_reference_bbox") <- sf::st_bbox(poly)
       message(sprintf(
-        "[Histology] Converted %d line annotation geometry/geometries to polygon rings from %s%s.",
-        sum(keep),
+        "[Histology] Converted %d line annotation geometry/geometries to polygon rings from %s%s%s.",
+        converted_line_n,
         context,
+        if (any(force_close & keep)) sprintf("; force-closed %d classified QuPath ROI(s)", sum(force_close & keep)) else "",
         if (skipped > 0L) sprintf("; skipped %d open line annotation(s)", skipped) else ""
       ))
       out
@@ -10936,7 +10966,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
 
       # Pixel-center intersection can miss annotations smaller than one MSI
-      # pixel. Preserve each in-canvas cell annotation with one nearest pixel.
+      # pixel. Rescue each in-canvas annotation to a nearby pixel where it can
+      # survive the selected overlap rule. A plain nearest-pixel assignment can
+      # send several small ROIs to the same pixel and silently discard all but
+      # one during overlap resolution.
       polygon_hit_n <- tabulate(as.integer(unlist(hit, use.names = FALSE)), nbins = nrow(poly_t))
       rescue_idx <- which(is_cell_poly & polygon_hit_n == 0L)
       if (length(rescue_idx) > 0L) {
@@ -10955,15 +10988,36 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
             rescue_xy[, 2] >= (min(pts_df$y) - y_step / 2) &
             rescue_xy[, 2] <= (max(pts_df$y) + y_step / 2)
           if (any(in_canvas)) {
-            nearest <- try(sf::st_nearest_feature(rescue_pts[in_canvas, , drop = FALSE], pts_sf), silent = TRUE)
-            if (!inherits(nearest, "try-error")) {
-              rescue_use <- rescue_idx[in_canvas]
-              for (j in seq_along(nearest)) {
-                px <- as.integer(nearest[j])
-                if (is.finite(px) && px >= 1L && px <= length(hit)) {
-                  hit[[px]] <- unique(c(hit[[px]], rescue_use[j]))
-                }
+            rescue_use <- rescue_idx[in_canvas]
+            rescue_result <- try(
+              rescue_zero_hit_polygons(
+                hit = hit,
+                pixel_xy = as.matrix(pts_df[, c("x", "y"), drop = FALSE]),
+                polygon_xy = rescue_xy[in_canvas, 1:2, drop = FALSE],
+                polygon_index = rescue_use,
+                polygon_area = poly_area,
+                eligible_mask = is_cell_poly,
+                overlap_rule = input$polygon_overlap_rule,
+                max_shift_steps = 2
+              ),
+              silent = TRUE
+            )
+            if (!inherits(rescue_result, "try-error")) {
+              hit <- rescue_result$hit
+              rescue_assignments <- rescue_result$assignments
+              rescued_n <- if (is.null(rescue_assignments)) 0L else nrow(rescue_assignments)
+              preserved_n <- if (rescued_n > 0L && "survives_rule" %in% names(rescue_assignments)) {
+                sum(rescue_assignments$survives_rule, na.rm = TRUE)
+              } else {
+                0L
               }
+              message(sprintf(
+                "[Polygon Mapping] Rescued %d/%d zero-hit ROI(s); %d survive overlap rule '%s'.",
+                rescued_n,
+                length(rescue_use),
+                preserved_n,
+                as.character(input$polygon_overlap_rule)[1]
+              ))
             }
           }
         }
@@ -11002,6 +11056,29 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       mapped_uid <- map_polygon_values_from_hit(poly_uid, mask = is_cell_poly, outside = outside_label)
       hit_cell <- mapped_uid != outside_label
       hit_non_cell <- mapped_uid_all != outside_label & !hit_cell
+
+      mapped_uid_values <- unique(unlist(
+        strsplit(mapped_uid[hit_cell], ";", fixed = TRUE),
+        use.names = FALSE
+      ))
+      mapped_uid_values <- mapped_uid_values[!is.na(mapped_uid_values) & nzchar(trimws(mapped_uid_values))]
+      mapped_polygon_n <- tabulate(match(mapped_uid_values, poly_uid), nbins = length(poly_uid))
+      unmapped_cell_idx <- which(is_cell_poly & mapped_polygon_n == 0L)
+      if (length(unmapped_cell_idx) > 0L) {
+        message(sprintf(
+          "[Polygon Mapping] WARNING: %d eligible ROI(s) received no MSI pixel after overlap resolution: %s",
+          length(unmapped_cell_idx),
+          paste(poly_uid[unmapped_cell_idx], collapse = ", ")
+        ))
+        showNotification(
+          sprintf(
+            "%d eligible ROI(s) could not be represented at the MSI pixel resolution. See the R console for polygon IDs.",
+            length(unmapped_cell_idx)
+          ),
+          type = "warning",
+          duration = 10
+        )
+      }
 
       mapped_lab_original <- NULL
       orig_col_name <- NULL
