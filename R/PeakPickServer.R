@@ -697,6 +697,7 @@ PeakPickServer <- function(id, setup_values) {
                          return()
                        }
                        log_file_load("main dataset", input$peakPickfile, pick_path, overview_peaks)
+                       overview_peaks <- drop_duplicate_pixels(overview_peaks, context = "load processed file")
                        
                        # overview_peaks <- readImzML(input$peakPickfile)
                        # print(overview_peaks)
@@ -728,6 +729,7 @@ PeakPickServer <- function(id, setup_values) {
                          return()
                        }
                        log_file_load("legacy converted dataset", input$peakPickfile, pick_path, overview_peaks)
+                       overview_peaks <- drop_duplicate_pixels(overview_peaks, context = "load legacy .rds")
                        print(overview_peaks)
                        
                      } else if (input$peak_pick_status == "pp_no") {
@@ -1034,6 +1036,7 @@ PeakPickServer <- function(id, setup_values) {
         return()
       }
       log_file_load("file-to-add", input$peakAddfile, add_path, add_peaks)
+      add_peaks <- drop_duplicate_pixels(add_peaks, context = "load file-to-add")
       # add_peaks <- readImzML(input$peakAddfile)
       # print(add_peaks)
       # 
@@ -1131,6 +1134,7 @@ PeakPickServer <- function(id, setup_values) {
         return()
       }
       log_file_load("file-to-add same-peaklist", input$peakAddfile, add_path, add_peaks)
+      add_peaks <- drop_duplicate_pixels(add_peaks, context = "load file-to-add (same peaklist)")
       
       #browser()
       # add_peaks <- readImzML(input$peakAddfile)
