@@ -291,6 +291,35 @@ MaskedAnalysisServer <- function(id,  setup_values) {
         x4$seg_pdata <- NULL
         return()
       }
+
+      # Duplicate (run, x, y) rows break the pixel-count guard downstream:
+      # select_pix() extracts each raw pixel once, so px_expected overcounts.
+      tmpl_coord <- as.data.frame(Cardinal::coord(x4$seg_pdata))
+      dup_key <- do.call(paste, c(
+        list(as.character(Cardinal::run(x4$seg_pdata))),
+        tmpl_coord,
+        sep = "\r"
+      ))
+      dup_idx <- duplicated(dup_key)
+      if (any(dup_idx)) {
+        n_dup <- sum(dup_idx)
+        dup_coords <- unique(tmpl_coord[dup_idx, , drop = FALSE])
+        message(sprintf(
+          "[MaskedAnalysis] Coordinate template contains %d duplicate pixel(s); keeping first occurrence of each.",
+          n_dup
+        ))
+        message("[MaskedAnalysis] Duplicated coordinates:")
+        print(utils::head(dup_coords, 20))
+        showNotification(
+          sprintf(
+            "Coordinate template contained %d duplicate pixel(s); duplicates were dropped (first occurrence kept). See console for coordinates.",
+            n_dup
+          ),
+          type = "warning",
+          duration = 10
+        )
+        x4$seg_pdata <- x4$seg_pdata[!dup_idx, ]
+      }
       print(sprintf(
         "[MaskedAnalysis] Loaded coordinate template: pixels=%d runs=%d",
         nrow(x4$seg_pdata), length(unique(as.character(Cardinal::run(x4$seg_pdata))))

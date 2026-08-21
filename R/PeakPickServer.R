@@ -337,7 +337,42 @@ PeakPickServer <- function(id, setup_values) {
       ))
       combine_card(img_list)
     }
-    
+
+    #overlapping crops taken from the same run contribute the same pixel twice.
+    #duplicated run/x/y pixels break downstream phenotyping and stats, so keep
+    #only the first copy of each pixel after a pixel-wise combine.
+    drop_duplicate_pixels <- function(img, context = "combine") {
+      cd <- try(as.data.frame(coord(img)), silent = TRUE)
+      runs_px <- try(as.character(Cardinal::run(img)), silent = TRUE)
+      if (inherits(cd, "try-error") || inherits(runs_px, "try-error") ||
+          is.null(cd$x) || is.null(cd$y) || length(runs_px) != nrow(cd)) {
+        message(sprintf("[PeakPick] %s: could not check for duplicate pixels.", context))
+        return(img)
+      }
+      dup <- duplicated(paste(runs_px, cd$x, cd$y, sep = "::"))
+      if (!any(dup)) return(img)
+
+      out <- try(img[, !dup], silent = TRUE)
+      if (inherits(out, "try-error")) {
+        message(sprintf(
+          "[PeakPick] %s: found %d duplicate pixel(s) but could not remove them. Error: %s",
+          context, sum(dup), as.character(out)
+        ))
+        showNotification("Duplicate pixels were found but could not be removed. Check for overlapping crops.", type = "error", duration = 10)
+        return(img)
+      }
+      message(sprintf(
+        "[PeakPick] %s: dropped %d duplicate pixel(s) with repeated run/x/y coordinates.",
+        context, sum(dup)
+      ))
+      showNotification(
+        sprintf("Dropped %d duplicate pixel(s) shared by overlapping crops of the same run.", sum(dup)),
+        type = "warning",
+        duration = 10
+      )
+      out
+    }
+
     # any time the reactive changes, update the selectInput
     observeEvent(my_files(),
                  ignoreInit = T,
@@ -1134,6 +1169,8 @@ PeakPickServer <- function(id, setup_values) {
         message("PeakPick same-peaklist combine failure: ", as.character(dat))
         return()
       }
+
+      dat <- drop_duplicate_pixels(dat, context = "same-peaklist combine")
 
       x0$overview_peaks <- dat
       
