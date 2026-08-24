@@ -49,6 +49,149 @@ MaskedAnalysisServer <- function(id,  setup_values) {
       file.path(setup_values()[["wd"]], path)
     }
 
+    masked_analysis_coordinate_examples <- function(coords, indices, limit = 5L) {
+      if (length(indices) == 0L) return("none")
+      indices <- head(as.integer(indices), limit)
+      paste(
+        sprintf("(%s,%s)", coords$x[indices], coords$y[indices]),
+        collapse = ", "
+      )
+    }
+
+    masked_analysis_coordinate_map <- function(raw_coord, target_coord, run_label = NULL) {
+      prefix <- "[MaskedAnalysis]"
+      if (!is.null(run_label) && length(run_label) > 0L && !is.na(run_label[1])) {
+        prefix <- sprintf("%s run '%s'", prefix, as.character(run_label[1]))
+      }
+
+      raw_coord <- try(as.data.frame(raw_coord, stringsAsFactors = FALSE), silent = TRUE)
+      target_coord <- try(as.data.frame(target_coord, stringsAsFactors = FALSE), silent = TRUE)
+      if (inherits(raw_coord, "try-error") || inherits(target_coord, "try-error")) {
+        return(list(
+          ok = FALSE,
+          index = integer(0),
+          message = sprintf("%s could not convert coordinate tables to data frames.", prefix)
+        ))
+      }
+
+      required <- c("x", "y")
+      if (!all(required %in% names(raw_coord))) {
+        return(list(
+          ok = FALSE,
+          index = integer(0),
+          message = sprintf(
+            "%s raw data must contain x and y coordinates; found: %s.",
+            prefix,
+            paste(names(raw_coord), collapse = ", ")
+          )
+        ))
+      }
+      if (!all(required %in% names(target_coord))) {
+        return(list(
+          ok = FALSE,
+          index = integer(0),
+          message = sprintf(
+            "%s coordinate template must contain x and y coordinates; found: %s.",
+            prefix,
+            paste(names(target_coord), collapse = ", ")
+          )
+        ))
+      }
+
+      raw_xy <- raw_coord[, required, drop = FALSE]
+      target_xy <- target_coord[, required, drop = FALSE]
+      as_numeric_coordinate <- function(x) {
+        if (is.factor(x)) x <- as.character(x)
+        suppressWarnings(as.numeric(x))
+      }
+      raw_xy[] <- lapply(raw_xy, as_numeric_coordinate)
+      target_xy[] <- lapply(target_xy, as_numeric_coordinate)
+
+      bad_raw <- which(!is.finite(raw_xy$x) | !is.finite(raw_xy$y))
+      if (length(bad_raw) > 0L) {
+        return(list(
+          ok = FALSE,
+          index = integer(0),
+          message = sprintf(
+            "%s raw data contain %d missing or non-finite x/y coordinate row(s).",
+            prefix, length(bad_raw)
+          )
+        ))
+      }
+      bad_target <- which(!is.finite(target_xy$x) | !is.finite(target_xy$y))
+      if (length(bad_target) > 0L) {
+        return(list(
+          ok = FALSE,
+          index = integer(0),
+          message = sprintf(
+            "%s coordinate template contains %d missing or non-finite x/y coordinate row(s): %s.",
+            prefix,
+            length(bad_target),
+            masked_analysis_coordinate_examples(target_xy, bad_target)
+          )
+        ))
+      }
+
+      raw_key <- paste(raw_xy$x, raw_xy$y, sep = "\r")
+      target_key <- paste(target_xy$x, target_xy$y, sep = "\r")
+
+      raw_duplicates <- which(duplicated(raw_key))
+      if (length(raw_duplicates) > 0L) {
+        return(list(
+          ok = FALSE,
+          index = integer(0),
+          message = sprintf(
+            "%s raw data contain %d duplicate x/y coordinate row(s): %s.",
+            prefix,
+            length(raw_duplicates),
+            masked_analysis_coordinate_examples(raw_xy, raw_duplicates)
+          )
+        ))
+      }
+
+      target_duplicates <- which(duplicated(target_key))
+      if (length(target_duplicates) > 0L) {
+        return(list(
+          ok = FALSE,
+          index = integer(0),
+          message = sprintf(
+            "%s coordinate template contains %d duplicate x/y row(s): %s. Remove duplicate pixels before peak picking.",
+            prefix,
+            length(target_duplicates),
+            masked_analysis_coordinate_examples(target_xy, target_duplicates)
+          )
+        ))
+      }
+
+      index <- match(target_key, raw_key)
+      missing <- which(is.na(index))
+      if (length(missing) > 0L) {
+        return(list(
+          ok = FALSE,
+          index = as.integer(index),
+          missing = as.integer(missing),
+          message = sprintf(
+            "%s coordinate template contains %d x/y pixel(s) absent from raw data: %s.",
+            prefix,
+            length(missing),
+            masked_analysis_coordinate_examples(target_xy, missing)
+          )
+        ))
+      }
+
+      list(
+        ok = TRUE,
+        index = as.integer(index),
+        raw_n = nrow(raw_xy),
+        target_n = nrow(target_xy),
+        missing = integer(0),
+        message = sprintf(
+          "%s mapped %d target pixel(s) to raw data in target order.",
+          prefix, nrow(target_xy)
+        )
+      )
+    }
+
     extract_imzml_template_pdata <- function(seg_path) {
       parsed <- try(CardinalIO::parseImzML(seg_path), silent = TRUE)
       if (inherits(parsed, "try-error")) {
@@ -295,9 +438,16 @@ MaskedAnalysisServer <- function(id,  setup_values) {
       # Duplicate (run, x, y) rows break the pixel-count guard downstream:
       # select_pix() extracts each raw pixel once, so px_expected overcounts.
       tmpl_coord <- as.data.frame(Cardinal::coord(x4$seg_pdata))
+      if (!all(c("x", "y") %in% names(tmpl_coord))) {
+        showNotification("Coordinate template must contain x and y columns.", type = "error", duration = 8)
+        message("[MaskedAnalysis] Coordinate template is missing x or y columns.")
+        x4$seg_pdata <- NULL
+        return()
+      }
+      tmpl_xy <- tmpl_coord[, c("x", "y"), drop = FALSE]
       dup_key <- do.call(paste, c(
         list(as.character(Cardinal::run(x4$seg_pdata))),
-        tmpl_coord,
+        tmpl_xy,
         sep = "\r"
       ))
       dup_idx <- duplicated(dup_key)
@@ -533,10 +683,10 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                        lapply(1:length(coord_list_segmented), function(x)
                          coord_list_segmented[[x]][sample(
                            1:nrow(coord_list_segmented[[x]]),
-                           round(
-                             nrow(coord_list_segmented[[x]]) *select_ratio / 100
-                           )
-                         ),])
+                             round(
+                               nrow(coord_list_segmented[[x]]) *select_ratio / 100
+                             )
+                         ), , drop = FALSE])
                      
                      names(coord_list_reduced)<-names(coord_list_segmented)
                      
@@ -555,24 +705,21 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                          raw_img <- raw_list[[index]]
                          raw_coord <- as.data.frame(coord(raw_img))
                          target_coord <- as.data.frame(coord_set[[index]])
-
-                         if (nrow(raw_coord) == nrow(target_coord)) {
-                           same_xy <- suppressWarnings(
-                             all(raw_coord$x == target_coord$x & raw_coord$y == target_coord$y, na.rm = FALSE)
-                           )
-                           if (isTRUE(same_xy)) {
-                             return(raw_img)
-                           }
-                         }
-
-                         idx <- prodlim::row.match(raw_coord, target_coord)
-                         raw_img[!is.na(idx)]
+                         run_label <- if (length(names(raw_list)) >= index) names(raw_list)[index] else NULL
+                         mapping <- masked_analysis_coordinate_map(raw_coord, target_coord, run_label)
+                         if (!isTRUE(mapping$ok)) stop(mapping$message, call. = FALSE)
+                         raw_img[mapping$index]
                        }
                      
                      
                      #most likely point of failure here....
                      get_pixel_count <- function(obj) {
                        if (is.null(obj)) return(NA_integer_)
+
+                       c_try <- suppressWarnings(try(as.data.frame(coord(obj)), silent = TRUE))
+                       if (!inherits(c_try, "try-error")) {
+                         return(as.integer(nrow(c_try)))
+                       }
 
                        n_try <- suppressWarnings(try(as.integer(ncol(obj)), silent = TRUE))
                        if (!inherits(n_try, "try-error") && length(n_try) == 1 && is.finite(n_try)) {
@@ -582,11 +729,6 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                        n_try <- suppressWarnings(try(as.integer(length(obj)), silent = TRUE))
                        if (!inherits(n_try, "try-error") && length(n_try) == 1 && is.finite(n_try)) {
                          return(n_try)
-                       }
-
-                       c_try <- suppressWarnings(try(as.data.frame(coord(obj)), silent = TRUE))
-                       if (!inherits(c_try, "try-error")) {
-                         return(as.integer(nrow(c_try)))
                        }
 
                        NA_integer_
@@ -604,12 +746,43 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                        paste(coord_npix, collapse = ",")
                      ))
 
+                     if (length(raw_list_ord) != length(coord_list_reduced)) {
+                       message(sprintf(
+                         "[MaskedAnalysis] Cannot map coordinates: %d raw run(s) and %d coordinate run(s) remain.",
+                         length(raw_list_ord), length(coord_list_reduced)
+                       ))
+                       showNotification(
+                         "Cannot map coordinates because raw and template run counts differ.",
+                         type = "error", duration = 10
+                       )
+                       return()
+                     }
+
+                     coordinate_maps <- lapply(seq_along(raw_list_ord), function(index) {
+                       target_coord <- as.data.frame(coord_list_reduced[[index]])
+                       masked_analysis_coordinate_map(
+                         as.data.frame(coord(raw_list_ord[[index]])),
+                         target_coord,
+                         names(raw_list_ord)[index]
+                       )
+                     })
+                     invalid_maps <- which(!vapply(coordinate_maps, function(x) isTRUE(x$ok), logical(1)))
+                     if (length(invalid_maps) > 0L) {
+                       map_messages <- vapply(coordinate_maps[invalid_maps], function(x) x$message, character(1))
+                       message(paste(map_messages, collapse = "\n"))
+                       showNotification(
+                         paste(map_messages[1], "Peak picking stopped before intensity extraction."),
+                         type = "error", duration = 12
+                       )
+                       return()
+                     }
+
                      full_cover <- isTRUE(select_ratio >= 100) &&
                        length(raw_list_ord) == length(coord_list_reduced) &&
-                       length(raw_npix) > 0 &&
-                       all(is.finite(raw_npix)) &&
-                       all(is.finite(coord_npix)) &&
-                       all(raw_npix == coord_npix)
+                       length(coordinate_maps) > 0L &&
+                       all(vapply(coordinate_maps, function(x) {
+                         identical(x$index, seq_len(x$raw_n)) && x$target_n == x$raw_n
+                       }, logical(1)))
 
                      if (full_cover) {
                        message("[MaskedAnalysis] Coordinate template matches full raw pixel coverage; skipping row-match remap.")
@@ -672,8 +845,12 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                      #px_found<-unlist(lapply(1:length(runNames(test_raw_reduced)), function(x) dim(test_raw_reduced[,run(test_raw_reduced)%in%runNames(test_raw_reduced)[x]])[2]))
                      #raw_reduced<-combine(bplapply(1:length(raw_list), function(x) select_pix(x,raw_list, coord_list_reduced)))
                      #browser()
-                     if (length(test_raw_reduced) != px_expected) {
-                       print("reduced coordinate set does not match input coordinate set")
+                     mapped_npix <- get_pixel_count(test_raw_reduced)
+                     if (!is.finite(mapped_npix) || mapped_npix != px_expected) {
+                       print(sprintf(
+                         "[MaskedAnalysis] Mapped pixel count (%s) does not match template count (%s).",
+                         mapped_npix, px_expected
+                       ))
                        print("Run names from reduced coordinate set:")
                        print(runNames(test_raw_reduced))
                        print("")
