@@ -20,12 +20,9 @@ StatsPrepServer <- function(id,  setup_values) {
       list.files(setup_values()[["wd"]], recursive = T)
     }
     
-    is_intel_mac <- identical(Sys.info()[["sysname"]], "Darwin") &&
-      grepl("x86_64|i386", R.version$arch, ignore.case = TRUE)
-    file_poll_ms <- if (is_intel_mac) 10000 else 10
+    file_poll_ms <- 10000
 
-    # Slow down recursive directory polling only on Intel Macs, where
-    # cloud-synced working directories can cause noticeable UI lag.
+    # Recursive file discovery does not need sub-second polling.
     my_files <-
       reactivePoll(file_poll_ms, session, checkFunc = has.new.files, valueFunc = get.files)
     

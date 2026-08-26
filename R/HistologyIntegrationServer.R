@@ -289,12 +289,38 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       )
 
       if (isTRUE(include_intensity)) {
-        xmat <- try(get_intensity_matrix_fast(msi_obj), silent = TRUE)
-        if (!inherits(xmat, "try-error") && !is.null(xmat) && nrow(xmat) >= max(keep_idx)) {
-          xmat <- xmat[keep_idx, , drop = FALSE]
-          tab$detect_fraction <- rowMeans(is.finite(xmat) & xmat > 0, na.rm = TRUE)
-          tab$mean_intensity <- rowMeans(xmat, na.rm = TRUE)
-          rm(xmat)
+        fd <- try(as.data.frame(Cardinal::fData(msi_obj)), silent = TRUE)
+        if (!inherits(fd, "try-error") && is.data.frame(fd) && nrow(fd) >= max(keep_idx)) {
+          if ("freq" %in% names(fd)) {
+            tab$detect_fraction <- suppressWarnings(as.numeric(fd$freq[keep_idx]))
+          } else if ("count" %in% names(fd) && ncol(msi_obj) > 0L) {
+            tab$detect_fraction <- suppressWarnings(as.numeric(fd$count[keep_idx])) / ncol(msi_obj)
+          }
+          if ("mean" %in% names(fd)) {
+            tab$mean_intensity <- suppressWarnings(as.numeric(fd$mean[keep_idx]))
+          }
+        }
+
+        needs_matrix <- !all(is.finite(tab$detect_fraction)) ||
+          !all(is.finite(tab$mean_intensity))
+        matrix_values <- as.numeric(nrow(msi_obj)) * as.numeric(ncol(msi_obj))
+        auto_matrix_allowed <- is.finite(matrix_values) && matrix_values <= 5e6
+        if (needs_matrix && auto_matrix_allowed) {
+          xmat <- try(get_intensity_matrix_fast(msi_obj), silent = TRUE)
+          if (!inherits(xmat, "try-error") && !is.null(xmat) && nrow(xmat) >= max(keep_idx)) {
+            xmat <- xmat[keep_idx, , drop = FALSE]
+            tab$detect_fraction <- rowMeans(is.finite(xmat) & xmat > 0, na.rm = TRUE)
+            tab$mean_intensity <- rowMeans(xmat, na.rm = TRUE)
+            rm(xmat)
+          }
+        } else if (needs_matrix && is.finite(matrix_values)) {
+          message(sprintf(
+            paste0(
+              "[Histology MSI] Skipped automatic intensity materialization for %.0f values; ",
+              "feature labels will use available fData summaries."
+            ),
+            matrix_values
+          ))
         }
       }
 
