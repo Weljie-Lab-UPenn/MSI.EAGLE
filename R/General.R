@@ -865,6 +865,15 @@ pixDatFill_manual<-function(datas, sample_list, variables) {
 }
 
 
+#combine a list of Cardinal objects (e.g. MSImagingArrays) into one object.
+#Cardinal::combine(list) only unpacks the list via a combine(list, missing)
+#method from EBImage; newer Cardinal (e.g. 3.14) no longer imports EBImage, so without it
+#combine(list) silently returns the list unchanged. Splat the list explicitly.
+combine_msi_list <- function(x) {
+  x <- Filter(Negate(is.null), x)
+  do.call(Cardinal::combine, unname(x))
+}
+
 #for Cardinal 3.6+ the combine function doesn't work the same way
 #in many case can use do.call(cbind) to combine from a list, but doesn't work with some datasets
 #this function is a workaround to combine datasets

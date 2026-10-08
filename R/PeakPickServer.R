@@ -323,7 +323,7 @@ PeakPickServer <- function(id, setup_values) {
     }
 
     combine_with_cardinal_fallback <- function(img_list, context = "combine") {
-      combined <- try(Cardinal::combine(img_list), silent = TRUE)
+      combined <- try(combine_msi_list(img_list), silent = TRUE)
       if (!inherits(combined, "try-error")) {
         message(sprintf("[PeakPick] %s: using Cardinal::combine", context))
         return(combined)
@@ -777,7 +777,7 @@ PeakPickServer <- function(id, setup_values) {
                        #use Cardinal 3.6 peak processing method
                        
                        fresh_mass_range <- resolve_mass_range(setup_values()[["mz_min"]], setup_values()[["mz_max"]], "Fresh peak picking")
-                       msa<-try(convertMSImagingArrays2Experiment(Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)),
+                       msa<-try(convertMSImagingArrays2Experiment(combine_msi_list(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)),
                                                                                               mass.range = fresh_mass_range, 
                                                                                               #x1$mass.range,
                                                                                               resolution = setup_values()[["res"]], 
@@ -887,7 +887,7 @@ PeakPickServer <- function(id, setup_values) {
                        configure_cardinal_parallel("Reference peak binning")
                        
                        
-                       a<-Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays))
+                       a<-combine_msi_list(lapply(x1$raw_list, convertMSImagingExperiment2Arrays))
                        
                        overview_peaks <- try(a %>% normalize() %>% peakProcess(
                                                          ref=mz(test_mz_reduced),
@@ -922,7 +922,7 @@ PeakPickServer <- function(id, setup_values) {
                        test_mz_mean <- try(
                          #for debugging
                          #Cardinal::combine(x1$raw_list[c(1:3,5:8)]) %>%
-                         Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)) %>%
+                         combine_msi_list(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)) %>%
                          
                            convertMSImagingArrays2Experiment(
                              mass.range=mean_mass_range) %>% 
@@ -943,7 +943,7 @@ PeakPickServer <- function(id, setup_values) {
                        }
                        
                        configure_cardinal_parallel("Mean-spectrum peak binning")
-                       test_mz_reduced<-try(Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)) %>% 
+                       test_mz_reduced<-try(combine_msi_list(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)) %>% 
                                               normalize() %>% 
                                               peakProcess(
                                                  ref=mz(test_mz_mean),

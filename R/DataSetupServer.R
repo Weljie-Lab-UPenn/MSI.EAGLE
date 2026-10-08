@@ -370,7 +370,7 @@ DataSetupServer <- function(id, rawd, wd) {
      
       
       withProgress(message = "Extracting sample for plotting", value = 1, {
-        tmp.img <- Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays))
+        tmp.img <- combine_msi_list(lapply(x1$raw_list, convertMSImagingExperiment2Arrays))
         tmp.img <- convertMSImagingArrays2Experiment(tmp.img, 
                                                      #mass.range = c(input$mass_range_min, input$mass_range_max), 
                                                      mass.range= x1$mass.range,

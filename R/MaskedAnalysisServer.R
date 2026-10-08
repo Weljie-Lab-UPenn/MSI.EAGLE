@@ -931,7 +931,7 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                          #   convertMSImagingArrays2Experiment(mass.range=c(setup_values()[["mz_max"]], setup_values()[["mz_min"]])) %>%
                          
                          
-                         Cardinal::combine(lapply(tmp_seg_coord_list, convertMSImagingExperiment2Arrays)) %>%
+                         combine_msi_list(lapply(tmp_seg_coord_list, convertMSImagingExperiment2Arrays)) %>%
                            convertMSImagingArrays2Experiment(mass.range=c(setup_values()[["mz_max"]], setup_values()[["mz_min"]])) %>%
                            estimateReferencePeaks( SNR=input$SNR2, 
                                                    method=input$pp_method2)
@@ -948,7 +948,7 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                        
                        
                        #test_mz_reduced2<-try(peakProcess(test_raw_reduced, 
-                       test_mz_reduced2<-try(peakProcess(Cardinal::combine(lapply(tmp_seg_coord_list, convertMSImagingExperiment2Arrays)), 
+                       test_mz_reduced2<-try(peakProcess(combine_msi_list(lapply(tmp_seg_coord_list, convertMSImagingExperiment2Arrays)), 
                                                         ref=mz(test_mz_mean),
                                                         SN=input$SNR2,
                                                         type="area",
