@@ -1180,3 +1180,236 @@ pixel_level_means_test <- function(data, test_var, grouping_var = NULL) {
   
   return(stats_df)
 }
+
+# --- Collapsible options panel -------------------------------------------------
+# Every analysis tab is a sidebarLayout: options on the left, results on the
+# right. msi_options_toggle() emits a small button that hides the options column
+# and lets the results column expand to the full window width; clicking again
+# restores it. The toggle is done entirely in the browser (no Shiny round trip,
+# no server code per tab), by finding the sidebarLayout row that follows the
+# button and swapping the Bootstrap column classes.
+msi_ui_assets <- function() {
+  shiny::tags$head(
+    shiny::tags$style(shiny::HTML("
+      .msie-toggle-bar { margin: 4px 0 6px 0; }
+      .msie-toggle-btn { font-size: 12px; }
+
+      /* Plot panels: one bordered card per plot, with a title bar, so the ion
+         image controls and the mass spectrum controls are visibly separate. */
+      .msie-panel {
+        border: 1px solid #dcd6cd;
+        border-radius: 4px;
+        background: #fff;
+        padding: 10px 12px 6px 12px;
+        margin: 0 0 14px 0;
+      }
+      .msie-panel-title {
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #8a7f72;
+        border-bottom: 1px solid #eee7dd;
+        padding-bottom: 6px;
+        margin-bottom: 10px;
+      }
+      .msie-subtitle {
+        font-size: 12px;
+        font-weight: 600;
+        color: #8a7f72;
+        margin: 4px 0 6px 0;
+      }
+      .msie-gate {
+        background: #f6f3ee;
+        border: 1px solid #e6e1da;
+        border-radius: 4px;
+        padding: 8px 8px 0 8px;
+        margin-bottom: 10px;
+      }
+      .msie-opts .form-group { margin-bottom: 8px; }
+      .msie-opts .control-label { font-size: 12px; margin-bottom: 2px; }
+      .msie-opts .checkbox { margin-top: 2px; margin-bottom: 2px; }
+      .msie-opts .nav-pills > li > a { padding: 4px 10px; font-size: 12px; }
+      .msie-opt-body {
+        padding-top: 10px;
+        max-height: 72vh;
+        overflow-y: auto;
+        overflow-x: hidden;
+      }
+      /* While the server is busy for more than half a second, dim the tab
+         content and stop it accepting clicks. Without this the browser happily
+         queues every click made during a long computation and replays them all
+         when R frees up. */
+      body.msie-busy .tab-content {
+        opacity: 0.40;
+        pointer-events: none;
+        transition: opacity 150ms ease;
+      }
+      body.msie-busy::after {
+        content: 'Working...';
+        position: fixed;
+        top: 6px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #3b3b3b;
+        color: #fff;
+        padding: 4px 14px;
+        border-radius: 12px;
+        font-size: 12px;
+        letter-spacing: 0.03em;
+        z-index: 10000;
+        pointer-events: none;
+      }
+
+      .msie-rule { margin: 10px 0; border-top: 1px solid #eee7dd; }
+      .msie-hint { color: #9a9a9a; display: block; margin-top: -4px; }
+
+      /* Reserve the image area so the m/z list does not jump up and down as
+         images appear and disappear. */
+      .msie-image-slot {
+        /* Starting reservation only -- the server sends the real height of the
+           image it is about to draw, so the slot matches the plot instead of
+           leaving a block of empty space. */
+        min-height: 240px;
+        /* Draw the image at exactly the requested size; if that is larger than
+           the window, scroll rather than shrink (shrinking only the width is
+           what distorted the aspect ratio). */
+        overflow: auto;
+        border: 1px dashed #e6e1da;
+        border-radius: 4px;
+        padding: 4px;
+        margin-bottom: 8px;
+        position: relative;
+      }
+      .msie-image-slot img { max-width: none; }
+      .msie-image-slot .msie-slot-hint {
+        position: absolute;
+        top: 50%;
+        left: 0;
+        right: 0;
+        transform: translateY(-50%);
+        text-align: center;
+        color: #b8b0a6;
+        font-size: 13px;
+        pointer-events: none;
+        z-index: 0;
+      }
+      .msie-image-slot .shiny-image-output { position: relative; z-index: 1; }
+    ")),
+    shiny::tags$script(shiny::HTML("
+      function msieToggleOptions(btn) {
+        var bar = btn.parentNode;
+        while (bar && !(bar.className && bar.className.indexOf('msie-toggle-bar') >= 0)) {
+          bar = bar.parentNode;
+        }
+        if (!bar) { return; }
+        var row = bar.nextElementSibling;
+        while (row && !(row.className && / row /.test(' ' + row.className + ' '))) {
+          row = row.nextElementSibling;
+        }
+        if (!row) { return; }
+        var cols = [];
+        for (var i = 0; i < row.children.length; i++) {
+          var c = row.children[i];
+          if (/\\bcol-(xs|sm|md|lg)-\\d+\\b/.test(c.className)) { cols.push(c); }
+        }
+        if (cols.length < 2) { return; }
+        var sb = cols[0], mn = cols[1];
+        if (sb.getAttribute('data-msie-hidden') === '1') {
+          sb.style.display = '';
+          sb.setAttribute('data-msie-hidden', '0');
+          var restore = mn.getAttribute('data-msie-cls');
+          if (restore) { mn.className = restore; }
+          btn.innerHTML = '&#9664; Hide options';
+        } else {
+          if (!mn.getAttribute('data-msie-cls')) {
+            mn.setAttribute('data-msie-cls', mn.className);
+          }
+          sb.style.display = 'none';
+          sb.setAttribute('data-msie-hidden', '1');
+          var keep = mn.className.split(/\\s+/).filter(function (c) {
+            return c && !/^col-(xs|sm|md|lg)-\\d+$/.test(c);
+          });
+          keep.push('col-sm-12');
+          mn.className = keep.join(' ');
+          btn.innerHTML = '&#9654; Show options';
+        }
+        if (window.jQuery) { jQuery(window).trigger('resize'); }
+        else { window.dispatchEvent(new Event('resize')); }
+      }
+
+      // Busy state. Shiny reports when the server is working; after a short
+      // grace period (so quick updates do not flicker) the tab content is dimmed
+      // and made non-interactive, which also discards clicks that would
+      // otherwise queue up and all fire at once when the computation ends.
+      document.addEventListener('DOMContentLoaded', function () {
+        if (!window.jQuery) { return; }
+        var busyTimer = null;
+        jQuery(document).on('shiny:busy', function () {
+          if (busyTimer !== null) { return; }
+          busyTimer = setTimeout(function () {
+            busyTimer = null;
+            document.body.classList.add('msie-busy');
+          }, 500);
+        });
+        jQuery(document).on('shiny:idle', function () {
+          if (busyTimer !== null) { clearTimeout(busyTimer); busyTimer = null; }
+          document.body.classList.remove('msie-busy');
+        });
+      });
+
+      // The plot card reports the height of the image it is about to draw, so
+      // the reserved slot matches the plot exactly.
+      if (window.Shiny && Shiny.addCustomMessageHandler) {
+        Shiny.addCustomMessageHandler('msieSlotHeight', function (msg) {
+          if (!msg || !msg.id) { return; }
+          var el = document.getElementById(msg.id);
+          if (el && msg.h) { el.style.minHeight = msg.h + 'px'; }
+        });
+      }
+
+      // Arrow-key navigation of the m/z list. Up/Down move the selection to the
+      // neighbouring ion; Shift+Up/Down extend the selection instead of
+      // replacing it. The handler finds the visible ion table and reports to
+      // that plot card's namespace, so it works on every tab that plots.
+      // Only after the user last clicked inside an ion table, so the arrow keys
+      // still scroll the page and work in other widgets otherwise.
+      document.addEventListener('mousedown', function (e) {
+        var t = e.target;
+        window.msieLastIonTable = (t && t.closest) ? t.closest('.msie-ion-table') : null;
+      }, true);
+      document.addEventListener('keydown', function (e) {
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') { return; }
+        if (e.metaKey || e.ctrlKey || e.altKey) { return; }
+        var t = e.target;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' ||
+                  t.tagName === 'SELECT' || t.isContentEditable)) { return; }
+        var slot = window.msieLastIonTable || null;
+        if (!slot || slot.offsetParent === null || !document.body.contains(slot)) { return; }
+        var nsPrefix = slot.getAttribute('data-ns') || '';
+        if (!window.Shiny || !Shiny.setInputValue) { return; }
+        e.preventDefault();
+        Shiny.setInputValue(nsPrefix + 'mz_key_nav', {
+          dir: (e.key === 'ArrowDown') ? 'down' : 'up',
+          add: e.shiftKey === true,
+          nonce: Date.now() + Math.random()
+        }, { priority: 'event' });
+      });
+    "))
+  )
+}
+
+msi_options_toggle <- function(label = "options") {
+  shiny::div(
+    class = "msie-toggle-bar",
+    shiny::tags$button(
+      type = "button",
+      class = "btn btn-default btn-sm msie-toggle-btn",
+      onclick = "msieToggleOptions(this)",
+      shiny::HTML(paste0("&#9664; Hide ", label))
+    )
+  )
+}
+
+# Physical RAM in MB, or NA when it can't be determined. Used to cap R's
+# vector-memory limit (see configure_cardinal_parallel) below physical RAM.

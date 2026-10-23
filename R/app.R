@@ -69,7 +69,8 @@ MSI.EAGLE <- function(...) {
   }
   
   ui <- navbarPage(p(strong("MSI EAGLE")),
-                   theme = shinythemes::shinytheme("sandstone"),                   
+                   theme = shinythemes::shinytheme("sandstone"),
+                   header = msi_ui_assets(),
                    DataSetupUI("tab1", ncores, nchunks, rawd, wd),
                    PeakPickUI("tab2"),
                    UMAPUI("tab3"),
