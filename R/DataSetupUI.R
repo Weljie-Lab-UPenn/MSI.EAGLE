@@ -55,6 +55,13 @@ DataSetupUI <- function(id, ncores, nchunks, rawd, wd) {
           selected = "qtof1"
         ),
         uiOutput(ns("pp_params_display")),
+        selectInput(
+          ns("spectrum_type"),
+          label = "Spectrum type",
+          choices = list("Auto (from imzML)" = "auto", "Centroided" = "centroid", "Profile" = "profile"),
+          selected = "auto"
+        ),
+        helpText("Centroided data (e.g. AFAMM-converted Waters files) are kept as centroids, not resampled to a profile grid or re-picked; profile data are peak picked as before."),
         actionButton(ns("action1"), label = "Import Data"),
         
         

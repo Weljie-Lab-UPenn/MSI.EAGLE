@@ -335,6 +335,14 @@ DataSetupServer <- function(id, rawd, wd) {
           file_path <- normalizePath(file.path(input$folder, x), winslash = "/", mustWork = FALSE)
           message(sprintf("[DataSetup] Reading imzML: '%s'", file_path))
           t0 <- proc.time()[["elapsed"]]
+          spec_type <- if (is.null(input$spectrum_type)) "auto" else input$spectrum_type
+          if (identical(spec_type, "auto")) spec_type <- imzml_spectrum_type(file_path)
+          if (identical(spec_type, "centroid")) {
+            # keep the centroids: readMSIData() would resample processed spectra onto a profile grid whenever
+            # mass.range or resolution is given; the mass range is applied to the aligned features instead
+            message("[DataSetup] Centroided spectra: reading without profile resampling")
+            y <- mark_centroided(Cardinal::readMSIData(file_path, as = "MSImagingArrays"))
+          } else {
           y <- Cardinal::readMSIData(
             file_path,
             #folder=input$folder,
@@ -342,8 +350,8 @@ DataSetupServer <- function(id, rawd, wd) {
             units = input$units,
             mass.range = mass.range
           )
+          }
           elapsed_s <- proc.time()[["elapsed"]] - t0
-          #Cardinal::centroided(y) <- TRUE
           coord(y)$z <- NULL
           log_msi_import_summary(y, file_name = x, file_path = file_path, elapsed_s = elapsed_s)
           return(y)
@@ -370,13 +378,12 @@ DataSetupServer <- function(id, rawd, wd) {
      
       
       withProgress(message = "Extracting sample for plotting", value = 1, {
-        tmp.img <- combine_msi_list(lapply(x1$raw_list, convertMSImagingExperiment2Arrays))
-        tmp.img <- convertMSImagingArrays2Experiment(tmp.img, 
-                                                     #mass.range = c(input$mass_range_min, input$mass_range_max), 
-                                                     mass.range= x1$mass.range,
-                                                     resolution = input$res, 
-                                                     units = input$units
-                                                     )
+        # centroided data stay centroids (no profile resampling); profile data are converted as before
+        tmp.img <- prepare_for_peaks(x1$raw_list,
+                                     #mass.range = c(input$mass_range_min, input$mass_range_max),
+                                     mass.range = x1$mass.range,
+                                     resolution = input$res,
+                                     units = input$units)
         #tmp.img <- Cardinal::combine(x1$raw_list[1:length(files())])
         tmp.img<- tmp.img %>% 
            peakProcess(SNR=20, 
@@ -384,7 +391,8 @@ DataSetupServer <- function(id, rawd, wd) {
                        units = input$units, 
                        method="diff",
                        mass.range = x1$mass.range, 
-                       sampleSize=input$pix_to_plot/100, filterFreq=0.2) %>% summarizeFeatures()
+                       sampleSize=input$pix_to_plot/100, filterFreq=0.2) %>%
+          restrict_mass_range(x1$mass.range) %>% summarizeFeatures()
       })
     })
     

@@ -4,6 +4,7 @@ PeakPickServer <- function(id, setup_values) {
   moduleServer(id, function(input, output, session) {
     #for dynamic UI
     ns = session$ns
+    spec_mode <- spectrum_mode_tracker(setup_values)   # "centroid" / "profile": sets the S/N box label and default
     
     output$variables <- renderPrint({
       setup_vals <- setup_values()
@@ -323,7 +324,7 @@ PeakPickServer <- function(id, setup_values) {
     }
 
     combine_with_cardinal_fallback <- function(img_list, context = "combine") {
-      combined <- try(combine_msi_list(img_list), silent = TRUE)
+      combined <- try(Cardinal::combine(img_list), silent = TRUE)
       if (!inherits(combined, "try-error")) {
         message(sprintf("[PeakPick] %s: using Cardinal::combine", context))
         return(combined)
@@ -548,8 +549,7 @@ PeakPickServer <- function(id, setup_values) {
           #   min = 1,
           #   max = 100
           # ),
-          numericInput(ns("SNR"), "S/N for overview peak picking", 20, min =
-                         0),
+          snr_input(ns("SNR"), spec_mode(), "S/N for overview peak picking", 20),
           numericInput(
             ns("freq_min"),
             "Minimum peak frequency (0-1)",
@@ -571,8 +571,7 @@ PeakPickServer <- function(id, setup_values) {
                         )),
         "pp_mean" = list(
           #uiOutput('pk_file'),
-          numericInput(ns("SNR"), "S/N for overview peak picking", 10, min =
-                         0),
+          snr_input(ns("SNR"), spec_mode(), "S/N for overview peak picking", 10),
           selectInput(
             ns("pp_method"),
             "Peak picking method",
@@ -777,16 +776,23 @@ PeakPickServer <- function(id, setup_values) {
                        #use Cardinal 3.6 peak processing method
                        
                        fresh_mass_range <- resolve_mass_range(setup_values()[["mz_min"]], setup_values()[["mz_max"]], "Fresh peak picking")
-                       msa<-try(convertMSImagingArrays2Experiment(combine_msi_list(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)),
-                                                                                              mass.range = fresh_mass_range, 
-                                                                                              #x1$mass.range,
-                                                                                              resolution = setup_values()[["res"]], 
-                                                                                              units = "ppm"), silent = TRUE)
+                       # centroided data stay centroids (no profile resampling, no re-picking); profile data as before
+                       msa<-try(prepare_for_peaks(x1$raw_list,
+                                                  mass.range = fresh_mass_range,
+                                                  #x1$mass.range,
+                                                  resolution = setup_values()[["res"]],
+                                                  units = "ppm"), silent = TRUE)
                        if (inherits(msa, "try-error")) {
                          notify_peak_processing_error(msa, "Fresh peak picking m/z conversion")
                          return()
                        }
                        
+                       if (is_centroided_msi(msa)) {
+                         # centroided: reference peaks from the pooled centroids, per-pixel extraction (see HTS_reproc)
+                         test_mz_reduced <- try(HTS_reproc(msa, SN = input$SNR, align_tol = setup_values()[["tol"]],
+                                                           freq.min = input$freq_min, method = input$pp_method,
+                                                           mzrange = fresh_mass_range, ref_SNR = input$SNR) %>% summarizeFeatures())
+                       } else {
                        mse_queue<- msa |>
                          normalize() |>
                          #smooth() |>
@@ -803,6 +809,7 @@ PeakPickServer <- function(id, setup_values) {
                           subsetFeatures( freq > input$freq_min)%>% 
                           summarizeFeatures()
                        )
+                       }
                           
 
                          # peakProcess(
@@ -887,7 +894,7 @@ PeakPickServer <- function(id, setup_values) {
                        configure_cardinal_parallel("Reference peak binning")
                        
                        
-                       a<-combine_msi_list(lapply(x1$raw_list, convertMSImagingExperiment2Arrays))
+                       a<-Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays))
                        
                        overview_peaks <- try(a %>% normalize() %>% peakProcess(
                                                          ref=mz(test_mz_reduced),
@@ -919,10 +926,16 @@ PeakPickServer <- function(id, setup_values) {
                        configure_cardinal_parallel("Mean-spectrum peak finding")
                        print("binning raw files from mean spectrum")
                        mean_mass_range <- resolve_mass_range(setup_values()[["mz_min"]], setup_values()[["mz_max"]], "Mean-spectrum peak finding")
+                       if (all_centroided(x1$raw_list)) {
+                         # centroided data have no profile mean spectrum: build the reference from the aligned centroids
+                         test_mz_mean <- try(HTS_reproc(prepare_for_peaks(x1$raw_list), SN = input$SNR,
+                                                        align_tol = setup_values()[["tol"]], freq.min = input$freq_min,
+                                                        mzrange = mean_mass_range, ref_SNR = input$SNR))
+                       } else {
                        test_mz_mean <- try(
                          #for debugging
                          #Cardinal::combine(x1$raw_list[c(1:3,5:8)]) %>%
-                         combine_msi_list(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)) %>%
+                         Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)) %>%
                          
                            convertMSImagingArrays2Experiment(
                              mass.range=mean_mass_range) %>% 
@@ -932,6 +945,7 @@ PeakPickServer <- function(id, setup_values) {
                          estimateReferencePeaks( SNR=input$SNR, 
                                                 method=input$pp_method)
                        )
+                       }
                        
                        print(test_mz_mean)
                        #add check to see if 0 peaks picked...
@@ -943,7 +957,7 @@ PeakPickServer <- function(id, setup_values) {
                        }
                        
                        configure_cardinal_parallel("Mean-spectrum peak binning")
-                       test_mz_reduced<-try(combine_msi_list(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)) %>% 
+                       test_mz_reduced<-try(Cardinal::combine(lapply(x1$raw_list, convertMSImagingExperiment2Arrays)) %>% 
                                               normalize() %>% 
                                               peakProcess(
                                                  ref=mz(test_mz_mean),

@@ -4,7 +4,8 @@ MaskedAnalysisServer <- function(id,  setup_values) {
     # output$table <- DT::renderDataTable(mtcars)
     
     ns = session$ns #for dyanamic variable namespace
-    
+    spec_mode <- spectrum_mode_tracker(setup_values)   # "centroid" / "profile": sets the S/N box label and default
+
     output$variables <- renderPrint({
       setup_vals <- setup_values()
       paste("working directory=", setup_vals$wd)
@@ -332,12 +333,8 @@ MaskedAnalysisServer <- function(id,  setup_values) {
             # ),
             list(
               fluidRow(
-                column(6, 
-                       numericInput(
-                         ns("SNR2"),
-                         "S/N for comprehensive peak picking",
-                         20
-                       )
+                column(6,
+                       snr_input(ns("SNR2"), spec_mode(), "S/N for comprehensive peak picking", 20)
                 ),
                 column(6, 
                        numericInput(
@@ -388,7 +385,7 @@ MaskedAnalysisServer <- function(id,  setup_values) {
             numericInput(ns("tol2"), "tolerance for peak binning (ppm)", 25)
           ),
         "mean" = list(
-          numericInput(ns("SNR2"), "S/N for comprehensive peak picking", 10),
+          snr_input(ns("SNR2"), spec_mode(), "S/N for comprehensive peak picking", 10),
           textInput(
             ns("pp_method2"),
             "Peak picking method (“diff”, “sd”, “mad”, “quantile”, “filter”, “cwt”)",
@@ -854,12 +851,17 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                        print("Run names from raw data list:")
                        print(names(x1$raw_list))
                        return()
+                     } else if (all_centroided(raw_list_ord)) {
+                       # centroided raw data: keep the centroids (no profile resampling, no re-picking; see HTS_reproc)
+                       message("[MaskedAnalysis] Centroided spectra: kept as centroids (no profile resampling, no re-picking)")
+                       test_raw_reduced <- mark_centroided(test_raw_reduced)
                      } else {
                        #browser()
                        test_raw_reduced<-convertMSImagingArrays2Experiment(test_raw_reduced)
                        #pData(test_raw_reduced)<-pData(seg_file_ord)
                        
                       }
+                     masked_mass_range <- c(setup_values()[["mz_min"]], setup_values()[["mz_max"]])
                      
                        
                        
@@ -885,7 +887,9 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                            res = input$res,
                            align_tol = input$tol2,
                            method = input$pp_method2,
-                           freq.min = input$freq_min2
+                           freq.min = input$freq_min2,
+                           mzrange = if (is_centroided_msi(test_raw_reduced)) masked_mass_range else NULL,
+                           ref_SNR = input$SNR2   # same S/N box: pooled-centroid S/N when the data are centroided
                          ))
                        
                        
@@ -924,6 +928,12 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                        
                        
                        
+                       if (is_centroided_msi(test_raw_reduced)) {
+                         # centroided data have no profile mean spectrum: build the reference from the aligned centroids
+                         test_mz_mean <- try(HTS_reproc(test_raw_reduced, SN = input$SNR2, align_tol = input$tol2,
+                                                        freq.min = input$freq_min2, mzrange = masked_mass_range,
+                                                        ref_SNR = input$SNR2))
+                       } else {
                        test_mz_mean <- try(
                          #for debugging
                          #Cardinal::combine(x1$raw_list[c(1:3,5:8)]) %>%
@@ -931,11 +941,12 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                          #   convertMSImagingArrays2Experiment(mass.range=c(setup_values()[["mz_max"]], setup_values()[["mz_min"]])) %>%
                          
                          
-                         combine_msi_list(lapply(tmp_seg_coord_list, convertMSImagingExperiment2Arrays)) %>%
+                         Cardinal::combine(lapply(tmp_seg_coord_list, convertMSImagingExperiment2Arrays)) %>%
                            convertMSImagingArrays2Experiment(mass.range=c(setup_values()[["mz_max"]], setup_values()[["mz_min"]])) %>%
                            estimateReferencePeaks( SNR=input$SNR2, 
                                                    method=input$pp_method2)
                        )
+                       }
                        
                        #check class of test_mz_mean
                        if(class(test_mz_mean) %in% "try-error") {
@@ -948,7 +959,8 @@ MaskedAnalysisServer <- function(id,  setup_values) {
                        
                        
                        #test_mz_reduced2<-try(peakProcess(test_raw_reduced, 
-                       test_mz_reduced2<-try(peakProcess(combine_msi_list(lapply(tmp_seg_coord_list, convertMSImagingExperiment2Arrays)), 
+                       test_mz_reduced2<-try(peakProcess(if (is_centroided_msi(test_raw_reduced)) test_raw_reduced else
+                                                           Cardinal::combine(lapply(tmp_seg_coord_list, convertMSImagingExperiment2Arrays)),
                                                         ref=mz(test_mz_mean),
                                                         SN=input$SNR2,
                                                         type="area",

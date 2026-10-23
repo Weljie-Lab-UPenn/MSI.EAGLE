@@ -1933,16 +1933,37 @@ StatsPrepServer <- function(id,  setup_values) {
       
       showNotification("Starting data export.")
       
-      numdat <- as.matrix(spectra(x5$data_file))
-      rownames(numdat) <- mz(x5$data_file)
+      # Group means are computed by streaming pixel chunks (sum / count per group)
+      # rather than densifying the full feature x pixel matrix, which does not fit
+      # in memory for large combined datasets (e.g. 2866 features x 4e6 pixels).
       pdat <- as.data.frame(pData(x5$data_file))
-      
-      dat <- cbind(pdat, t(numdat))
-      
-      dat_long_tech_avg <-
-        (dat) %>%  dplyr::group_by_at(c(input$grouping_variables_export)) %>%
+      grouped_pdat <- dplyr::group_by_at(pdat, c(input$grouping_variables_export))
+      gid <- dplyr::group_indices(grouped_pdat)
+
+      dat_long_tech_avg <- grouped_pdat %>%
         dplyr::summarize(across(where(is.numeric), mean), .groups = 'keep')
-      
+
+      n_groups <- nrow(dat_long_tech_avg)
+      n_pix <- length(gid)
+      spec <- spectra(x5$data_file)
+      sums <- matrix(0, nrow = n_groups, ncol = nrow(spec))
+      chunk_size <- 50000L
+      starts <- seq.int(1L, n_pix, by = chunk_size)
+      withProgress(message = "Exporting group means", value = 0, {
+        for (s in starts) {
+          idx <- s:min(s + chunk_size - 1L, n_pix)
+          chunk <- as.matrix(spec[, idx, drop = FALSE])
+          g <- gid[idx]
+          ug <- sort(unique(g))
+          sums[ug, ] <- sums[ug, ] + rowsum(t(chunk), g, reorder = TRUE)
+          incProgress(length(idx) / n_pix)
+        }
+      })
+      means <- sums / as.vector(tabulate(gid, nbins = n_groups))
+      colnames(means) <- as.character(mz(x5$data_file))
+
+      dat_long_tech_avg <- cbind(as.data.frame(dat_long_tech_avg), means)
+
       file_name=paste0("MSI.EAGLE_data_table_export_", Sys.Date(), ".tsv")
       
       print("Exporting datatable summarized by selected variables.")
@@ -1950,11 +1971,11 @@ StatsPrepServer <- function(id,  setup_values) {
       
       write.table(
         dat_long_tech_avg,
-        file = paste0("data_table_export_", Sys.Date(), ".txt"),
+        file = file_name,
         sep = "\t",
         row.names = F
       )
-      
+
     })
     
     

@@ -1,8 +1,151 @@
 #require(Cardinal)
 library(magrittr)
 
+#### Centroided spectra ####
+# Centroided data (e.g. Waters .raw centroided and lock-mass corrected with AFAMM) must be aligned directly. Cardinal
+# only flags a file as centroided when the imzML fileContent lists "centroid spectrum" (MS:1000127); AFAMM writes it
+# per spectrum instead, so the data load as unflagged. Unflagged processed data are resampled onto a profile m/z grid
+# (readImzML with mass.range/resolution, or convertMSImagingArrays2Experiment) and re-picked, which moves every peak
+# 1-2 grid steps (~20-38 ppm with the default ~17.5 ppm grid) below its true m/z.
+
+# spectrum type declared in an imzML file ("centroid", "profile" or NA), from the header and the first spectra
+imzml_spectrum_type <- function(path, n_bytes = 4e6) {
+  if (is.null(path) || !file.exists(path) || !grepl("\\.imzml$", path, ignore.case = TRUE)) return(NA_character_)
+  con <- file(path, "rb"); on.exit(close(con))
+  txt <- readChar(con, n_bytes, useBytes = TRUE)
+  centroid <- grepl("MS:1000127", txt, fixed = TRUE)
+  profile <- grepl("MS:1000128", txt, fixed = TRUE)
+  if (centroid && !profile) "centroid" else if (profile && !centroid) "profile" else NA_character_
+}
+
+is_centroided_msi <- function(x) isTRUE(tryCatch(Cardinal::isCentroided(x), error = function(e) FALSE))
+
+all_centroided <- function(lst) length(lst) > 0L && all(vapply(lst, is_centroided_msi, logical(1)))
+
+mark_centroided <- function(x) {
+  Cardinal::centroided(x) <- TRUE
+  x
+}
+
+# combine raw files for peak processing. Centroided: kept as centroids (MSImagingArrays, flag re-applied); profile:
+# converted to an MSImagingExperiment on a profile m/z grid, as before
+prepare_for_peaks <- function(raw_list, mass.range = NULL, resolution = NA, units = "ppm") {
+  arr <- Cardinal::combine(lapply(raw_list, convertMSImagingExperiment2Arrays))
+  if (all_centroided(raw_list)) {
+    message("[Peaks] centroided spectra: kept as centroids (no profile resampling, no re-picking)")
+    return(mark_centroided(arr))
+  }
+  convertMSImagingArrays2Experiment(arr, mass.range = mass.range, resolution = resolution, units = units)
+}
+
+# Reference peak list for centroided data. Aligning single-pixel centroids directly splits weak ions over several
+# low-frequency bins and has no noise filter, so instead: the centroids of (a sample of) all spectra are summed into a
+# fine log-spaced histogram (res_ppm), lightly smoothed, and peaks are picked on that pooled spectrum with the usual
+# SNR / noise method. Each peak's m/z is the intensity-weighted mean of the centroids within its bounds (at most
+# +/- tolerance/2), so no m/z is snapped to a coarse grid.
+# Pooling follows the Data Setup parallel settings: the backend from getCardinalBPPARAM() (Serial, Multicore, Snow or
+# Future) and the number of chunks from getCardinalNChunks(). Chunks run in waves of one chunk per worker (bplapply,
+# which every backend supports); each chunk's sums are added as soon as its wave returns, with a progress message.
+
+# one chunk of spectra -> non-empty log-spaced bins: index k, summed intensity s, summed intensity x m/z sm.
+# 'spec' is either a list(mz, intensity) holding just this chunk's spectra (in-memory data), or the full file-backed
+# matter lists plus the chunk's indices (only a reference is sent to the worker, which reads its own spectra)
+.pool_centroid_chunk <- function(spec, lo, step, nb) {
+  if (is.null(spec$idx)) { m <- unlist(spec$mz, use.names = FALSE); v <- unlist(spec$intensity, use.names = FALSE) }
+  else {
+    suppressPackageStartupMessages(requireNamespace("matter", quietly = TRUE))   # fresh Snow / Future workers
+    m <- unlist(as.list(spec$mz[spec$idx]), use.names = FALSE); v <- unlist(as.list(spec$intensity[spec$idx]), use.names = FALSE)
+  }
+  b <- floor(log(m / lo) / step) + 1L; ok <- b >= 1L & b <= nb & v > 0
+  if (!any(ok)) return(list(k = integer(0), s = numeric(0), sm = numeric(0)))
+  r <- rowsum(cbind(v[ok], v[ok] * m[ok]), b[ok])
+  list(k = as.integer(rownames(r)), s = r[, 1], sm = r[, 2])     # sparse: only non-empty bins go back to the main process
+}
+
+centroid_reference_peaks <- function(x, SNR = 20, method = "diff", tolerance = 30, res_ppm = 1, smooth_ppm = 3,
+                                     sampleSize = NA, mass.range = NULL, nchunks = NULL,
+                                     BPPARAM = Cardinal::getCardinalBPPARAM()) {
+  t0 <- proc.time()[["elapsed"]]
+  mzl <- Cardinal::mz(x); inl <- Cardinal::intensity(x); n <- length(mzl)
+  idx <- if (is.na(sampleSize)) seq_len(n) else
+    unique(round(seq(1, n, length.out = if (sampleSize < 1) max(1, ceiling(sampleSize * n)) else min(n, sampleSize))))
+  if (is.null(mass.range) || length(mass.range) < 2L || any(!is.finite(mass.range))) {
+    probe <- idx[unique(round(seq(1, length(idx), length.out = min(500L, length(idx)))))]
+    mass.range <- range(unlist(lapply(mzl[probe], range)))
+  }
+  lo <- min(mass.range); hi <- max(mass.range); step <- log1p(res_ppm * 1e-6)
+  nb <- ceiling(log(hi / lo) / step) + 1L
+  if (is.null(nchunks)) nchunks <- Cardinal::getCardinalNChunks()             # Data Setup "# of chunks"
+  nchunks <- max(1L, min(as.integer(nchunks), length(idx)))
+  blocks <- unname(split(idx, cut(seq_along(idx), nchunks, labels = FALSE)))
+  if (is.null(BPPARAM)) BPPARAM <- BiocParallel::SerialParam()                 # Data Setup "Parallelization mode"
+  nw <- max(1L, tryCatch(as.integer(BiocParallel::bpnworkers(BPPARAM)), error = function(e) 1L))
+  file_backed <- inherits(mzl, "matter") && inherits(inl, "matter")
+  message(sprintf("[Peaks] pooled centroid spectrum: %d spectra in %d chunks of ~%d (%s, %d worker%s), m/z %.1f-%.1f at %g ppm",
+                  length(idx), nchunks, ceiling(length(idx) / nchunks), class(BPPARAM)[1], nw, if (nw == 1L) "" else "s",
+                  lo, hi, res_ppm))
+  S <- numeric(nb); SM <- numeric(nb); done <- 0L               # summed intensity and intensity x m/z per bin
+  if (!BiocParallel::bpisup(BPPARAM)) {                         # start the workers once for all waves
+    BiocParallel::bpstart(BPPARAM); on.exit(BiocParallel::bpstop(BPPARAM), add = TRUE)
+  }
+  for (wave in split(seq_along(blocks), ceiling(seq_along(blocks) / nw))) {
+    spec <- lapply(blocks[wave], function(b) if (file_backed) list(mz = mzl, intensity = inl, idx = b)
+                                             else list(mz = mzl[b], intensity = inl[b]))
+    res <- BiocParallel::bplapply(spec, .pool_centroid_chunk, lo = lo, step = step, nb = nb, BPPARAM = BPPARAM)
+    for (r in res) {
+      S[r$k] <- S[r$k] + r$s; SM[r$k] <- SM[r$k] + r$sm; done <- done + 1L
+      el <- proc.time()[["elapsed"]] - t0
+      message(sprintf("[Peaks] pooled centroid spectrum: chunk %d/%d done (%.0f s elapsed, ~%.0f s left)",
+                      done, nchunks, el, el / done * (nchunks - done)))
+    }
+  }
+  sd_bins <- smooth_ppm / res_ppm; kern <- stats::dnorm(seq(-ceiling(3 * sd_bins), ceiling(3 * sd_bins)), sd = sd_bins)
+  Ss <- as.numeric(stats::filter(S, kern / sum(kern), sides = 2)); Ss[is.na(Ss)] <- 0
+  noise <- switch(method, quantile = "quant", cwt = , adaptive = "diff", method)
+  pk <- matter::findpeaks(Ss, snr = SNR, noise = noise, relheight = NULL)   # as Cardinal peakPick (no relative-height cut)
+  if (!length(pk)) return(numeric(0))
+  lb <- attr(pk, "left_bounds"); rb <- attr(pk, "right_bounds"); half <- ceiling(0.5 * tolerance / res_ppm)
+  ref <- vapply(seq_along(pk), function(j) {
+    a <- max(lb[j], pk[j] - half, 1L); z <- min(rb[j], pk[j] + half, nb); sum(SM[a:z]) / sum(S[a:z])
+  }, numeric(1))
+  ref <- sort(unique(ref[is.finite(ref)]))
+  message(sprintf("[Peaks] centroided spectra: %d reference peaks from the pooled centroid spectrum of %d spectra (SNR %s; %.0f s)",
+                  length(ref), length(idx), SNR, proc.time()[["elapsed"]] - t0))
+  ref
+}
+
+# Spectrum type of the loaded raw data ("centroid", "profile" or NA), for UI defaults. A reactiveVal only invalidates
+# when its value changes, so panels that use it re-render when newly imported data change type, not on every Data
+# Setup edit
+spectrum_mode_tracker <- function(setup_values) {
+  mode <- shiny::reactiveVal(NA_character_)
+  shiny::observe({
+    rl <- setup_values()[["x1"]]$raw_list
+    mode(if (is.null(rl) || !length(rl)) NA_character_ else if (all_centroided(rl)) "centroid" else "profile")
+  })
+  mode
+}
+
+# S/N box that switches with the spectrum type: for centroided data it sets the S/N on the pooled centroid spectrum
+# (ref_SNR, default 3); for profile data it is the per-spectrum peak-picking S/N with the tab's usual default
+snr_input <- function(id, mode, label, profile_default) {
+  cen <- identical(mode, "centroid")
+  shiny::numericInput(id, if (cen) paste(label, "- centroided data: S/N on the pooled centroid spectrum") else label,
+                      if (cen) 3 else profile_default, min = 0)
+}
+
+# keep features inside a mass range (applied after alignment for centroided data, which are not resampled)
+restrict_mass_range <- function(x, mass.range = NULL) {
+  if (is.null(mass.range) || length(mass.range) < 2L || any(!is.finite(mass.range))) return(x)
+  subsetFeatures(x, mz >= min(mass.range) & mz <= max(mass.range))
+}
+
 #function to process data
-HTS_reproc<-function(data1, SN, res=10, align_tol=15, pix_include=NULL,mzrange=NULL, freq.min=0.01, method="adaptive") {
+# ref_SNR: SNR for picking reference peaks on the pooled centroid spectrum (centroided data only; SN is the per-spectrum
+# SNR used for profile data; in the app both come from the same S/N box, which defaults to 3 for centroided data). On
+# the 2 x 2 um DESI test data, ref_SNR = 3 recovered 93 % of the features that the
+# profile route (SN = 20) found in >= 5 % of pixels.
+HTS_reproc<-function(data1, SN, res=10, align_tol=15, pix_include=NULL,mzrange=NULL, freq.min=0.01, method="adaptive", ref_SNR=3) {
   
   #remove z-axis as it messes with the segmentation algorithms
   coord(data1)$z<-NULL
@@ -16,6 +159,22 @@ HTS_reproc<-function(data1, SN, res=10, align_tol=15, pix_include=NULL,mzrange=N
   #setCardinalBPPARAM(MulticoreParam())
   
   
+  if (is_centroided_msi(data1)) {
+    # centroided input: no profile resampling and no re-picking. Peaks are picked once on the pooled centroid spectrum
+    # (ref_SNR applies there) and every pixel's centroid intensities are extracted at those reference m/z
+    message("[HTS_reproc] centroided spectra: reference peaks from the pooled centroids, then per-pixel extraction")
+    ref <- centroid_reference_peaks(data1, SNR = ref_SNR, method = method, tolerance = align_tol, mass.range = mzrange)
+    t_ex <- proc.time()[["elapsed"]]
+    message(sprintf("[HTS_reproc] extracting intensities at %d reference peaks from %d spectra (Cardinal chunks follow)",
+                    length(ref), length(data1)))
+    data3 <- data1 %>% normalize(method="tic") %>%
+      peakProcess(ref = ref, tolerance = align_tol, units = "ppm", verbose = TRUE) %>% process(verbose = TRUE)
+    message(sprintf("[HTS_reproc] extraction done (%.0f s)", proc.time()[["elapsed"]] - t_ex))
+    # peakProcess(ref = ...) does not count detections, so add the per-feature pixel frequency used by the filter below
+    nz <- Cardinal::summarizeFeatures(data3, stat = "nnzero")
+    fData(data3)$count <- fData(nz)[[grep("nnzero", names(fData(nz)))[1]]]
+    fData(data3)$freq <- fData(data3)$count / ncol(data3)
+  } else {
   data2 <- data1 %>% #reduceBaseline(method="median", blocks=100) %>%
     normalize(method="tic") %>% 
     peakPick(
@@ -26,6 +185,7 @@ HTS_reproc<-function(data1, SN, res=10, align_tol=15, pix_include=NULL,mzrange=N
   #peakAlign no longer available in Cardinal 3.6, but peakAlign adds info
   data3<- data2 %>% peakAlign(units="ppm", tolerance=align_tol) %>%
     process()
+  }
   
   
   #if no peaks meet filtering criteria, return original data3
@@ -35,6 +195,9 @@ HTS_reproc<-function(data1, SN, res=10, align_tol=15, pix_include=NULL,mzrange=N
     message("No peaks meet filtering criteria, returning peak aligned data")
     data4 <- data3
   }
+
+  # centroided data are not resampled to a mass range, so restrict the aligned features instead
+  data4 <- restrict_mass_range(data4, mzrange)
 
   return(data4)
 }
@@ -864,15 +1027,6 @@ pixDatFill_manual<-function(datas, sample_list, variables) {
   }
 }
 
-
-#combine a list of Cardinal objects (e.g. MSImagingArrays) into one object.
-#Cardinal::combine(list) only unpacks the list via a combine(list, missing)
-#method from EBImage; newer Cardinal (e.g. 3.14) no longer imports EBImage, so without it
-#combine(list) silently returns the list unchanged. Splat the list explicitly.
-combine_msi_list <- function(x) {
-  x <- Filter(Negate(is.null), x)
-  do.call(Cardinal::combine, unname(x))
-}
 
 #for Cardinal 3.6+ the combine function doesn't work the same way
 #in many case can use do.call(cbind) to combine from a list, but doesn't work with some datasets
