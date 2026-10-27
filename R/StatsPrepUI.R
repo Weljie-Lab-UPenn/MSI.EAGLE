@@ -164,7 +164,12 @@ StatsPrepUI <- function(id) {
                    
                    # create an uiOutput for the tabPanel
                    uiOutput(ns("grouping_variables_export")),
-                   
+                   checkboxInput(
+                     ns("export_keep_runs"),
+                     "Keep runs separate (adds run to the grouping)",
+                     value = TRUE
+                   ),
+
                    # create an actionButton for the tabPanel
                    actionButton(
                      ns("data_export"),

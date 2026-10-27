@@ -1937,7 +1937,25 @@ StatsPrepServer <- function(id,  setup_values) {
       # rather than densifying the full feature x pixel matrix, which does not fit
       # in memory for large combined datasets (e.g. 2866 features x 4e6 pixels).
       pdat <- as.data.frame(pData(x5$data_file))
-      grouped_pdat <- dplyr::group_by_at(pdat, c(input$grouping_variables_export))
+      group_vars <- c(input$grouping_variables_export)
+      # Labels written by polygon mapping (e.g. polygon_00123) are only unique within the section they were mapped on, so
+      # grouping a multi-run dataset without the run can average unrelated cells from different sections into one row.
+      run_vec <- as.character(Cardinal::run(x5$data_file))
+      if (length(unique(run_vec)) > 1L && !"run" %in% group_vars) {
+        key <- do.call(paste, c(lapply(group_vars, function(v) as.character(pdat[[v]])), sep = "\r"))
+        n_shared <- sum(tapply(run_vec, key, function(r) length(unique(r))) > 1L)
+        if (isTRUE(input$export_keep_runs)) {
+          pdat$run <- run_vec
+          group_vars <- c(group_vars, "run")
+          message(sprintf("[Export] 'run' added to the grouping (%d group(s) of the selected variables occur in more than one run).", n_shared))
+        } else if (n_shared > 0L) {
+          showNotification(
+            sprintf("%d group(s) occur in more than one run and will be averaged across runs. Tick 'Keep runs separate' to export them per run.", n_shared),
+            type = "warning", duration = 12
+          )
+        }
+      }
+      grouped_pdat <- dplyr::group_by_at(pdat, group_vars)
       gid <- dplyr::group_indices(grouped_pdat)
 
       dat_long_tech_avg <- grouped_pdat %>%

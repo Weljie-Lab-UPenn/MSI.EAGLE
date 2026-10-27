@@ -1237,12 +1237,11 @@ msi_ui_assets <- function() {
         overflow-x: hidden;
       }
       /* While the server is busy for more than half a second, dim the tab
-         content and stop it accepting clicks. Without this the browser happily
-         queues every click made during a long computation and replays them all
-         when R frees up. */
+         content as a visual cue. The content stays interactive, so the user can
+         keep selecting and clicking; Shiny processes those inputs once R is
+         free. */
       body.msie-busy .tab-content {
         opacity: 0.40;
-        pointer-events: none;
         transition: opacity 150ms ease;
       }
       body.msie-busy::after {
@@ -1340,8 +1339,7 @@ msi_ui_assets <- function() {
 
       // Busy state. Shiny reports when the server is working; after a short
       // grace period (so quick updates do not flicker) the tab content is dimmed
-      // and made non-interactive, which also discards clicks that would
-      // otherwise queue up and all fire at once when the computation ends.
+      // and a 'Working...' label is shown. Inputs remain clickable.
       document.addEventListener('DOMContentLoaded', function () {
         if (!window.jQuery) { return; }
         var busyTimer = null;

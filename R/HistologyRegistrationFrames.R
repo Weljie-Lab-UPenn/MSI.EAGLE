@@ -221,6 +221,27 @@ source_bbox_to_display_bbox <- function(bbox, coord_frame, flip_y = TRUE) {
   )
 }
 
+# Rebuild a POLYGON / MULTIPOLYGON from sf::st_coordinates() output whose X / Y were replaced by x1 / y1.
+# st_coordinates() numbers the rings of a polygon in L1; L2 is the polygon of a MULTIPOLYGON (L3 = feature) or the feature of
+# a POLYGON. Rings must therefore be split by L1 within each polygon. Splitting by L2 joined every hole to its outer boundary
+# as one self-crossing ring, which st_make_valid() then broke into wedge-shaped fragments (seen on region / cluster polygons).
+polygon_from_transformed_coords <- function(cc_new) {
+  close_ring <- function(ring) {
+    if (nrow(ring) > 2L && !all(ring[1, ] == ring[nrow(ring), ])) ring <- rbind(ring, ring[1, ])
+    ring
+  }
+  rings_of <- function(sub) {
+    if (!"L1" %in% colnames(sub)) return(list(close_ring(as.matrix(sub[, c("x1", "y1"), drop = FALSE]))))
+    lapply(unique(sub[, "L1"]), function(l1) close_ring(as.matrix(sub[sub[, "L1"] == l1, c("x1", "y1"), drop = FALSE])))
+  }
+  if ("L3" %in% colnames(cc_new)) {
+    polys <- lapply(unique(cc_new[, "L2"]), function(l2) sf::st_polygon(rings_of(cc_new[cc_new[, "L2"] == l2, , drop = FALSE])))
+    if (length(polys) == 1L) polys[[1]] else sf::st_multipolygon(polys)
+  } else {
+    sf::st_polygon(rings_of(cc_new))
+  }
+}
+
 source_sf_to_display_sf <- function(poly_sf, coord_frame, flip_y = TRUE) {
   if (is.null(poly_sf) || nrow(poly_sf) == 0L || is.null(coord_frame)) return(poly_sf)
   rebuild_one <- function(one_row) {
@@ -250,29 +271,7 @@ source_sf_to_display_sf <- function(poly_sf, coord_frame, flip_y = TRUE) {
       return(sf::st_linestring(line))
     }
 
-    if ("L3" %in% colnames(cc_new)) {
-      polys <- lapply(unique(cc_new[, "L3"]), function(l3) {
-        sub <- cc_new[cc_new[, "L3"] == l3, , drop = FALSE]
-        rings <- lapply(unique(sub[, "L2"]), function(l2) {
-          ring <- as.matrix(sub[sub[, "L2"] == l2, c("x1", "y1"), drop = FALSE])
-          if (nrow(ring) > 2 && !all(ring[1, ] == ring[nrow(ring), ])) ring <- rbind(ring, ring[1, ])
-          ring
-        })
-        sf::st_polygon(rings)
-      })
-      if (length(polys) == 1) polys[[1]] else sf::st_multipolygon(polys)
-    } else if ("L2" %in% colnames(cc_new)) {
-      rings <- lapply(unique(cc_new[, "L2"]), function(l2) {
-        ring <- as.matrix(cc_new[cc_new[, "L2"] == l2, c("x1", "y1"), drop = FALSE])
-        if (nrow(ring) > 2 && !all(ring[1, ] == ring[nrow(ring), ])) ring <- rbind(ring, ring[1, ])
-        ring
-      })
-      sf::st_polygon(rings)
-    } else {
-      ring <- as.matrix(cc_new[, c("x1", "y1"), drop = FALSE])
-      if (nrow(ring) > 2 && !all(ring[1, ] == ring[nrow(ring), ])) ring <- rbind(ring, ring[1, ])
-      sf::st_polygon(list(ring))
-    }
+    polygon_from_transformed_coords(cc_new)
   }
 
   geoms <- lapply(seq_len(nrow(poly_sf)), function(i) rebuild_one(poly_sf[i, , drop = FALSE]))

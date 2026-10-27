@@ -4026,13 +4026,13 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       invisible(NULL)
     }
 
-    transform_polygons_for_current_registration <- function(poly_sf, tx, ty, axis_mode = NULL) {
+    transform_polygons_for_current_registration <- function(poly_sf, tx, ty, axis_mode = NULL, rotate_sign = 1) {
       msi <- make_msi_raster()
       tr_spec <- registration_transform()
       if (is.null(axis_mode)) {
         axis_mode <- resolve_polygon_axis_mode(poly_sf, input$polygon_axis_mode, get_histology_image_optional())
       }
-      polygon_rotate <- effective_polygon_rotate_deg()
+      polygon_rotate <- rotate_sign * effective_polygon_rotate_deg()
       polygon_flip_y <- effective_polygon_flip_y(tr_spec)
       poly_src <- transform_polygon_sf(
         poly_sf = poly_sf,
@@ -4077,6 +4077,17 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       poly_display <- source_sf_to_display_sf(poly_src, current_registration_view_coord_frame())
       line_display <- source_sf_to_display_sf(line_src, current_registration_view_coord_frame())
       list(source = poly_src, display = poly_display, lines_source = line_src, lines_display = line_display, axis_mode = axis_mode)
+    }
+
+    # Polygons for pData assignment. The assignment tests display-frame polygons (top-down rows) against unflipped MSI
+    # source rows (y_norm). That comparison mirrors the display flip, which keeps the polygon shape upright but reverses
+    # the sense of translate_y and of the rotation relative to the overlay the registration was fitted on: cells landed
+    # 2 * translate_y rows off (and rotated by 2 * rotate_deg). Mirroring both here puts each cell on the pixels the
+    # overlay shows it on (checked against ion-image / H&E alignment on two sections, 2026-10-23).
+    transform_polygons_for_pdata_assignment <- function(poly_sf, tx, ty, axis_mode = NULL) {
+      ty_num <- suppressWarnings(as.numeric(ty))
+      if (length(ty_num) != 1L || !is.finite(ty_num)) ty_num <- 0
+      transform_polygons_for_current_registration(poly_sf, tx = tx, ty = -ty_num, axis_mode = axis_mode, rotate_sign = -1)$display
     }
 
     decode_rgba_hex <- function(rgba_hex) {
@@ -4878,29 +4889,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
         cc_new <- cbind(x1, y1, cc[, setdiff(colnames(cc), c("X", "Y")), drop = FALSE])
 
-        if ("L3" %in% colnames(cc_new)) {
-          polys <- lapply(unique(cc_new[, "L3"]), function(l3) {
-            sub <- cc_new[cc_new[, "L3"] == l3, , drop = FALSE]
-            rings <- lapply(unique(sub[, "L2"]), function(l2) {
-              ring <- as.matrix(sub[sub[, "L2"] == l2, c("x1", "y1"), drop = FALSE])
-              if (nrow(ring) > 2 && !all(ring[1, ] == ring[nrow(ring), ])) ring <- rbind(ring, ring[1, ])
-              ring
-            })
-            sf::st_polygon(rings)
-          })
-          if (length(polys) == 1) polys[[1]] else sf::st_multipolygon(polys)
-        } else if ("L2" %in% colnames(cc_new)) {
-          rings <- lapply(unique(cc_new[, "L2"]), function(l2) {
-            ring <- as.matrix(cc_new[cc_new[, "L2"] == l2, c("x1", "y1"), drop = FALSE])
-            if (nrow(ring) > 2 && !all(ring[1, ] == ring[nrow(ring), ])) ring <- rbind(ring, ring[1, ])
-            ring
-          })
-          sf::st_polygon(rings)
-        } else {
-          ring <- as.matrix(cc_new[, c("x1", "y1"), drop = FALSE])
-          if (nrow(ring) > 2 && !all(ring[1, ] == ring[nrow(ring), ])) ring <- rbind(ring, ring[1, ])
-          sf::st_polygon(list(ring))
-        }
+        polygon_from_transformed_coords(cc_new)
       }
 
       geoms <- lapply(seq_len(nrow(poly)), function(i) {
@@ -10942,7 +10931,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
       poly$map_label <- get_polygon_labels(poly, current_label_field)
       axis_mode <- resolve_polygon_axis_mode(poly, input$polygon_axis_mode, get_histology_image_optional())
-      poly_t <- transform_polygons_for_current_registration(poly, tx = input$translate_x, ty = input$translate_y, axis_mode = axis_mode)$display
+      poly_t <- transform_polygons_for_pdata_assignment(poly, tx = input$translate_x, ty = input$translate_y, axis_mode = axis_mode)
 
       pts_df <- data.frame(
         x = msi$x_display,
@@ -11136,12 +11125,12 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         nucleus_poly <- nucleus_poly_try
         if (nrow(nucleus_poly) > 0) {
           nucleus_axis_mode <- resolve_polygon_axis_mode(nucleus_poly, input$polygon_axis_mode, get_histology_image_optional())
-          nucleus_t <- transform_polygons_for_current_registration(
+          nucleus_t <- transform_polygons_for_pdata_assignment(
             nucleus_poly,
             tx = input$translate_x,
             ty = input$translate_y,
             axis_mode = nucleus_axis_mode
-          )$display
+          )
 
           nucleus_uid <- paste0("nucleus_", sprintf("%05d", seq_len(nrow(nucleus_t))))
           nucleus_area <- suppressWarnings(as.numeric(sf::st_area(nucleus_t)))

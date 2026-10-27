@@ -781,29 +781,7 @@ ra_transform_polygon_sf <- function(poly_sf, nx, ny, scale_x, scale_y, translate
     y1 <- cy + (st * xr + ct * yr)
 
     cc_new <- cbind(x1, y1, cc[, setdiff(colnames(cc), c("X", "Y")), drop = FALSE])
-    if ("L3" %in% colnames(cc_new)) {
-      polys <- lapply(unique(cc_new[, "L3"]), function(l3) {
-        sub <- cc_new[cc_new[, "L3"] == l3, , drop = FALSE]
-        rings <- lapply(unique(sub[, "L2"]), function(l2) {
-          ring <- as.matrix(sub[sub[, "L2"] == l2, c("x1", "y1"), drop = FALSE])
-          if (nrow(ring) > 2L && !all(ring[1, ] == ring[nrow(ring), ])) ring <- rbind(ring, ring[1, ])
-          ring
-        })
-        sf::st_polygon(rings)
-      })
-      if (length(polys) == 1L) polys[[1]] else sf::st_multipolygon(polys)
-    } else if ("L2" %in% colnames(cc_new)) {
-      rings <- lapply(unique(cc_new[, "L2"]), function(l2) {
-        ring <- as.matrix(cc_new[cc_new[, "L2"] == l2, c("x1", "y1"), drop = FALSE])
-        if (nrow(ring) > 2L && !all(ring[1, ] == ring[nrow(ring), ])) ring <- rbind(ring, ring[1, ])
-        ring
-      })
-      sf::st_polygon(rings)
-    } else {
-      ring <- as.matrix(cc_new[, c("x1", "y1"), drop = FALSE])
-      if (nrow(ring) > 2L && !all(ring[1, ] == ring[nrow(ring), ])) ring <- rbind(ring, ring[1, ])
-      sf::st_polygon(list(ring))
-    }
+    polygon_from_transformed_coords(cc_new)
   }
 
   geoms <- lapply(seq_len(nrow(poly)), function(i) try(rebuild_one(poly[i, , drop = FALSE]), silent = TRUE))
@@ -2979,29 +2957,7 @@ ra_polygon_source_to_image_sf <- function(poly_sf, overlay_frame, image_width, i
     x1 <- x_frame
     y1 <- if (isTRUE(base_flip_y)) (image_height - y_frame) else y_frame
     cc_new <- cbind(x1, y1, cc[, setdiff(colnames(cc), c("X", "Y")), drop = FALSE])
-    if ("L3" %in% colnames(cc_new)) {
-      polys <- lapply(unique(cc_new[, "L3"]), function(l3) {
-        sub <- cc_new[cc_new[, "L3"] == l3, , drop = FALSE]
-        rings <- lapply(unique(sub[, "L2"]), function(l2) {
-          ring <- as.matrix(sub[sub[, "L2"] == l2, c("x1", "y1"), drop = FALSE])
-          if (nrow(ring) > 2 && !all(ring[1, ] == ring[nrow(ring), ])) ring <- rbind(ring, ring[1, ])
-          ring
-        })
-        sf::st_polygon(rings)
-      })
-      if (length(polys) == 1L) polys[[1]] else sf::st_multipolygon(polys)
-    } else if ("L2" %in% colnames(cc_new)) {
-      rings <- lapply(unique(cc_new[, "L2"]), function(l2) {
-        ring <- as.matrix(cc_new[cc_new[, "L2"] == l2, c("x1", "y1"), drop = FALSE])
-        if (nrow(ring) > 2 && !all(ring[1, ] == ring[nrow(ring), ])) ring <- rbind(ring, ring[1, ])
-        ring
-      })
-      sf::st_polygon(rings)
-    } else {
-      ring <- as.matrix(cc_new[, c("x1", "y1"), drop = FALSE])
-      if (nrow(ring) > 2 && !all(ring[1, ] == ring[nrow(ring), ])) ring <- rbind(ring, ring[1, ])
-      sf::st_polygon(list(ring))
-    }
+    polygon_from_transformed_coords(cc_new)
   }
 
   geoms <- lapply(seq_len(nrow(poly)), function(i) rebuild_one(poly[i, , drop = FALSE]))
