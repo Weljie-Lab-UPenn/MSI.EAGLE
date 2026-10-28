@@ -283,7 +283,7 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       
       if(!is.null(a$ID)) {
       
-        Cardinal::fData(x3$img.dat)<-Cardinal::MassDataFrame(mz(x3$img.dat), ID=a$ID)
+        Cardinal::fData(x3$img.dat)<-Cardinal::MassDataFrame(mz=Cardinal::mz(x3$img.dat), a[,setdiff(names(a),"mz"),drop=FALSE])
       }
       
       
@@ -449,7 +449,7 @@ PhenoServer <- function(id,  setup_values, preproc_values) {
       }
       
         
-        writeImzML(pk_img, filen)
+        msi_write_bundle(pk_img, filen)
       }
     )
     

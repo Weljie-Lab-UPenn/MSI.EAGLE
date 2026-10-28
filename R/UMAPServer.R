@@ -363,7 +363,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
           message("[UMAP-Autosave] Dataset cleanup failed: ", dataset_err)
         } else {
           message(sprintf("[UMAP-Autosave] Writing imzML autosave: %s", out_base))
-          write_ok <- try(writeImzML(dataset, out_base), silent = TRUE)
+          write_ok <- try(msi_write_bundle(dataset, out_base), silent = TRUE)
           if (inherits(write_ok, "try-error")) {
             dataset_err <- as.character(write_ok)
             message("[UMAP-Autosave] writeImzML failed: ", dataset_err)
@@ -3548,7 +3548,7 @@ UMAPServer <- function(id, setup_values, preproc_values, preproc_values_umap = N
       
       fData(pk_img) <- MassDataFrame(mz=a$mz, a %>% as.data.frame() %>% dplyr::select(-mz))
       
-      writeImzML(pk_img, filen)
+      msi_write_bundle(pk_img, filen)
       elapsed_save <- as.numeric((proc.time() - ptm_save)[["elapsed"]])
       message(sprintf("[UMAP-Autosave] Save imzML elapsed: %.1fs", elapsed_save))
       autosave_long_operation("Save_imzML", elapsed_save,

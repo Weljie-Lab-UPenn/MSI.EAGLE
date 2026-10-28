@@ -84,6 +84,7 @@ HistologyIntegrationUI <- function(id) {
               "MSI Source",
               choices = c(
                 "Use current MSI data" = "current",
+                "Saved imzML bundle" = "bundle",
                 "Upload MSI .rds file" = "upload"
               ),
               selected = "current"

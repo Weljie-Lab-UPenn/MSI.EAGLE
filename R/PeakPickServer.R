@@ -215,11 +215,11 @@ PeakPickServer <- function(id, setup_values) {
       grepl("\\.imzML$", basename(path), ignore.case = TRUE)
     }
     rds_files <- reactive({
-      files <- listed_files()
+      files <- msi_dataset_choices(listed_files())
       files[is_rds_file(files)]
     })
     imzml_or_rds_files <- reactive({
-      files <- listed_files()
+      files <- msi_dataset_choices(listed_files())
       files[is_rds_file(files) | is_imzml_file(files)]
     })
     resolve_wd_path <- function(path) {
@@ -674,11 +674,11 @@ PeakPickServer <- function(id, setup_values) {
                        #check filetype and open accordingly
                        if (is_rds_file(input$peakPickfile)) {
                          message(sprintf("[PeakPick] Loading main dataset from .rds | selected='%s' | path='%s'", input$peakPickfile, pick_path))
-                         overview_peaks <- try(readRDS(pick_path), silent = TRUE)
+                         overview_peaks <- try(msi_clean_calibration_metadata(readRDS(pick_path)), silent = TRUE)
                          print(overview_peaks)
                        } else if (is_imzml_file(input$peakPickfile)) {
                          message(sprintf("[PeakPick] Loading main dataset from .imzML | selected='%s' | path='%s'", input$peakPickfile, pick_path))
-                         overview_peaks <- try(readImzML(pick_path), silent = TRUE)
+                         overview_peaks <- try(msi_clean_calibration_metadata(readImzML(pick_path)), silent = TRUE)
                          print(overview_peaks)
                        } else {
                          print("file type not recognized")
@@ -711,7 +711,7 @@ PeakPickServer <- function(id, setup_values) {
                        
                        pick_path <- resolve_wd_path(input$peakPickfile)
                        message(sprintf("[PeakPick] Loading legacy dataset from .rds | selected='%s' | path='%s'", input$peakPickfile, pick_path))
-                       old_dat <- try(readRDS(pick_path), silent = TRUE)
+                       old_dat <- try(msi_clean_calibration_metadata(readRDS(pick_path)), silent = TRUE)
                        if (inherits(old_dat, "try-error")) {
                          showNotification("Failed to read legacy .rds file. Please verify the file or use .imzML input.", type = "error", duration = 10)
                          return()
@@ -879,10 +879,10 @@ PeakPickServer <- function(id, setup_values) {
                        pick_path <- resolve_wd_path(input$peakPickfile)
                        if (is_rds_file(input$peakPickfile)) {
                          message(sprintf("[PeakPick] Loading reference peak list from .rds | selected='%s' | path='%s'", input$peakPickfile, pick_path))
-                         test_mz_reduced <- readRDS(pick_path)
+                         test_mz_reduced <- msi_clean_calibration_metadata(readRDS(pick_path))
                        } else if (is_imzml_file(input$peakPickfile)) {
                          message(sprintf("[PeakPick] Loading reference peak list from .imzML | selected='%s' | path='%s'", input$peakPickfile, pick_path))
-                         test_mz_reduced <- readImzML(pick_path)
+                         test_mz_reduced <- msi_clean_calibration_metadata(readImzML(pick_path))
                        } else {
                          print("file type not recognized")
                          showNotification("Reference file type not recognized. Use .imzML or .rds/.RData.", type = "error", duration = 8)
@@ -1028,11 +1028,11 @@ PeakPickServer <- function(id, setup_values) {
       add_path <- resolve_wd_path(input$peakAddfile)
       if (is_rds_file(input$peakAddfile)) {
         message(sprintf("[PeakPick] Loading file-to-add from .rds | selected='%s' | path='%s'", input$peakAddfile, add_path))
-        add_peaks <- try(readRDS(add_path), silent = TRUE)
+        add_peaks <- try(msi_clean_calibration_metadata(readRDS(add_path)), silent = TRUE)
         print(add_peaks)
       } else if (is_imzml_file(input$peakAddfile)) {
         message(sprintf("[PeakPick] Loading file-to-add from .imzML | selected='%s' | path='%s'", input$peakAddfile, add_path))
-        add_peaks <- try(readImzML(add_path), silent = TRUE)
+        add_peaks <- try(msi_clean_calibration_metadata(readImzML(add_path)), silent = TRUE)
         print(add_peaks)
       } else {
         print("file type not recognized")
@@ -1064,6 +1064,10 @@ PeakPickServer <- function(id, setup_values) {
       x <- x0$overview_peaks
       y <- add_peaks
       
+      if (msi_is_calibrated(x) || msi_is_calibrated(y)) {
+        showNotification("Restore original masses before merging calibrated peak lists.", type="error")
+        return()
+      }
       #remove all featureData other than IDs
       fData(x) <- fData(x)[, colnames(fData(x)) %in% "ID"]
       fData(y) <- fData(y)[, colnames(fData(y)) %in% "ID"]
@@ -1126,11 +1130,11 @@ PeakPickServer <- function(id, setup_values) {
       add_path <- resolve_wd_path(input$peakAddfile)
       if (is_rds_file(input$peakAddfile)) {
         message(sprintf("[PeakPick] Loading file-to-add (same peaklist) from .rds | selected='%s' | path='%s'", input$peakAddfile, add_path))
-        add_peaks <- try(readRDS(add_path), silent = TRUE)
+        add_peaks <- try(msi_clean_calibration_metadata(readRDS(add_path)), silent = TRUE)
         print(add_peaks)
       } else if (is_imzml_file(input$peakAddfile)) {
         message(sprintf("[PeakPick] Loading file-to-add (same peaklist) from .imzML | selected='%s' | path='%s'", input$peakAddfile, add_path))
-        add_peaks <- try(readImzML(add_path), silent = TRUE)
+        add_peaks <- try(msi_clean_calibration_metadata(readImzML(add_path)), silent = TRUE)
         print(add_peaks)
       } else {
         print("file type not recognized")
@@ -1146,6 +1150,8 @@ PeakPickServer <- function(id, setup_values) {
       }
       log_file_load("file-to-add same-peaklist", input$peakAddfile, add_path, add_peaks)
       add_peaks <- drop_duplicate_pixels(add_peaks, context = "load file-to-add (same peaklist)")
+      compatible <- try(msi_check_feature_compatibility(list(x0$overview_peaks,add_peaks)),silent=TRUE)
+      if(inherits(compatible,"try-error")) {showNotification(as.character(compatible),type="error"); return()}
       
       #browser()
       # add_peaks <- readImzML(input$peakAddfile)
@@ -1408,7 +1414,7 @@ PeakPickServer <- function(id, setup_values) {
         return(NULL)
       }
 
-      writeImzML(pk_img, filen)
+      msi_write_bundle(pk_img, filen)
       saveRDS(pk_img, paste0(filen, ".rds"))
 
       n_runs_saved <- length(unique(as.character(Cardinal::run(pk_img))))
@@ -1426,7 +1432,13 @@ PeakPickServer <- function(id, setup_values) {
     
     preproc_values <- reactive({
       list(x2 = x2,
-           x0 = x0)
+           x0 = x0,
+           replace_dataset = function(dataset) {
+             x2$overview_peaks_sel <- NULL
+             x2$mytable_selected <- NULL
+             x2$data_list <- NULL
+             x0$overview_peaks <- dataset
+           })
     })
     return(preproc_values)
     

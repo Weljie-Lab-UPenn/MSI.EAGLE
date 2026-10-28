@@ -43,6 +43,24 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
     )
     overlay_last_recorded <- reactiveVal(NULL)
 
+    loaded_bundle <- reactiveVal(NULL)
+    loaded_bundle_path <- reactiveVal(NULL)
+    bundle_revision <- reactiveVal(0L)
+    bundle_listing <- reactivePoll(10000,session,
+      checkFunc=function() list(root=setup_values()[["wd"]],files=list.files(setup_values()[["wd"]],recursive=TRUE)),
+      valueFunc=function() list.files(setup_values()[["wd"]],recursive=TRUE))
+    bundle_files <- reactive({files <- bundle_listing(); files[grepl("[.]imzML$",files,ignore.case=TRUE)]})
+    observeEvent(input$load_bundle, {
+      loaded_bundle(NULL); loaded_bundle_path(NULL); xh$mapped_obj <- NULL
+      selected <- input$bundle_file
+      if(is.null(selected) || !selected %in% bundle_files()) {showNotification("Select an available imzML bundle",type="error"); return()}
+      path <- file.path(setup_values()[["wd"]],selected)
+      obj <- try(msi_read_bundle(path),silent=TRUE)
+      if(inherits(obj,"try-error")) {showNotification(as.character(obj),type="error",duration=12); return()}
+      loaded_bundle_path(normalizePath(path)); loaded_bundle(obj); bundle_revision(isolate(bundle_revision())+1L)
+    })
+    observeEvent(input$msi_source,{xh$mapped_obj <- NULL},ignoreInit=TRUE,priority=100)
+    output$bundle_loaded_status <- renderText({p <- loaded_bundle_path(); if(is.null(p)) "No bundle loaded" else paste("Loaded:",p)})
     output$msi_upload_ui <- renderUI({
       if (identical(input$msi_source, "upload")) {
         fileInput(
@@ -50,9 +68,10 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
           "Upload MSI data (.rds)",
           accept = c(".rds")
         )
-      } else {
-        NULL
-      }
+      } else if(identical(input$msi_source,"bundle")) {
+        tagList(selectInput(ns("bundle_file"),"Saved imzML bundle in working directory",choices=bundle_files(),selected=isolate(input$bundle_file)),
+                actionButton(ns("load_bundle"),"Load bundle"),textOutput(ns("bundle_loaded_status")))
+      } else {NULL}
     })
 
     output$overlay_info_ui <- renderUI({
@@ -212,6 +231,11 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
     }, ignoreInit = TRUE)
 
     msi_data <- reactive({
+      if(identical(input$msi_source,"bundle")) {
+        bundle_revision()
+        validate(need(!is.null(loaded_bundle()),"Select a saved imzML bundle and click Load bundle."))
+        return(loaded_bundle())
+      }
       if (identical(input$msi_source, "upload")) {
         req(input$msi_upload)
         file <- input$msi_upload
@@ -220,12 +244,12 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
         out <- try(readRDS(file$datapath), silent = TRUE)
         validate(need(!inherits(out, "try-error"), "Could not read uploaded .rds MSI file."))
-        return(out)
+        return(msi_clean_calibration_metadata(out))
       }
 
       x2 <- preproc_values()[["x2"]]
       validate(need(!is.null(x2$overview_peaks_sel), "No current MSI data found. Load or peak-pick data first in Overview Analysis."))
-      x2$overview_peaks_sel
+      msi_clean_calibration_metadata(x2$overview_peaks_sel)
     })
 
     msi_for_pdata <- reactive({
@@ -244,6 +268,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       mz_min <- if (length(mz_axis) > 0L) round(min(mz_axis), 6) else NA_real_
       mz_max <- if (length(mz_axis) > 0L) round(max(mz_axis), 6) else NA_real_
       paste(
+        paste(format(mz_axis, digits = 17), collapse = ","),
+        paste(format(Cardinal::fData(msi_obj)$mz_original,digits=17),format(Cardinal::fData(msi_obj)$correction_ppm,digits=17),collapse=","),
         suppressWarnings(as.integer(nrow(msi_obj))),
         suppressWarnings(as.integer(ncol(msi_obj))),
         paste(rn, collapse = "|"),
@@ -282,6 +308,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       tab <- data.frame(
         feature_index = as.integer(keep_idx),
         feature_key = as.character(keep_idx),
+        feature_id = if("feature_id" %in% names(Cardinal::fData(msi_obj))) as.character(Cardinal::fData(msi_obj)$feature_id[keep_idx]) else as.character(keep_idx),
         mz = mz_axis[keep_idx],
         detect_fraction = NA_real_,
         mean_intensity = NA_real_,
@@ -393,7 +420,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       choices
     }
 
-    refresh_mz_ion_inputs <- function(msi_obj) {
+    refresh_mz_ion_inputs <- function(msi_obj, reset=FALSE) {
       sig_now <- try(msi_dataset_signature(msi_obj), silent = TRUE)
       tab <- isolate(xh$mz_ion_table)
       if (inherits(sig_now, "try-error") || is.null(sig_now) || !identical(isolate(xh$mz_ion_signature), sig_now) ||
@@ -409,7 +436,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       if (length(idx_vals) == 0L) return(invisible(FALSE))
       mz_num <- suppressWarnings(as.numeric(tab$mz))
 
-      cur <- isolate(input$mz_select)
+      cur <- if(reset) NULL else isolate(input$mz_select)
       sel <- if (!is.null(cur) && cur %in% idx_vals) cur else idx_vals[1]
       restore_sel <- isolate(xh$restore_mz_select)
       if (!is.null(restore_sel)) {
@@ -433,7 +460,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
 
       mode_now <- tolower(trimws(as.character(input$msi_plot_mode)[1]))
       if (identical(mode_now, "rgb")) {
-        cur_rgb <- isolate(input$rgb_mz_select)
+        cur_rgb <- if(reset) NULL else isolate(input$rgb_mz_select)
         rgb_sel <- intersect(as.character(cur_rgb), idx_vals)
         restore_rgb_idx <- isolate(xh$restore_rgb_select)
         if (!is.null(restore_rgb_idx)) {
@@ -483,6 +510,13 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
     }
 
     observeEvent(msi_data(), {
+      xh$mapped_obj <- NULL; xh$cluster_lookup <- NULL; xh$mapped_column <- NULL
+      for(field in c("rgb_mz_applied","last_valid_mz_select","mz_ion_table","mz_ion_signature",
+          "stat_fit_grid","stat_fit_candidates","stat_fit_summary","stat_fit_signature","stat_fit_target_info",
+          "histology_fit_grid","histology_fit_candidates","histology_fit_summary","histology_fit_signature","histology_fit_target_info",
+          "edge_fit_target_info","polygon_cluster_result","polygon_cluster_profile_table")) xh[[field]] <- NULL
+      updateSelectizeInput(session,"mz_select",selected=character(0))
+      updateSelectizeInput(session,"rgb_mz_select",selected=character(0))
       obj <- try(msi_data(), silent = TRUE)
       if (inherits(obj, "try-error") || is.null(obj)) return()
       cd <- try(as.data.frame(Cardinal::coord(obj)), silent = TRUE)
@@ -500,8 +534,8 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
         }
       }
       rebuild_mz_ion_cache(obj)
-      refresh_mz_ion_inputs(obj)
-    }, ignoreInit = FALSE)
+      refresh_mz_ion_inputs(obj,reset=TRUE)
+    }, ignoreInit = FALSE, priority=100)
 
     observeEvent(input$mz_sort_mode, {
       xh$restore_mz_sort_mode <- NULL
@@ -3240,6 +3274,9 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       rgb_sel_vals <- if (length(rgb_sel_idx) > 0) mz_axis[rgb_sel_idx] else numeric(0)
 
       list(
+        msi_source = input$msi_source,
+        msi_bundle_path = if(identical(input$msi_source,"bundle")) loaded_bundle_path() else "",
+        msi_bundle_signature = if(identical(input$msi_source,"bundle") && !inherits(obj,"try-error")) msi_dataset_signature(obj) else "",
         registration_canonical_frame = "msi_source_coords_v1",
         registration_rotation_convention = "shared_overlay_rotation_v2",
         registration_translation_frame = "overlay_center_in_msi_source_coords_v3",
@@ -11914,6 +11951,20 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       kv <- read_registration_params(input$registration_params_upload$datapath)
       validate(need(!is.null(kv) && length(kv) > 0, "Could not parse registration parameter file."))
       kv <- as.list(kv)
+      if(identical(kv$msi_source,"bundle") && !is.null(kv$msi_bundle_path)) {
+        path <- kv$msi_bundle_path
+        restored <- try(msi_read_bundle(path),silent=TRUE)
+        if(!inherits(restored,"try-error") && !is.null(kv$msi_bundle_signature) && nzchar(kv$msi_bundle_signature) && !identical(kv$msi_bundle_signature,msi_dataset_signature(restored))) restored <- structure("Saved bundle identity has changed",class="try-error")
+        if(inherits(restored,"try-error")) {
+          loaded_bundle(NULL); loaded_bundle_path(NULL); xh$mapped_obj <- NULL
+          updateRadioButtons(session,"msi_source",selected="bundle")
+          showNotification("Saved bundle is unavailable or incomplete. Select its current location and click Load bundle, then reload registration parameters.",type="error",duration=15)
+          return()
+        }
+        loaded_bundle_path(normalizePath(path)); loaded_bundle(restored)
+        bundle_revision(isolate(bundle_revision())+1L)
+        updateRadioButtons(session,"msi_source",selected="bundle")
+      }
       xh$loaded_registration_reference_frame <- parse_saved_msi_coord_frame(kv)
 
       if ("msi_plot_mode" %in% names(kv) && !is.null(kv[["msi_plot_mode"]])) {
@@ -12379,7 +12430,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       }
       try(Cardinal::setCardinalNChunks(write_chunks), silent = TRUE)
 
-      write_ok <- try(writeImzML(obj, filen), silent = TRUE)
+      write_ok <- try(msi_write_bundle(obj, filen), silent = TRUE)
       if (inherits(write_ok, "try-error")) {
         err_txt <- gsub("\\s+", " ", as.character(write_ok))
         message("[HistologyIntegration] writeImzML failed for mapped object: ", err_txt)

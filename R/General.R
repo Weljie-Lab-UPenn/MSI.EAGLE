@@ -1044,6 +1044,7 @@ combine_card <- function(x) {
     return(NULL)
   }
   if (length(x) > 1) {
+    msi_check_feature_compatibility(x)
     
     #get run order to preserve order of runs
     run_order <- unique(as.character(unlist(lapply(x, runNames))))
@@ -1411,3 +1412,83 @@ msi_options_toggle <- function(label = "options") {
 
 # Physical RAM in MB, or NA when it can't be determined. Used to cap R's
 # vector-memory limit (see configure_cardinal_parallel) below physical RAM.
+
+# Canonical metadata at calibrated imzML export boundaries. Summaries follow saved pixels.
+msi_prepare_export <- function(x) {
+  fd <- as.data.frame(Cardinal::fData(x))
+  if(!msi_is_calibrated(x)) return(x)
+  x <- msi_clean_calibration_metadata(x)
+  fd <- as.data.frame(Cardinal::fData(x))
+  if(!nrow(x) || !ncol(x)) stop("Cannot export an empty calibrated dataset")
+  sf <- Cardinal::summarizeFeatures(x,stat=c(mean="mean",count="nnzero"),verbose=FALSE)
+  fd$mean <- as.numeric(Cardinal::fData(sf)$mean)
+  fd$count <- as.numeric(Cardinal::fData(sf)$count)
+  fd$freq <- fd$count/ncol(x)
+  fd$mz <- NULL
+  Cardinal::fData(x) <- Cardinal::MassDataFrame(mz=Cardinal::mz(x),fd)
+  x
+}
+msi_write_bundle <- function(object, file, ...) {
+  object <- msi_prepare_export(object)
+  Cardinal::writeImzML(object,file,...)
+  invisible(object)
+}
+msi_dataset_choices <- function(files) {
+  files[!is.na(files) & grepl("\\.(imzML|rds|RData)$",basename(files),ignore.case=TRUE) &
+          !grepl("_calibration[.]rds$",basename(files),ignore.case=TRUE)]
+}
+msi_read_bundle <- function(path) {
+  if(!file.exists(path)) stop("The selected imzML file is unavailable. Select its current bundle location.")
+  if(!grepl("[.]imzML$",path,ignore.case=TRUE)) stop("Select a saved imzML dataset")
+  stem <- sub("[.]imzML$","",path,ignore.case=TRUE)
+  if(any(file.exists(paste0(stem,c("_masses.tsv","_calibration.txt"))))) {
+    missing <- paste0(stem,c(".fdata",".pdata"))
+    missing <- missing[!file.exists(missing)]
+    if(length(missing)) stop("Calibrated bundle is incomplete: missing ",paste(basename(missing),collapse=", "))
+  }
+  obj <- msi_clean_calibration_metadata(Cardinal::readMSIData(path))
+  if(!inherits(obj,"MSImagingExperiment") || !nrow(obj) || !ncol(obj)) stop("A non-empty processed MSI dataset is required")
+  if(nrow(Cardinal::fData(obj))!=nrow(obj) || nrow(Cardinal::pData(obj))!=ncol(obj)) stop("Bundle metadata dimensions do not match the spectra")
+  probe <- try(as.matrix(Cardinal::spectra(obj)[unique(c(1L,nrow(obj))),unique(c(1L,ncol(obj))),drop=FALSE]),silent=TRUE)
+  if(inherits(probe,"try-error")) stop("Cannot read bundle intensities. Keep the imzML and its linked IBD together. ",as.character(probe))
+  obj
+}
+msi_check_feature_compatibility <- function(objects) {
+  if(length(objects)<2) return(invisible(TRUE))
+  first <- objects[[1]]; fd <- as.data.frame(Cardinal::fData(first))
+  for(other in objects[-1]) {
+    od <- as.data.frame(Cardinal::fData(other))
+    if(!msi_is_calibrated(first) && !msi_is_calibrated(other)) next
+    if(!isTRUE(all.equal(as.numeric(Cardinal::mz(first)),as.numeric(Cardinal::mz(other)),tolerance=0))) stop("Calibrated feature axes differ")
+    for(n in c("mz_original","correction_ppm")) {
+      if(!n %in% names(fd) || !n %in% names(od) || !identical(fd[[n]],od[[n]])) stop("Incompatible calibrated feature metadata: ",n)
+    }
+  }
+  invisible(TRUE)
+}
+
+msi_feature_result_index <- function(results,features) {
+  if("feature_id" %in% intersect(names(results),names(features))) return(match(results$feature_id,features$feature_id))
+  if(!"mz" %in% names(results) || !"mz" %in% names(features)) stop("Feature results require feature identity or exact m/z")
+  match(results$mz,features$mz)
+}
+
+# Calibration-specific details belong in reports; only these two fields travel with features.
+msi_is_calibrated <- function(x) {
+  fd <- Cardinal::fData(x)
+  all(c("mz_original","correction_ppm") %in% names(fd)) || "calibration_id" %in% names(fd)
+}
+msi_clean_calibration_metadata <- function(x) {
+  if(!inherits(x,"MSImagingExperiment")) return(x)
+  fd <- as.data.frame(Cardinal::fData(x))
+  if(!msi_is_calibrated(x)) return(x)
+  legacy <- "calibration_id" %in% names(fd)
+  drop <- c("mz_observed","outside_calibration_range","calibration_id","calibration_model",
+            "calibration_library_version","calibration_schema","calibration_annotation_status")
+  # Earlier calibration generated these synthetic IDs. Keep IDs supplied by source datasets.
+  if(legacy && "feature_id" %in% names(fd) && identical(as.character(fd$feature_id),paste0("feature_",seq_len(nrow(fd))))) drop <- c(drop,"feature_id")
+  if(!any(drop %in% names(fd))) return(x)
+  fd <- fd[,!names(fd)%in%c("mz",drop),drop=FALSE]
+  Cardinal::fData(x) <- Cardinal::MassDataFrame(mz=Cardinal::mz(x),fd)
+  x
+}

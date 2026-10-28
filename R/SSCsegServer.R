@@ -605,7 +605,7 @@ SSCsegServer <- function(id, setup_values, preproc_values) {
         
         fData(pk_img) <- MassDataFrame(mz=a$mz, a %>% as.data.frame() %>% dplyr::select(-mz))
         
-        writeImzML(pk_img, filen)
+        msi_write_bundle(pk_img, filen)
       }
     )
   })

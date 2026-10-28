@@ -37,7 +37,7 @@ MaskedAnalysisServer <- function(id,  setup_values) {
       reactivePoll(file_poll_ms, session, checkFunc = has.new.files, valueFunc = get.files)
 
     segmentation_file_choices <- reactive({
-      files <- my_files()
+      files <- msi_dataset_choices(my_files())
       files <- files[!is.na(files) & nzchar(files)]
       files[grepl("\\.(imzML|rds)$", basename(files), ignore.case = TRUE)]
     })
@@ -1214,7 +1214,7 @@ MaskedAnalysisServer <- function(id,  setup_values) {
       
         pk_img <- x4$seg_pp_file
         #pData(pk_img) <- pData(x4$seg_file_trimmed)
-        writeImzML(pk_img, filen)
+        msi_write_bundle(pk_img, filen)
         saveRDS(pk_img, paste0(filen,".rds"))
       }
     )
@@ -1233,5 +1233,6 @@ MaskedAnalysisServer <- function(id,  setup_values) {
     #     saveRDS(pk_img, filen)
     #   }
     #) 
+    return(reactive(x4$seg_pp_file))
   })
 }

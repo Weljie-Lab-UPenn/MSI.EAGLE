@@ -1,6 +1,6 @@
 ### R/StatsPrepServer.R
 
-StatsPrepServer <- function(id,  setup_values) {
+StatsPrepServer <- function(id, setup_values, identification_values = NULL) {
   moduleServer(id, function(input, output, session) {
     # output$table <- DT::renderDataTable(mtcars)
     
@@ -27,9 +27,15 @@ StatsPrepServer <- function(id,  setup_values) {
       reactivePoll(file_poll_ms, session, checkFunc = has.new.files, valueFunc = get.files)
     
     stats_file_choices <- reactive({
-      files <- my_files()
+      files <- msi_dataset_choices(my_files())
       files <- files[!is.na(files) & nzchar(files)]
       files[grepl("\\.(imzML|rds)$", basename(files), ignore.case = TRUE)]
+    })
+    identification_choice <- "__msieagle_calibrated_identification__"
+    identification_ready <- reactive({
+      if (is.null(identification_values)) return(FALSE)
+      x <- tryCatch(identification_values(), error = function(e) NULL)
+      is.list(x) && !is.null(x$data)
     })
     resolve_wd_path <- function(path) {
       if (is.null(path) || !nzchar(path)) return(path)
@@ -38,14 +44,16 @@ StatsPrepServer <- function(id,  setup_values) {
     }
 
     # any time the reactive changes, update the selectInput
-    observeEvent(my_files(),
+    observeEvent(list(my_files(), identification_ready()),
                  ignoreInit = T,
                  ignoreNULL = T,
                  {
+                   choices <- stats_file_choices()
+                   if (identification_ready()) choices <- c("Current calibrated dataset (m/z Identification)" = identification_choice, choices)
                    updateSelectInput(
                      session,
                      ns("stats_input_file"),
-                     choices = stats_file_choices()
+                     choices = choices
                    )
                  })
     
@@ -158,10 +166,14 @@ StatsPrepServer <- function(id,  setup_values) {
       mytable_stats_plate_rows_selected = NULL #selected rows from stats table
     )
     output$final_data <- renderUI({
+      choices <- stats_file_choices()
+      if (identification_ready()) {
+        choices <- c("Current calibrated dataset (m/z Identification)" = identification_choice, choices)
+      }
       selectInput(
         ns("stats_input_file"),
         "Imageset for analysis",
-        stats_file_choices()
+        choices
       )
     })
     
@@ -175,6 +187,15 @@ StatsPrepServer <- function(id,  setup_values) {
       
      
       
+      if (identical(input$stats_input_file, identification_choice)) {
+        current_identification <- if (is.null(identification_values)) NULL else identification_values()
+        if (is.null(current_identification) || is.null(current_identification$data)) {
+          showNotification("Run m/z Identification on a calibrated dataset first.", type = "warning", duration = 7)
+          return(NULL)
+        }
+        x5$data_file <- current_identification$data
+        x5$source_file <- "Current calibrated dataset (m/z Identification)"
+      } else {
       input_path <- resolve_wd_path(input$stats_input_file)
       if (grepl("\\.rds$", basename(input$stats_input_file), ignore.case = TRUE)) {
         x5$data_file <- readRDS(input_path)
@@ -184,6 +205,9 @@ StatsPrepServer <- function(id,  setup_values) {
       } else {
         showNotification("Please select a valid .imzML or .rds file.", type = "error", duration = 8)
         return(NULL)
+      }
+      x5$data_file <- msi_clean_calibration_metadata(x5$data_file)
+      x5$source_file <- input$stats_input_file
       }
       print(x5$data_file)
       
@@ -199,7 +223,6 @@ StatsPrepServer <- function(id,  setup_values) {
       }
       
       
-      x5$source_file <- input$stats_input_file
     })
     
     
@@ -1384,7 +1407,7 @@ StatsPrepServer <- function(id,  setup_values) {
           fdat<-as.data.frame(fData(var_red_peaks))
           if("ID" %in% colnames(fdat)) {
             tf <- tf %>%
-              dplyr::mutate(ID = fdat$ID[match(tf$mz, fdat$mz)]) %>%  # Add the new column
+              dplyr::mutate(ID = fdat$ID[msi_feature_result_index(tf,fdat)]) %>%  # Add the new column
               dplyr::relocate(ID, .after = mz)  # Relocate it after the "mz" column
           }
           
@@ -1467,7 +1490,7 @@ StatsPrepServer <- function(id,  setup_values) {
           fdat<-as.data.frame(fData(var_red_peaks))
           if("ID" %in% colnames(fdat)) {
             tf <- tf %>%
-              dplyr::mutate(ID = fdat$ID) %>%  # Add the new column
+              dplyr::mutate(ID = fdat$ID[msi_feature_result_index(tf,fdat)]) %>%  # Add the new column
               dplyr::relocate(ID, .after = mz)  # Relocate it after the "mz" column
           }
           
@@ -2699,7 +2722,6 @@ StatsPrepServer <- function(id,  setup_values) {
             dat <- cbind(dat, apply(mean_vals_num, 2, function(v) signif(as.numeric(v), 3)))
             dat <-
               cbind(dat, max_mean_group = mean_col_labels[max.col(as.matrix(mean_vals_num), ties.method = "first")])
-            dat$mz <- round(dat$mz, 4)
             
             
             #if ID exists in mean_spectra, add it to dat, and reorder to have i, mz and ID first
@@ -2771,13 +2793,12 @@ StatsPrepServer <- function(id,  setup_values) {
                   max_mean_group = df_group_labels[max.col(as.matrix(df_filtered), ties.method = "first")]
                   )
           if(!is.null(mean_spectra$ID)){
-            temp_means <- cbind(mz=round(mean_spectra$mz,4), ID=mean_spectra$ID, temp_means)
+            temp_means <- cbind(mz=mean_spectra$mz, ID=mean_spectra$ID, temp_means)
           } else {
-            temp_means <- cbind(mz=round(mean_spectra$mz,4), temp_means)
+            temp_means <- cbind(mz=mean_spectra$mz, temp_means)
           }
           
           
-          dat$mz <- round(dat$mz, 4)
           
           dat <- merge(dat, temp_means, by=c("mz"))
           

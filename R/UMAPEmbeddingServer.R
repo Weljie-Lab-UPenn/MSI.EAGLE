@@ -594,7 +594,7 @@ UMAPEmbeddingServer <- function(id, setup_values, preproc_values, preproc_values
         other_cols <- setdiff(colnames(a_df), "mz")
         fData(pk_img) <- MassDataFrame(mz = a_df$mz, a_df[, other_cols, drop = FALSE])
       }
-      writeImzML(pk_img, filen)
+      msi_write_bundle(pk_img, filen)
       showNotification(paste0("Saved imzML: ", filen), type = "message", duration = 7)
     })
     

@@ -903,7 +903,9 @@ plot_card_server_impl <- function(id, data_rv, data_version, spatialOnly=FALSE, 
       if(!is.null(tbl$mean)) {
         tbl$mean<-round(tbl$mean, 1)
       }
-      tbl$mz<-round(tbl$mz, 4)
+      for (column in intersect(c("mz", "mz_original", "correction_ppm"), names(tbl))) {
+        tbl[[column]] <- round(tbl[[column]], 4)
+      }
       
       
       # (No longer resets the image width/height here: sizes now persist

@@ -589,7 +589,7 @@ DataSetupServer <- function(id, rawd, wd) {
     setup_values <- reactive({
       list(
         wd = input$wd,
-        rawd = input$rawd,
+        rawd = input$folder,
         ncores = input$ncores,
         chunks = input$chunks,
         x1 = x1,

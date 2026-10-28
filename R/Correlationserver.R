@@ -21,7 +21,7 @@ CorrelationServer <- function(id, proc_values, setup_values) {
     # Reactive polling to detect new files every 10 seconds (10000 ms)
     my_files <- reactivePoll(10000, session, checkFunc = has_new_files, valueFunc = get_files)
     valid_file_choices <- reactive({
-      files <- my_files()
+      files <- msi_dataset_choices(my_files())
       files <- files[!is.na(files) & nzchar(files)]
       files[grepl("\\.(imzML|rds)$", basename(files), ignore.case = TRUE)]
     })
@@ -228,7 +228,7 @@ CorrelationServer <- function(id, proc_values, setup_values) {
       }
       
       if (!is.null(data_file)) {
-        x6$data_file <- data_file
+        x6$data_file <- msi_clean_calibration_metadata(data_file)
         showNotification("Data file loaded successfully.", type = "message")
       }
     })
