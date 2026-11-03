@@ -79,7 +79,6 @@ MSI.EAGLE <- function(...) {
                    PhenoSetupUI("tab4"),
                    MaskedAnalysisUI("tab5"),
                    MassCalibrationUI("tab_calibration"),
-                   MzIdentificationUI("tab_identification"),
                    StatsPrepUI("tab6"),
                    HeatmapUI("tab7"),
                    CorrelationUI("tab8"),
@@ -113,9 +112,8 @@ MSI.EAGLE <- function(...) {
     UMAPEmbeddingServer("tab3b", setup_values, preproc_values, NULL)
     PhenoServer("tab4", setup_values, preproc_values)
     masked_values <- MaskedAnalysisServer("tab5", setup_values)
-    calibration_values <- MassCalibrationServer("tab_calibration", setup_values, preproc_values)
-    identification_values <- MzIdentificationServer("tab_identification", setup_values, calibration_values)
-    proc_values<-StatsPrepServer("tab6", setup_values, identification_values)
+    MassCalibrationServer("tab_calibration", setup_values, preproc_values)
+    proc_values<-StatsPrepServer("tab6", setup_values)
     HeatmapServer("tab7", proc_values)
     CorrelationServer("tab8", proc_values, setup_values)
     HistologyIntegrationServer("tab9", setup_values, preproc_values)

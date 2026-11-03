@@ -1,0 +1,37 @@
+pkgload::load_all('.',quiet=TRUE)
+pixel_values <- function(x) {d <- as.data.frame(Cardinal::pData(x)); rownames(d) <- NULL; d}
+m <- seq(100,900,length.out=20)
+a <- data.frame(feature=seq_along(m),obs=m,ppm_raw=2+3*m/1000,use=TRUE,reason='Accepted')
+f <- cal_fit(a,robust=FALSE)
+x <- Cardinal::MSImagingExperiment(spectraData=S4Vectors::SimpleList(intensity=matrix(seq_len(60),20,3)),featureData=Cardinal::MassDataFrame(mz=m),pixelData=Cardinal::PositionDataFrame(coord=data.frame(x=1:3,y=1),run=rep('run1',3),Cells=c('a','b','c')),centroided=TRUE)
+y <- cal_apply(x,f)
+root <- tempfile();dir.create(root)
+p <- file.path(root,'calibrated')
+folder <- cal_save_bundle(y,f,paste0(p,'.imzML'))
+expected <- paste0('calibrated',c('.imzML','.ibd','_calibration.txt','_anchors.tsv','_models.tsv','_masses.tsv'))
+stopifnot(identical(list.files(root),'calibrated'),all(expected%in%list.files(folder)))
+z <- Cardinal::readMSIData(file.path(folder,'calibrated.imzML'))
+stopifnot(isTRUE(all.equal(as.numeric(Cardinal::mz(y)),as.numeric(Cardinal::mz(z)))),isTRUE(all.equal(as.matrix(Cardinal::spectra(y)),as.matrix(Cardinal::spectra(z)))),isTRUE(all.equal(pixel_values(y),pixel_values(z))))
+stopifnot(ncol(read.delim(file.path(folder,'calibrated_anchors.tsv')))==ncol(f$anchors))
+stopifnot(inherits(try(cal_save_bundle(y,f,p),silent=TRUE),'try-error'))
+ui <- as.character(MassCalibrationUI('check'))
+stopifnot(grepl('check-save_imzml',ui,fixed=TRUE),!grepl('check-save_path',ui,fixed=TRUE))
+cat('Standard save control, bundle-contained reports, imzML data/metadata round trip and overwrite protection passed\n')
+
+stopifnot(!any(grepl("[.]rds$",list.files(folder),ignore.case=TRUE)))
+moved <- paste0(folder,"_moved")
+stopifnot(file.rename(folder,moved))
+z <- Cardinal::readMSIData(file.path(moved,"calibrated.imzML"))
+stopifnot(isTRUE(all.equal(as.matrix(Cardinal::spectra(y)),as.matrix(Cardinal::spectra(z)))),
+          isTRUE(all.equal(pixel_values(y),pixel_values(z))),
+          all(c("mz_original","correction_ppm") %in% names(Cardinal::fData(z))))
+cat("No RDS exports; moved imzML bundle retains intensity access and calibration/pixel metadata\n")
+
+stopifnot(setequal(setdiff(names(Cardinal::fData(y)),names(Cardinal::fData(x))),c("mz_original","correction_ppm")))
+stopifnot(!any(c("calibration_id","mz_observed","outside_calibration_range","calibration_model","calibration_library_version","calibration_schema","feature_id") %in% names(Cardinal::fData(z))))
+report <- read.delim(file.path(moved,"calibrated_masses.tsv"))
+stopifnot(all(c("mz_observed","calibration_model","outside_calibration_range") %in% names(report)))
+legacy <- y;Cardinal::fData(legacy)$calibration_id <- "old";Cardinal::fData(legacy)$feature_id <- paste0("feature_",seq_len(nrow(legacy)));Cardinal::fData(legacy)$mz_observed <- m
+clean <- msi_clean_calibration_metadata(legacy)
+stopifnot(setequal(names(Cardinal::fData(clean)),names(Cardinal::fData(y))),msi_is_calibrated(clean))
+cat("Only two calibration-specific feature columns; report detail and legacy cleanup checks passed\n")

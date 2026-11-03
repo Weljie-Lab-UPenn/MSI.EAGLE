@@ -1,2 +1,4 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# Preserve calibration table bytes for the versioned manifest checksums.
+inst/calibration/*.tsv -text

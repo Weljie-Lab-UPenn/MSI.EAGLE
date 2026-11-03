@@ -1,6 +1,6 @@
 ### R/StatsPrepServer.R
 
-StatsPrepServer <- function(id, setup_values, identification_values = NULL) {
+StatsPrepServer <- function(id, setup_values) {
   moduleServer(id, function(input, output, session) {
     # output$table <- DT::renderDataTable(mtcars)
     
@@ -31,12 +31,6 @@ StatsPrepServer <- function(id, setup_values, identification_values = NULL) {
       files <- files[!is.na(files) & nzchar(files)]
       files[grepl("\\.(imzML|rds)$", basename(files), ignore.case = TRUE)]
     })
-    identification_choice <- "__msieagle_calibrated_identification__"
-    identification_ready <- reactive({
-      if (is.null(identification_values)) return(FALSE)
-      x <- tryCatch(identification_values(), error = function(e) NULL)
-      is.list(x) && !is.null(x$data)
-    })
     resolve_wd_path <- function(path) {
       if (is.null(path) || !nzchar(path)) return(path)
       if (grepl("^(/|[A-Za-z]:[\\\\/])", path)) return(path)
@@ -44,12 +38,11 @@ StatsPrepServer <- function(id, setup_values, identification_values = NULL) {
     }
 
     # any time the reactive changes, update the selectInput
-    observeEvent(list(my_files(), identification_ready()),
+    observeEvent(my_files(),
                  ignoreInit = T,
                  ignoreNULL = T,
                  {
                    choices <- stats_file_choices()
-                   if (identification_ready()) choices <- c("Current calibrated dataset (m/z Identification)" = identification_choice, choices)
                    updateSelectInput(
                      session,
                      ns("stats_input_file"),
@@ -167,9 +160,6 @@ StatsPrepServer <- function(id, setup_values, identification_values = NULL) {
     )
     output$final_data <- renderUI({
       choices <- stats_file_choices()
-      if (identification_ready()) {
-        choices <- c("Current calibrated dataset (m/z Identification)" = identification_choice, choices)
-      }
       selectInput(
         ns("stats_input_file"),
         "Imageset for analysis",
@@ -182,20 +172,7 @@ StatsPrepServer <- function(id, setup_values, identification_values = NULL) {
         showNotification("Choose a .imzML or .rds file first.", type = "warning", duration = 7)
         return(NULL)
       }
-        
-      
-      
-     
-      
-      if (identical(input$stats_input_file, identification_choice)) {
-        current_identification <- if (is.null(identification_values)) NULL else identification_values()
-        if (is.null(current_identification) || is.null(current_identification$data)) {
-          showNotification("Run m/z Identification on a calibrated dataset first.", type = "warning", duration = 7)
-          return(NULL)
-        }
-        x5$data_file <- current_identification$data
-        x5$source_file <- "Current calibrated dataset (m/z Identification)"
-      } else {
+
       input_path <- resolve_wd_path(input$stats_input_file)
       if (grepl("\\.rds$", basename(input$stats_input_file), ignore.case = TRUE)) {
         x5$data_file <- readRDS(input_path)
@@ -208,7 +185,6 @@ StatsPrepServer <- function(id, setup_values, identification_values = NULL) {
       }
       x5$data_file <- msi_clean_calibration_metadata(x5$data_file)
       x5$source_file <- input$stats_input_file
-      }
       print(x5$data_file)
       
       if (!is.na(input$debug_n)) {
