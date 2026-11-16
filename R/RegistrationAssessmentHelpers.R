@@ -324,6 +324,17 @@ ra_registration_view_coord_frame <- function(current_frame, saved_frame = NULL) 
   )
 }
 
+# Source y used to sample the histology raster for a bundle cropped from the saved
+# registration frame. It must agree with the overlay display, which draws the
+# histology in the subset view window (ra_registration_view_coord_frame) with the
+# same top-to-bottom order as the MSI rows: the top MSI row (current ymax) meets
+# view ymax and the bottom row (current ymin) meets view ymin. That is a shift,
+# not a mirror; mirroring (saved ymax - y + saved ymin) made the Histology Fit
+# score a vertically flipped H&E while the overlay showed it upright.
+ra_subset_source_y <- function(y, current_frame, saved_frame) {
+  y + (saved_frame$ymin + saved_frame$ymax) - (current_frame$ymin + current_frame$ymax)
+}
+
 ra_make_msi_geometry <- function(obj, saved_frame = NULL) {
   cd <- as.data.frame(Cardinal::coord(obj))
   current_frame <- ra_current_msi_coord_frame(obj)
@@ -334,7 +345,7 @@ ra_make_msi_geometry <- function(obj, saved_frame = NULL) {
   x_source <- x_current
   y_source <- y_current
   if (ra_current_frame_is_saved_subset(current_frame, saved_frame)) {
-    y_source <- saved_frame$ymax - y_source + saved_frame$ymin
+    y_source <- ra_subset_source_y(y_source, current_frame, saved_frame)
   }
   x_norm <- as.integer(x_current - current_frame$xmin + 1L)
   y_norm <- as.integer(y_current - current_frame$ymin + 1L)

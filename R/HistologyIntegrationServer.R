@@ -3244,7 +3244,7 @@ HistologyIntegrationServer <- function(id, setup_values, preproc_values) {
       current_frame <- current_msi_coord_frame()
       saved_frame <- isolate(xh$loaded_registration_reference_frame)
       if (current_frame_is_saved_subset(current_frame, saved_frame)) {
-        y_src <- saved_frame$ymax - y_src + saved_frame$ymin
+        y_src <- ra_subset_source_y(y_src, current_frame, saved_frame)
       }
       list(x = x_src, y = y_src)
     }
